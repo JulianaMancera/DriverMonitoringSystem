@@ -1,10 +1,11 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:math';
 import 'package:cached_network_image/cached_network_image.dart';
 
 class MonitorScreen extends StatefulWidget {
-  const MonitorScreen({Key? key}) : super(key: key);
+  const MonitorScreen({super.key});
 
   @override
   State<MonitorScreen> createState() => _MonitorScreenState();
@@ -426,7 +427,7 @@ class _MonitorScreenState extends State<MonitorScreen>
         children: [
           _buildStatusItem(
             active: sunglasses,
-            icon: Icons.glasses,
+            icon: Icons.wb_sunny_outlined,
             label: 'Sunglasses',
             onToggle: () {
               setState(() {

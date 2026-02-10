@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 
 class DashboardScreen extends StatelessWidget {
-  const DashboardScreen({Key? key}) : super(key: key);
+  const DashboardScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -31,27 +31,23 @@ class DashboardScreen extends StatelessWidget {
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        flex: 4,
-                        child: _buildSafetyScoreCard(),
-                      ),
+                      Expanded(flex: 4, child: _buildSafetyScoreCard()),
                       const SizedBox(width: 32),
-                      Expanded(
-                        flex: 8,
-                        child: _buildQuickStatsGrid(),
-                      ),
+                      Expanded(flex: 8, child: _buildQuickStatsGrid()),
                     ],
                   );
                 }
               },
             ),
-            
+
             const SizedBox(height: 32),
-            
+
             // Chart section
             _buildAlertnesChart(),
-            
-            SizedBox(height: isMobile ? 96 : 32), // Extra padding for mobile bottom nav
+
+            SizedBox(
+              height: isMobile ? 96 : 32,
+            ), // Extra padding for mobile bottom nav
           ],
         ),
       ),
@@ -67,12 +63,12 @@ class DashboardScreen extends StatelessWidget {
         boxShadow: [
           const BoxShadow(
             color: Color(0xFF0b1120),
-            offset: Offset(8, 8),
+            offset: Offset(10, 10),
             blurRadius: 16,
           ),
           const BoxShadow(
             color: Color(0xFF1e293b),
-            offset: Offset(-8, -8),
+            offset: Offset(-10, -10),
             blurRadius: 16,
           ),
         ],
@@ -88,10 +84,7 @@ class DashboardScreen extends StatelessWidget {
               height: 8,
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [
-                    Color(0xFF22d3ee),
-                    Color(0xFF3b82f6),
-                  ],
+                  colors: [Color(0xFF22d3ee), Color(0xFF3b82f6)],
                 ),
                 borderRadius: BorderRadius.only(
                   topLeft: Radius.circular(24),
@@ -100,36 +93,37 @@ class DashboardScreen extends StatelessWidget {
               ),
             ),
           ),
-          
-          // Main content
-          Padding(
-            padding: const EdgeInsets.all(32),
+
+         // Main content
+          Center ( 
+            child: Padding(
+            padding: const EdgeInsets.all(87),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                const SizedBox(height: 16),
                 const Text(
                   'SAFETY SCORE',
                   style: TextStyle(
                     color: Color(0xFF94a3b8),
-                    fontSize: 14,
+                    fontSize: 24,
                     fontWeight: FontWeight.w500,
                     letterSpacing: 1.5,
                   ),
                 ),
-                const SizedBox(height: 24),
-                
+                const SizedBox(height: 32),
+
                 // Circular score indicator
                 SizedBox(
-                  width: 192,
-                  height: 192,
+                  width: 195,
+                  height: 195,
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
                       // Outer ring shadow
                       Container(
-                        width: 192,
-                        height: 192,
+                        width: 195,
+                        height: 195,
                         decoration: BoxDecoration(
                           color: const Color(0xFF0f172a),
                           shape: BoxShape.circle,
@@ -147,11 +141,11 @@ class DashboardScreen extends StatelessWidget {
                           ],
                         ),
                       ),
-                      
+
                       // Progress ring
                       SizedBox(
-                        width: 176,
-                        height: 176,
+                        width: 179,
+                        height: 179,
                         child: CircularProgressIndicator(
                           value: 0.92, // 92%
                           strokeWidth: 8,
@@ -162,11 +156,11 @@ class DashboardScreen extends StatelessWidget {
                           strokeCap: StrokeCap.round,
                         ),
                       ),
-                      
+
                       // Inner circle with score
                       Container(
-                        width: 144,
-                        height: 144,
+                        width: 147,
+                        height: 147,
                         decoration: BoxDecoration(
                           color: const Color(0xFF0f172a),
                           shape: BoxShape.circle,
@@ -201,15 +195,16 @@ class DashboardScreen extends StatelessWidget {
                                 fontSize: 10,
                                 color: Color(0xFF64748b),
                                 letterSpacing: 1,
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ],
@@ -217,48 +212,47 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 
- // Quick Stats Grid (4 cards)
-Widget _buildQuickStatsGrid() {
-  return GridView.count(
-    crossAxisCount: 2,
-    shrinkWrap: true,
-    physics: const NeverScrollableScrollPhysics(),
-    mainAxisSpacing: 24,
-    crossAxisSpacing: 24,
-    childAspectRatio: 1.2,
-    children: [
-      _buildStatCard(
-        icon: Icons.access_time,
-        label: 'Total Drive Time',
-        value: '127.5 hrs',
-        subtext: 'Last 30 days',
-        accent: false,
-      ),
-      _buildStatCard(
-        icon: Icons.notifications_active,
-        label: 'Alert Triggered',
-        value: '3',
-        subtext: 'Last 24 hours',
-        accent: true,
-      ),
-      _buildStatCard(
-        icon: Icons.trending_up,
-        label: 'Avg Alertness',
-        value: '88%',
-        subtext: '+2% vs last week',
-        accent: false,
-      ),
-      // Empty placeholder or you can add another metric
-      _buildStatCard(
-        icon: Icons.speed,
-        label: 'Avg Speed',
-        value: '65 km/h',
-        subtext: 'Highway average',
-        accent: false,
-      ),
-    ],
-  );
-}
+  // Quick Stats Grid (4 cards)
+  Widget _buildQuickStatsGrid() {
+    return GridView.count(
+      crossAxisCount: 2,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: 24,
+      crossAxisSpacing: 24,
+      childAspectRatio: 2.1,
+      children: [
+        _buildStatCard(
+          icon: Icons.access_time_outlined,
+          label: 'Total Drive Time',
+          value: '127.5 hrs',
+          subtext: 'Last 30 days',
+          accent: false,
+        ),
+        _buildStatCard(
+          icon: Icons.shield_outlined,
+          label: 'Alert Triggered',
+          value: '3',
+          subtext: 'Last 24 hours',
+          accent: true,
+        ),
+        _buildStatCard(
+          icon: Icons.local_fire_department_outlined,
+          label: 'Safety Streak',
+          value: '12 days',
+          subtext: 'No incidents',
+          accent: false,
+        ),
+        _buildStatCard(
+          icon: Icons.trending_up,
+          label: 'Avg Alertness',
+          value: '88%',
+          subtext: '+2% vs last week',
+          accent: false,
+        ),
+      ],
+    );
+  }
 
   // Individual Stat Card
   Widget _buildStatCard({
@@ -271,7 +265,7 @@ Widget _buildQuickStatsGrid() {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [
           const BoxShadow(
             color: Color(0xFF0b1120),
@@ -285,29 +279,29 @@ Widget _buildQuickStatsGrid() {
           ),
         ],
       ),
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // Icon and pulse indicator
+          // Icon and pulse indicator row
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: accent 
+                  color: accent
                       ? const Color(0xFF22d3ee).withOpacity(0.1)
                       : const Color(0xFF1e293b),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
                   icon,
-                  size: 24,
-                  color: accent 
+                  size: 22,
+                  color: accent
                       ? const Color(0xFF22d3ee)
-                      : const Color(0xFF94a3b8),
+                      : const Color(0xFF64748b),
                 ),
               ),
               if (accent)
@@ -328,35 +322,32 @@ Widget _buildQuickStatsGrid() {
                 ),
             ],
           ),
-          
-          // Stats
+
+          // Stats content
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 label,
                 style: const TextStyle(
-                  color: Color(0xFF94a3b8),
-                  fontSize: 14,
+                  color: Color(0xFF64748b),
+                  fontSize: 13,
                   fontWeight: FontWeight.w500,
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               Text(
                 value,
                 style: const TextStyle(
-                  fontSize: 24,
+                  fontSize: 26,
                   fontWeight: FontWeight.bold,
                   color: Color(0xFFe2e8f0),
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
               Text(
                 subtext,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Color(0xFF475569),
-                ),
+                style: const TextStyle(fontSize: 11, color: Color(0xFF475569)),
               ),
             ],
           ),
@@ -375,12 +366,12 @@ Widget _buildQuickStatsGrid() {
         boxShadow: [
           const BoxShadow(
             color: Color(0xFF0b1120),
-            offset: Offset(8, 8),
+            offset: Offset(10, 10),
             blurRadius: 16,
           ),
           const BoxShadow(
             color: Color(0xFF1e293b),
-            offset: Offset(-8, -8),
+            offset: Offset(-10, -10),
             blurRadius: 16,
           ),
         ],
@@ -428,10 +419,16 @@ Widget _buildQuickStatsGrid() {
                       interval: 1,
                       getTitlesWidget: (value, meta) {
                         const times = [
-                          '10:00', '10:10', '10:20', '10:30',
-                          '10:40', '10:50', '11:00'
+                          '10:00',
+                          '10:10',
+                          '10:20',
+                          '10:30',
+                          '10:40',
+                          '10:50',
+                          '11:00',
                         ];
-                        if (value.toInt() >= 0 && value.toInt() < times.length) {
+                        if (value.toInt() >= 0 &&
+                            value.toInt() < times.length) {
                           return Padding(
                             padding: const EdgeInsets.only(top: 8.0),
                             child: Text(
