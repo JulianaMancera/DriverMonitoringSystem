@@ -195,13 +195,11 @@ class _MainScreenState extends State<MainScreen> {
                         color: const Color(0xFF0b1120).withOpacity(0.5),
                         offset: const Offset(2, 2),
                         blurRadius: 4,
-                        inset: true,
                       ),
                       BoxShadow(
                         color: const Color(0xFF1e293b).withOpacity(0.5),
                         offset: const Offset(-2, -2),
                         blurRadius: 4,
-                        inset: true,
                       ),
                     ],
                   ),

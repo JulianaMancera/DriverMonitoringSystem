@@ -31,6 +31,7 @@ dependencies:
   flutter:
     sdk: flutter
   fl_chart: ^0.68.0 # For charts
+  cached_network_image: ^3.3.0 # For caching network images
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
