@@ -8,7 +8,7 @@ void main() {
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({Key? key}) : super(key: key);
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -26,7 +26,7 @@ class MyApp extends StatelessWidget {
 }
 
 class MainScreen extends StatefulWidget {
-  const MainScreen({Key? key}) : super(key: key);
+  const MainScreen({super.key});
 
   @override
   State<MainScreen> createState() => _MainScreenState();
@@ -190,16 +190,17 @@ class _MainScreenState extends State<MainScreen> {
                     color: const Color(0xFF0f172a),
                     borderRadius: BorderRadius.circular(12),
                     boxShadow: [
-                      // Inset shadow effect (neumorphism)
+                      // Inset shadow effect
                       BoxShadow(
-                        color: const Color(0xFF0b1120).withOpacity(0.5),
-                        offset: const Offset(2, 2),
+                        color: const Color(0xFF0b1120).withOpacity(0.8),
+                        offset: const Offset(3, 3),
                         blurRadius: 4,
+                        spreadRadius: -1,
                       ),
                       BoxShadow(
                         color: const Color(0xFF1e293b).withOpacity(0.5),
-                        offset: const Offset(-2, -2),
-                        blurRadius: 4,
+                        offset: const Offset(-1, -1),
+                        blurRadius: 2,
                       ),
                     ],
                   ),

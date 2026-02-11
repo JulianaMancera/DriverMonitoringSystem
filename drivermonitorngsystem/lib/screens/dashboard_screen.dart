@@ -27,18 +27,18 @@ class DashboardScreen extends StatelessWidget {
                     ],
                   );
                 } else {
-                    // Desktop: Side by side
+                  // Desktop: Side by side
                   return Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(flex: 4, child: _buildSafetyScoreCard()),
-                        const SizedBox(width: 32),
-                        Expanded(flex: 8, child: _buildQuickStatsGrid(isMobile: false)),
-                      ],
-                    );
-                  }
-                },
-              ),
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(flex: 4, child: _buildSafetyScoreCard()),
+                      const SizedBox(width: 32),
+                      Expanded(flex: 8, child: _buildQuickStatsGrid(isMobile: false)),
+                    ],
+                  );
+                }
+              },
+            ),
             
             const SizedBox(height: 32),
 
@@ -94,107 +94,107 @@ class DashboardScreen extends StatelessWidget {
             ),
           ),
 
-         // Main content
-          Center ( 
+          // Main content
+          Center(
             child: Padding(
-            padding: const EdgeInsets.all(87),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                const Text(
-                  'SAFETY SCORE',
-                  style: TextStyle(
-                    color: Color(0xFF94a3b8),
-                    fontSize: 24,
-                    fontWeight: FontWeight.w500,
-                    letterSpacing: 1.5,
+              padding: const EdgeInsets.all(87),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const Text(
+                    'SAFETY SCORE',
+                    style: TextStyle(
+                      color: Color(0xFF94a3b8),
+                      fontSize: 24,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 1.5,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 32),
+                  const SizedBox(height: 32),
 
-                // Circular score indicator
-                SizedBox(
-                  width: 195,
-                  height: 195,
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      // Outer ring shadow
-                      Container(
-                        width: 195,
-                        height: 195,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF0f172a),
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: const Color(0xFF0b1120).withOpacity(0.8),
-                              offset: const Offset(6, 6),
-                              blurRadius: 12,
-                            ),
-                            BoxShadow(
-                              color: const Color(0xFF1e293b).withOpacity(0.8),
-                              offset: const Offset(-6, -6),
-                              blurRadius: 12,
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      // Progress ring
-                      SizedBox(
-                        width: 179,
-                        height: 179,
-                        child: CircularProgressIndicator(
-                          value: 0.92, // 92%
-                          strokeWidth: 8,
-                          backgroundColor: const Color(0xFF1e293b),
-                          valueColor: const AlwaysStoppedAnimation<Color>(
-                            Color(0xFF22d3ee),
-                          ),
-                          strokeCap: StrokeCap.round,
-                        ),
-                      ),
-
-                      // Inner circle with score
-                      Container(
-                        width: 147,
-                        height: 147,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF0f172a),
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            const BoxShadow(
-                              color: Color(0xFF0b1120),
-                              offset: Offset(6, 6),
-                              blurRadius: 12,
-                            ),
-                            const BoxShadow(
-                              color: Color(0xFF1e293b),
-                              offset: Offset(-6, -6),
-                              blurRadius: 12,
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: const [
-                            Text(
-                              '92',
-                              style: TextStyle(
-                                fontSize: 48,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF22d3ee),
+                  // Circular score indicator
+                  SizedBox(
+                    width: 195,
+                    height: 195,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        // Outer ring shadow
+                        Container(
+                          width: 195,
+                          height: 195,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0f172a),
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFF0b1120).withOpacity(0.8),
+                                offset: const Offset(6, 6),
+                                blurRadius: 12,
                               ),
+                              BoxShadow(
+                                color: const Color(0xFF1e293b).withOpacity(0.8),
+                                offset: const Offset(-6, -6),
+                                blurRadius: 12,
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // Progress ring
+                        SizedBox(
+                          width: 179,
+                          height: 179,
+                          child: CircularProgressIndicator(
+                            value: 0.92, // 92%
+                            strokeWidth: 8,
+                            backgroundColor: const Color(0xFF1e293b),
+                            valueColor: const AlwaysStoppedAnimation<Color>(
+                              Color(0xFF22d3ee),
                             ),
-                            SizedBox(height: 4),
-                            Text(
-                              'EXCELLENT',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: Color(0xFF64748b),
-                                letterSpacing: 1,
+                            strokeCap: StrokeCap.round,
+                          ),
+                        ),
+
+                        // Inner circle with score
+                        Container(
+                          width: 147,
+                          height: 147,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0f172a),
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              const BoxShadow(
+                                color: Color(0xFF0b1120),
+                                offset: Offset(6, 6),
+                                blurRadius: 12,
+                              ),
+                              const BoxShadow(
+                                color: Color(0xFF1e293b),
+                                offset: Offset(-6, -6),
+                                blurRadius: 12,
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: const [
+                              Text(
+                                '92',
+                                style: TextStyle(
+                                  fontSize: 48,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF22d3ee),
+                                ),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'EXCELLENT',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Color(0xFF64748b),
+                                  letterSpacing: 1,
                                 ),
                               ),
                             ],
@@ -262,102 +262,12 @@ class DashboardScreen extends StatelessWidget {
     required String subtext,
     required bool accent,
   }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          const BoxShadow(
-            color: Color(0xFF0b1120),
-            offset: Offset(6, 6),
-            blurRadius: 12,
-          ),
-          const BoxShadow(
-            color: Color(0xFF1e293b),
-            offset: Offset(-6, -6),
-            blurRadius: 12,
-          ),
-        ],
-      ),
-      
-      // Mobile content
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          // Icon and pulse indicator row
-          Row(
-            mainAxisAlignment: MainAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: accent
-                      ? const Color(0xFF22d3ee).withOpacity(0.1)
-                      : const Color(0xFF1e293b),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  icon,
-                  size: 22,
-                  color: accent
-                      ? const Color(0xFF22d3ee)
-                      : const Color(0xFF64748b),
-                ),
-              ),
-             if (accent)
-                Padding(
-                  padding: const EdgeInsets.only(left: 12.0), // Adjust this number to increase/decrease space
-                  child: Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF22d3ee),
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFF22d3ee).withOpacity(0.6),
-                          blurRadius: 8,
-                          spreadRadius: 2,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-
-          // Stats content
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: const TextStyle(
-                  color: Color(0xFF64748b),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFFe2e8f0),
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                subtext,
-                style: const TextStyle(fontSize: 11, color: Color(0xFF475569)),
-              ),
-            ],
-          ),
-        ],
-      ),
+    return _StatCard(
+      icon: icon,
+      label: label,
+      value: value,
+      subtext: subtext,
+      accent: accent,
     );
   }
 
@@ -522,6 +432,164 @@ class DashboardScreen extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// Stateful widget for individual stat cards with hover effect
+class _StatCard extends StatefulWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final String subtext;
+  final bool accent;
+
+  const _StatCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.subtext,
+    required this.accent,
+  });
+
+  @override
+  State<_StatCard> createState() => _StatCardState();
+}
+
+class _StatCardState extends State<_StatCard> {
+  bool isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => isHovered = true),
+      onExit: (_) => setState(() => isHovered = false),
+      child: GestureDetector(
+        onTap: () {
+          // Add your onTap action here if needed
+          print('Card tapped: ${widget.label}');
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          decoration: BoxDecoration(
+            color: const Color(0xFF0f172a),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: isHovered
+                ? [
+                    // Hovered/Pressed state - inset shadows (inverted offsets)
+                    const BoxShadow(
+                      color: Color(0xFF0b1120),
+                      offset: Offset(-3, -3),
+                      blurRadius: 6,
+                      spreadRadius: 0,
+                    ),
+                    const BoxShadow(
+                      color: Color(0xFF1e293b),
+                      offset: Offset(3, 3),
+                      blurRadius: 6,
+                      spreadRadius: 0,
+                    ),
+                  ]
+                : [
+                    // Normal state - subtle raised shadows
+                    const BoxShadow(
+                      color: Color(0xFF0b1120),
+                      offset: Offset(4, 4),
+                      blurRadius: 8,
+                      spreadRadius: 0,
+                    ),
+                    const BoxShadow(
+                      color: Color(0xFF1e293b),
+                      offset: Offset(-4, -4),
+                      blurRadius: 8,
+                      spreadRadius: 0,
+                    ),
+                  ],
+          ),
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // Icon and pulse indicator row
+              Row(
+                mainAxisAlignment: MainAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: widget.accent
+                          ? const Color(0xFF22d3ee).withOpacity(0.1)
+                          : const Color(0xFF1e293b),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      widget.icon,
+                      size: 22,
+                      color: widget.accent
+                          ? const Color(0xFF22d3ee)
+                          : const Color(0xFF64748b),
+                    ),
+                  ),
+                  if (widget.accent)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 12.0),
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF22d3ee),
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF22d3ee).withOpacity(0.6),
+                              blurRadius: 8,
+                              spreadRadius: 2,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+
+              // Stats content
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.label,
+                    style: const TextStyle(
+                      color: Color(0xFF64748b),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    widget.value,
+                    style: const TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFFe2e8f0),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    widget.subtext,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFF475569),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
