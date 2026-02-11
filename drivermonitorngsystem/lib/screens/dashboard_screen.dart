@@ -23,23 +23,23 @@ class DashboardScreen extends StatelessWidget {
                     children: [
                       _buildSafetyScoreCard(),
                       const SizedBox(height: 32),
-                      _buildQuickStatsGrid(),
+                      _buildQuickStatsGrid(isMobile: true),
                     ],
                   );
                 } else {
-                  // Desktop: Side by side
+                    // Desktop: Side by side
                   return Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(flex: 4, child: _buildSafetyScoreCard()),
-                      const SizedBox(width: 32),
-                      Expanded(flex: 8, child: _buildQuickStatsGrid()),
-                    ],
-                  );
-                }
-              },
-            ),
-
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(flex: 4, child: _buildSafetyScoreCard()),
+                        const SizedBox(width: 32),
+                        Expanded(flex: 8, child: _buildQuickStatsGrid(isMobile: false)),
+                      ],
+                    );
+                  }
+                },
+              ),
+            
             const SizedBox(height: 32),
 
             // Chart section
@@ -213,14 +213,14 @@ class DashboardScreen extends StatelessWidget {
   }
 
   // Quick Stats Grid (4 cards)
-  Widget _buildQuickStatsGrid() {
+  Widget _buildQuickStatsGrid({required bool isMobile}) {
     return GridView.count(
       crossAxisCount: 2,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 24,
-      crossAxisSpacing: 24,
-      childAspectRatio: 2.1,
+      mainAxisSpacing: 16,
+      crossAxisSpacing: 16,
+      childAspectRatio: isMobile ? 1.0 : 2.1, // Different aspect ratio for mobile vs desktop
       children: [
         _buildStatCard(
           icon: Icons.access_time_outlined,
@@ -280,6 +280,7 @@ class DashboardScreen extends StatelessWidget {
         ],
       ),
       
+      // Mobile content
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -287,7 +288,7 @@ class DashboardScreen extends StatelessWidget {
         children: [
           // Icon and pulse indicator row
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            mainAxisAlignment: MainAxisAlignment.start,
             children: [
               Container(
                 padding: const EdgeInsets.all(10),
@@ -305,24 +306,27 @@ class DashboardScreen extends StatelessWidget {
                       : const Color(0xFF64748b),
                 ),
               ),
-              if (accent)
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF22d3ee),
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF22d3ee).withOpacity(0.6),
-                        blurRadius: 8,
-                        spreadRadius: 2,
-                      ),
-                    ],
+             if (accent)
+                Padding(
+                  padding: const EdgeInsets.only(left: 12.0), // Adjust this number to increase/decrease space
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF22d3ee),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF22d3ee).withOpacity(0.6),
+                          blurRadius: 8,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-            ],
-          ),
+              ],
+            ),
 
           // Stats content
           Column(
