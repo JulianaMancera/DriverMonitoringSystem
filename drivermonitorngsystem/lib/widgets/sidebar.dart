@@ -115,52 +115,11 @@ class Sidebar extends StatelessWidget {
   }) {
     final isActive = activeTab == item.id;
 
-    return InkWell(
+    return _NavButton(
+      item: item,
+      isMobile: isMobile,
+      isActive: isActive,
       onTap: () => onTabChanged(item.id),
-      borderRadius: BorderRadius.circular(16),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        width: isMobile ? 40 : double.infinity,
-        height: isMobile ? 40 : 64,
-        decoration: BoxDecoration(
-          color: isActive ? const Color(0xFF1e293b) : Colors.transparent,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: isActive
-              ? [
-                  // Inset shadow for active state (neumorphic pressed)
-                  BoxShadow(
-                    color: const Color(0xFF0b1120).withOpacity(0.8),
-                    offset: const Offset(3, 3),
-                    blurRadius: 6,
-                  ),
-                  BoxShadow(
-                    color: const Color(0xFF1e293b).withOpacity(0.8),
-                    offset: const Offset(-3, -3),
-                    blurRadius: 6,
-                  ),
-                ]
-              : [
-                  // Outer shadow for inactive state (neumorphic raised)
-                  const BoxShadow(
-                    color: Color(0xFF0b1120),
-                    offset: Offset(3, 3),
-                    blurRadius: 6,
-                  ),
-                  const BoxShadow(
-                    color: Color(0xFF1e293b),
-                    offset: Offset(-3, -3),
-                    blurRadius: 6,
-                  ),
-                ],
-        ),
-        child: Center(
-          child: Icon(
-            item.icon,
-            size: isMobile ? 20 : 24,
-            color: isActive ? const Color(0xFF22d3ee) : const Color(0xFF64748b),
-          ),
-        ),
-      ),
     );
   }
 
@@ -210,4 +169,86 @@ class NavItem {
     required this.icon,
     required this.label,
   });
+}
+
+// Stateful navigation button with hover effect
+class _NavButton extends StatefulWidget {
+  final NavItem item;
+  final bool isMobile;
+  final bool isActive;
+  final VoidCallback onTap;
+
+  const _NavButton({
+    required this.item,
+    required this.isMobile,
+    required this.isActive,
+    required this.onTap,
+  });
+
+  @override
+  State<_NavButton> createState() => _NavButtonState();
+}
+
+class _NavButtonState extends State<_NavButton> {
+  bool isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final shouldShowPressed = widget.isActive || isHovered;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => isHovered = true),
+      onExit: (_) => setState(() => isHovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          width: widget.isMobile ? 40 : double.infinity,
+          height: widget.isMobile ? 40 : 64,
+          decoration: BoxDecoration(
+            color: const Color(0xFF0f172a),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: shouldShowPressed
+                ? [
+                    // Pressed/Active state - inset shadows
+                    const BoxShadow(
+                      color: Color(0xFF0b1120),
+                      offset: Offset(-3, -3),
+                      blurRadius: 6,
+                    ),
+                    const BoxShadow(
+                      color: Color(0xFF1e293b),
+                      offset: Offset(3, 3),
+                      blurRadius: 6,
+                    ),
+                  ]
+                : [
+                    // Normal state - raised shadows
+                    const BoxShadow(
+                      color: Color(0xFF0b1120),
+                      offset: Offset(3, 3),
+                      blurRadius: 6,
+                    ),
+                    const BoxShadow(
+                      color: Color(0xFF1e293b),
+                      offset: Offset(-3, -3),
+                      blurRadius: 6,
+                    ),
+                  ],
+          ),
+          child: Center(
+            child: Icon(
+              widget.item.icon,
+              size: widget.isMobile ? 20 : 24,
+              color: widget.isActive
+                  ? const Color(0xFF22d3ee)
+                  : const Color(0xFF64748b),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
