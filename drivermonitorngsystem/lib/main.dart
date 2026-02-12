@@ -1,4 +1,3 @@
-import 'package:drivermonitorngsystem/utils/responsive.dart';
 import 'package:flutter/material.dart';
 import 'widgets/sidebar.dart';
 import 'screens/dashboard_screen.dart';
@@ -86,41 +85,40 @@ class _MainScreenState extends State<MainScreen> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xFF1e293b), Color(0xFF0f172a), Color(0xFF020617)],
+            colors: [
+              Color(0xFF1e293b),
+              Color(0xFF0f172a),
+              Color(0xFF020617),
+            ],
           ),
         ),
         child: Row(
           children: [
-            // Sidebar - Desktop only
-            if (Responsive.isDesktop(context))
-              Sidebar(activeTab: activeTab, onTabChanged: setActiveTab),
-
+            // Sidebar
+            if (!isMobile)
+              Sidebar(
+                activeTab: activeTab,
+                onTabChanged: setActiveTab,
+              ),
+            
             // Main content
             Expanded(
-              child: FractionallySizedBox(
-                widthFactor: Responsive.isDesktop(context) ? 1.0 : 1.0,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: Responsive.isDesktop(context)
-                        ? 1400
-                        : double.infinity,
+              child: Column(
+                children: [
+                  // Header
+                  _buildHeader(isMobile),
+                  
+                  // Content Area
+                  Expanded(
+                    child: _buildContent(),
                   ),
-                  child: Column(
-                    children: [
-                      // Header
-                      _buildHeader(isMobile),
-
-                      // Content Area
-                      Expanded(child: _buildContent()),
-                    ],
-                  ),
-                ),
+                ],
               ),
             ),
           ],
         ),
       ),
-
+      
       // Bottom navigation for mobile
       bottomNavigationBar: isMobile
           ? Sidebar(
@@ -135,8 +133,12 @@ class _MainScreenState extends State<MainScreen> {
   Widget _buildHeader(bool isMobile) {
     return Container(
       height: isMobile ? 64 : 80,
-      padding: EdgeInsets.symmetric(horizontal: isMobile ? 16 : 32),
-      decoration: const BoxDecoration(color: Color(0xFF0f172a)),
+      padding: EdgeInsets.symmetric(
+        horizontal: isMobile ? 16 : 32,
+      ),
+      decoration: const BoxDecoration(
+        color: Color(0xFF0f172a),
+      ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -148,11 +150,7 @@ class _MainScreenState extends State<MainScreen> {
               Text(
                 isMobile ? _getHeaderTitleMobile() : _getHeaderTitle(),
                 style: TextStyle(
-                  fontSize: Responsive.responsiveFont(
-                    context,
-                    mobile: 18,
-                    desktop: 24,
-                  ),
+                  fontSize: isMobile ? 18 : 24,
                   fontWeight: FontWeight.bold,
                   color: const Color(0xFFf1f5f9),
                 ),
@@ -160,7 +158,10 @@ class _MainScreenState extends State<MainScreen> {
               const SizedBox(height: 4),
               RichText(
                 text: const TextSpan(
-                  style: TextStyle(fontSize: 12, color: Color(0xFF64748b)),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF64748b),
+                  ),
                   children: [
                     TextSpan(text: 'Connected: '),
                     TextSpan(
@@ -175,7 +176,7 @@ class _MainScreenState extends State<MainScreen> {
               ),
             ],
           ),
-
+          
           // Status indicators
           Row(
             children: [
@@ -213,7 +214,7 @@ class _MainScreenState extends State<MainScreen> {
                   ),
                 ),
               if (!isMobile) const SizedBox(width: 16),
-
+              
               // Status indicator circle
               Container(
                 width: isMobile ? 32 : 40,
@@ -273,12 +274,18 @@ class _MainScreenState extends State<MainScreen> {
             children: const [
               Text(
                 'Module Under Development',
-                style: TextStyle(fontSize: 20, color: Color(0xFF475569)),
+                style: TextStyle(
+                  fontSize: 20,
+                  color: Color(0xFF475569),
+                ),
               ),
               SizedBox(height: 8),
               Text(
                 'Please return to Dashboard or Monitor',
-                style: TextStyle(fontSize: 14, color: Color(0xFF475569)),
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Color(0xFF475569),
+                ),
               ),
             ],
           ),
