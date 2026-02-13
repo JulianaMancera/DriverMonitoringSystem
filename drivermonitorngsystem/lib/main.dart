@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'widgets/sidebar.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/monitor_screen.dart';
+import 'screens/analytics_screen.dart';
 import 'utils/responsive.dart';
 
 void main() {
@@ -340,6 +341,7 @@ class _MainScreenState extends State<MainScreen> {
       case 'monitor':
         return const MonitorScreen();
       case 'analytics':
+        return const AnalyticsScreen();
       case 'settings':
         return Center(
           child: Column(
