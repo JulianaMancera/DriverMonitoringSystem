@@ -21,6 +21,10 @@ class Responsive {
   static double getWidth(BuildContext context) =>
       MediaQuery.of(context).size.width;
 
+  // Get current device height
+  static double getHeight(BuildContext context) =>
+      MediaQuery.of(context).size.height;
+
   // Responsive text scaling with better granularity
   static double responsiveFont(
     BuildContext context, {
@@ -126,5 +130,39 @@ class Responsive {
       return 1024;
     }
     return double.infinity;
+  }
+
+  // Responsive border radius
+  static double responsiveBorderRadius(
+    BuildContext context, {
+    required double mobile,
+    double? tablet,
+    double? desktop,
+  }) {
+    final width = MediaQuery.of(context).size.width;
+    
+    if (width >= desktopBreakpoint) {
+      return desktop ?? tablet ?? mobile * 1.2;
+    } else if (width >= mobileBreakpoint) {
+      return tablet ?? mobile * 1.1;
+    }
+    return mobile;
+  }
+
+  // Responsive icon size
+  static double responsiveIconSize(
+    BuildContext context, {
+    required double mobile,
+    double? tablet,
+    double? desktop,
+  }) {
+    final width = MediaQuery.of(context).size.width;
+    
+    if (width >= desktopBreakpoint) {
+      return desktop ?? tablet ?? mobile * 1.3;
+    } else if (width >= mobileBreakpoint) {
+      return tablet ?? mobile * 1.15;
+    }
+    return mobile;
   }
 }
