@@ -1,52 +1,92 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import '../utils/responsive.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    final isMobile = size.width < 768;
+    final isMobile = Responsive.isMobile(context);
 
     return Container(
-      padding: EdgeInsets.all(isMobile ? 16 : 32),
+      padding: EdgeInsets.all(
+        Responsive.responsivePadding(
+          context,
+          mobile: 16,
+          tablet: 24,
+          desktop: 32,
+        ),
+      ),
       child: SingleChildScrollView(
         child: Column(
           children: [
             // Top section with Safety Score + Stats
             LayoutBuilder(
               builder: (context, constraints) {
-                if (isMobile) {
-                  // Mobile: Stack vertically
+                if (isMobile || Responsive.isTablet(context)) {
+                  // Mobile & Tablet: Stack vertically
                   return Column(
                     children: [
-                      _buildSafetyScoreCard(),
-                      const SizedBox(height: 32),
-                      _buildQuickStatsGrid(isMobile: true),
+                      _buildSafetyScoreCard(context),
+                      SizedBox(
+                        height: Responsive.responsiveSpacing(
+                          context,
+                          mobile: 24,
+                          tablet: 28,
+                          desktop: 32,
+                        ),
+                      ),
+                      _buildQuickStatsGrid(context),
                     ],
                   );
                 } else {
-                  // Desktop: Side by side
+                  // Desktop only: Side by side
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(flex: 4, child: _buildSafetyScoreCard()),
-                      const SizedBox(width: 32),
-                      Expanded(flex: 8, child: _buildQuickStatsGrid(isMobile: false)),
+                      Expanded(
+                        flex: 4,
+                        child: _buildSafetyScoreCard(context),
+                      ),
+                      SizedBox(
+                        width: Responsive.responsiveSpacing(
+                          context,
+                          mobile: 16,
+                          tablet: 24,
+                          desktop: 32,
+                        ),
+                      ),
+                      Expanded(
+                        flex: 8,
+                        child: _buildQuickStatsGrid(context),
+                      ),
                     ],
                   );
                 }
               },
             ),
             
-            const SizedBox(height: 32),
+            SizedBox(
+              height: Responsive.responsiveSpacing(
+                context,
+                mobile: 24,
+                tablet: 28,
+                desktop: 32,
+              ),
+            ),
 
             // Chart section
-            _buildAlertnesChart(),
+            _buildAlertnesChart(context),
 
             SizedBox(
-              height: isMobile ? 96 : 32,
+              height: isMobile
+                  ? 96
+                  : Responsive.responsiveSpacing(
+                      context,
+                      mobile: 32,
+                      desktop: 32,
+                    ),
             ), // Extra padding for mobile bottom nav
           ],
         ),
@@ -55,11 +95,20 @@ class DashboardScreen extends StatelessWidget {
   }
 
   // Safety Score Card (the circular score display)
-  Widget _buildSafetyScoreCard() {
+  Widget _buildSafetyScoreCard(BuildContext context) {
+    final isMobile = Responsive.isMobile(context);
+
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(
+          Responsive.responsiveBorderRadius(
+            context,
+            mobile: 20,
+            tablet: 22,
+            desktop: 24,
+          ),
+        ),
         boxShadow: [
           const BoxShadow(
             color: Color(0xFF0b1120),
@@ -81,14 +130,33 @@ class DashboardScreen extends StatelessWidget {
             left: 0,
             right: 0,
             child: Container(
-              height: 8,
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
+              height: Responsive.responsiveValue(
+                context,
+                mobile: 6.0,
+                tablet: 7.0,
+                desktop: 8.0,
+              ),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
                   colors: [Color(0xFF22d3ee), Color(0xFF3b82f6)],
                 ),
                 borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(24),
-                  topRight: Radius.circular(24),
+                  topLeft: Radius.circular(
+                    Responsive.responsiveBorderRadius(
+                      context,
+                      mobile: 20,
+                      tablet: 22,
+                      desktop: 24,
+                    ),
+                  ),
+                  topRight: Radius.circular(
+                    Responsive.responsiveBorderRadius(
+                      context,
+                      mobile: 20,
+                      tablet: 22,
+                      desktop: 24,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -97,112 +165,43 @@ class DashboardScreen extends StatelessWidget {
           // Main content
           Center(
             child: Padding(
-              padding: const EdgeInsets.all(87),
+              padding: EdgeInsets.all(
+                Responsive.responsivePadding(
+                  context,
+                  mobile: isMobile ? 48 : 60,
+                  tablet: 55,
+                  desktop: 87,
+                ),
+              ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  const Text(
+                  Text(
                     'SAFETY SCORE',
                     style: TextStyle(
-                      color: Color(0xFF94a3b8),
-                      fontSize: 24,
+                      color: const Color(0xFF94a3b8),
+                      fontSize: Responsive.responsiveFont(
+                        context,
+                        mobile: 18,
+                        tablet: 20,
+                        desktop: 24,
+                      ),
                       fontWeight: FontWeight.w500,
                       letterSpacing: 1.5,
                     ),
                   ),
-                  const SizedBox(height: 32),
-
-                  // Circular score indicator
                   SizedBox(
-                    width: 195,
-                    height: 195,
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        // Outer ring shadow
-                        Container(
-                          width: 195,
-                          height: 195,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF0f172a),
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: const Color(0xFF0b1120).withOpacity(0.8),
-                                offset: const Offset(6, 6),
-                                blurRadius: 12,
-                              ),
-                              BoxShadow(
-                                color: const Color(0xFF1e293b).withOpacity(0.8),
-                                offset: const Offset(-6, -6),
-                                blurRadius: 12,
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        // Progress ring
-                        SizedBox(
-                          width: 179,
-                          height: 179,
-                          child: CircularProgressIndicator(
-                            value: 0.92, // 92%
-                            strokeWidth: 8,
-                            backgroundColor: const Color(0xFF1e293b),
-                            valueColor: const AlwaysStoppedAnimation<Color>(
-                              Color(0xFF22d3ee),
-                            ),
-                            strokeCap: StrokeCap.round,
-                          ),
-                        ),
-
-                        // Inner circle with score
-                        Container(
-                          width: 147,
-                          height: 147,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF0f172a),
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              const BoxShadow(
-                                color: Color(0xFF0b1120),
-                                offset: Offset(6, 6),
-                                blurRadius: 12,
-                              ),
-                              const BoxShadow(
-                                color: Color(0xFF1e293b),
-                                offset: Offset(-6, -6),
-                                blurRadius: 12,
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: const [
-                              Text(
-                                '92',
-                                style: TextStyle(
-                                  fontSize: 48,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF22d3ee),
-                                ),
-                              ),
-                              SizedBox(height: 4),
-                              Text(
-                                'EXCELLENT',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: Color(0xFF64748b),
-                                  letterSpacing: 1,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
+                    height: Responsive.responsiveSpacing(
+                      context,
+                      mobile: 24,
+                      tablet: 28,
+                      desktop: 32,
                     ),
                   ),
+
+                  // Circular score indicator
+                  _buildCircularScoreIndicator(context),
                 ],
               ),
             ),
@@ -212,17 +211,165 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 
+  Widget _buildCircularScoreIndicator(BuildContext context) {
+    final outerSize = Responsive.responsiveValue(
+      context,
+      mobile: 150.0,
+      tablet: 170.0,
+      desktop: 195.0,
+    );
+    final progressSize = Responsive.responsiveValue(
+      context,
+      mobile: 138.0,
+      tablet: 156.0,
+      desktop: 179.0,
+    );
+    final innerSize = Responsive.responsiveValue(
+      context,
+      mobile: 115.0,
+      tablet: 130.0,
+      desktop: 147.0,
+    );
+
+    return SizedBox(
+      width: outerSize,
+      height: outerSize,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // Outer ring shadow
+          Container(
+            width: outerSize,
+            height: outerSize,
+            decoration: BoxDecoration(
+              color: const Color(0xFF0f172a),
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF0b1120).withOpacity(0.8),
+                  offset: const Offset(6, 6),
+                  blurRadius: 12,
+                ),
+                BoxShadow(
+                  color: const Color(0xFF1e293b).withOpacity(0.8),
+                  offset: const Offset(-6, -6),
+                  blurRadius: 12,
+                ),
+              ],
+            ),
+          ),
+
+          // Progress ring
+          SizedBox(
+            width: progressSize,
+            height: progressSize,
+            child: CircularProgressIndicator(
+              value: 0.92, // 92%
+              strokeWidth: Responsive.responsiveValue(
+                context,
+                mobile: 6.0,
+                tablet: 7.0,
+                desktop: 8.0,
+              ),
+              backgroundColor: const Color(0xFF1e293b),
+              valueColor: const AlwaysStoppedAnimation<Color>(
+                Color(0xFF22d3ee),
+              ),
+              strokeCap: StrokeCap.round,
+            ),
+          ),
+
+          // Inner circle with score
+          Container(
+            width: innerSize,
+            height: innerSize,
+            decoration: BoxDecoration(
+              color: const Color(0xFF0f172a),
+              shape: BoxShape.circle,
+              boxShadow: [
+                const BoxShadow(
+                  color: Color(0xFF0b1120),
+                  offset: Offset(6, 6),
+                  blurRadius: 12,
+                ),
+                const BoxShadow(
+                  color: Color(0xFF1e293b),
+                  offset: Offset(-6, -6),
+                  blurRadius: 12,
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  '92',
+                  style: TextStyle(
+                    fontSize: Responsive.responsiveFont(
+                      context,
+                      mobile: 38,
+                      tablet: 42,
+                      desktop: 48,
+                    ),
+                    fontWeight: FontWeight.bold,
+                    color: const Color(0xFF22d3ee),
+                  ),
+                ),
+                SizedBox(
+                  height: Responsive.responsiveSpacing(
+                    context,
+                    mobile: 2,
+                    desktop: 4,
+                  ),
+                ),
+                Text(
+                  'EXCELLENT',
+                  style: TextStyle(
+                    fontSize: Responsive.responsiveFont(
+                      context,
+                      mobile: 9,
+                      tablet: 9.5,
+                      desktop: 10,
+                    ),
+                    color: const Color(0xFF64748b),
+                    letterSpacing: 1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // Quick Stats Grid (4 cards)
-  Widget _buildQuickStatsGrid({required bool isMobile}) {
+  Widget _buildQuickStatsGrid(BuildContext context) {
     return GridView.count(
       crossAxisCount: 2,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 16,
-      crossAxisSpacing: 16,
-      childAspectRatio: isMobile ? 1.0 : 2.1, // Different aspect ratio for mobile vs desktop
+      mainAxisSpacing: Responsive.responsiveSpacing(
+        context,
+        mobile: 12,
+        tablet: 14,
+        desktop: 16,
+      ),
+      crossAxisSpacing: Responsive.responsiveSpacing(
+        context,
+        mobile: 12,
+        tablet: 14,
+        desktop: 16,
+      ),
+      childAspectRatio: Responsive.responsiveValue(
+        context,
+        mobile: 1.0,
+        tablet: 1.4,
+        desktop: 2.1,
+      ),
       children: [
         _buildStatCard(
+          context,
           icon: Icons.access_time_outlined,
           label: 'Total Drive Time',
           value: '127.5 hrs',
@@ -230,6 +377,7 @@ class DashboardScreen extends StatelessWidget {
           accent: false,
         ),
         _buildStatCard(
+          context,
           icon: Icons.shield_outlined,
           label: 'Alert Triggered',
           value: '3',
@@ -237,6 +385,7 @@ class DashboardScreen extends StatelessWidget {
           accent: true,
         ),
         _buildStatCard(
+          context,
           icon: Icons.local_fire_department_outlined,
           label: 'Safety Streak',
           value: '12 days',
@@ -244,6 +393,7 @@ class DashboardScreen extends StatelessWidget {
           accent: false,
         ),
         _buildStatCard(
+          context,
           icon: Icons.trending_up,
           label: 'Avg Alertness',
           value: '88%',
@@ -255,7 +405,8 @@ class DashboardScreen extends StatelessWidget {
   }
 
   // Individual Stat Card
-  Widget _buildStatCard({
+  Widget _buildStatCard(
+    BuildContext context, {
     required IconData icon,
     required String label,
     required String value,
@@ -272,12 +423,24 @@ class DashboardScreen extends StatelessWidget {
   }
 
   // Alertness History Chart
-  Widget _buildAlertnesChart() {
+  Widget _buildAlertnesChart(BuildContext context) {
     return Container(
-      height: 320,
+      height: Responsive.responsiveHeight(
+        context,
+        mobile: 280,
+        tablet: 300,
+        desktop: 320,
+      ),
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(
+          Responsive.responsiveBorderRadius(
+            context,
+            mobile: 20,
+            tablet: 22,
+            desktop: 24,
+          ),
+        ),
         boxShadow: [
           const BoxShadow(
             color: Color(0xFF0b1120),
@@ -291,19 +454,38 @@ class DashboardScreen extends StatelessWidget {
           ),
         ],
       ),
-      padding: const EdgeInsets.all(24),
+      padding: EdgeInsets.all(
+        Responsive.responsivePadding(
+          context,
+          mobile: 16,
+          tablet: 20,
+          desktop: 24,
+        ),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Alertness History',
             style: TextStyle(
-              color: Color(0xFFcbd5e1),
-              fontSize: 16,
+              color: const Color(0xFFcbd5e1),
+              fontSize: Responsive.responsiveFont(
+                context,
+                mobile: 15,
+                tablet: 15.5,
+                desktop: 16,
+              ),
               fontWeight: FontWeight.w500,
             ),
           ),
-          const SizedBox(height: 24),
+          SizedBox(
+            height: Responsive.responsiveSpacing(
+              context,
+              mobile: 16,
+              tablet: 20,
+              desktop: 24,
+            ),
+          ),
           Expanded(
             child: LineChart(
               LineChartData(
@@ -348,9 +530,14 @@ class DashboardScreen extends StatelessWidget {
                             padding: const EdgeInsets.only(top: 8.0),
                             child: Text(
                               times[value.toInt()],
-                              style: const TextStyle(
-                                color: Color(0xFF64748b),
-                                fontSize: 12,
+                              style: TextStyle(
+                                color: const Color(0xFF64748b),
+                                fontSize: Responsive.responsiveFont(
+                                  context,
+                                  mobile: 10,
+                                  tablet: 11,
+                                  desktop: 12,
+                                ),
                               ),
                             ),
                           );
@@ -367,9 +554,14 @@ class DashboardScreen extends StatelessWidget {
                       getTitlesWidget: (value, meta) {
                         return Text(
                           value.toInt().toString(),
-                          style: const TextStyle(
-                            color: Color(0xFF64748b),
-                            fontSize: 12,
+                          style: TextStyle(
+                            color: const Color(0xFF64748b),
+                            fontSize: Responsive.responsiveFont(
+                              context,
+                              mobile: 10,
+                              tablet: 11,
+                              desktop: 12,
+                            ),
                           ),
                         );
                       },
@@ -394,7 +586,12 @@ class DashboardScreen extends StatelessWidget {
                     ],
                     isCurved: true,
                     color: const Color(0xFF22d3ee),
-                    barWidth: 3,
+                    barWidth: Responsive.responsiveValue(
+                      context,
+                      mobile: 2.5,
+                      tablet: 2.75,
+                      desktop: 3.0,
+                    ),
                     isStrokeCapRound: true,
                     dotData: const FlDotData(show: false),
                     belowBarData: BarAreaData(
@@ -476,7 +673,14 @@ class _StatCardState extends State<_StatCard> {
           curve: Curves.easeInOut,
           decoration: BoxDecoration(
             color: const Color(0xFF0f172a),
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(
+              Responsive.responsiveBorderRadius(
+                context,
+                mobile: 16,
+                tablet: 18,
+                desktop: 20,
+              ),
+            ),
             boxShadow: isHovered
                 ? [
                     // Hovered/Pressed state - inset shadows (inverted offsets)
@@ -509,7 +713,14 @@ class _StatCardState extends State<_StatCard> {
                     ),
                   ],
           ),
-          padding: const EdgeInsets.all(20),
+          padding: EdgeInsets.all(
+            Responsive.responsivePadding(
+              context,
+              mobile: 16,
+              tablet: 18,
+              desktop: 20,
+            ),
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -519,16 +730,35 @@ class _StatCardState extends State<_StatCard> {
                 mainAxisAlignment: MainAxisAlignment.start,
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(10),
+                    padding: EdgeInsets.all(
+                      Responsive.responsivePadding(
+                        context,
+                        mobile: 8,
+                        tablet: 9,
+                        desktop: 10,
+                      ),
+                    ),
                     decoration: BoxDecoration(
                       color: widget.accent
                           ? const Color(0xFF22d3ee).withOpacity(0.1)
                           : const Color(0xFF1e293b),
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(
+                        Responsive.responsiveBorderRadius(
+                          context,
+                          mobile: 10,
+                          tablet: 11,
+                          desktop: 12,
+                        ),
+                      ),
                     ),
                     child: Icon(
                       widget.icon,
-                      size: 22,
+                      size: Responsive.responsiveIconSize(
+                        context,
+                        mobile: 20,
+                        tablet: 21,
+                        desktop: 22,
+                      ),
                       color: widget.accent
                           ? const Color(0xFF22d3ee)
                           : const Color(0xFF64748b),
@@ -536,10 +766,27 @@ class _StatCardState extends State<_StatCard> {
                   ),
                   if (widget.accent)
                     Padding(
-                      padding: const EdgeInsets.only(left: 12.0),
+                      padding: EdgeInsets.only(
+                        left: Responsive.responsiveSpacing(
+                          context,
+                          mobile: 10,
+                          tablet: 11,
+                          desktop: 12,
+                        ),
+                      ),
                       child: Container(
-                        width: 8,
-                        height: 8,
+                        width: Responsive.responsiveValue(
+                          context,
+                          mobile: 7.0,
+                          tablet: 7.5,
+                          desktop: 8.0,
+                        ),
+                        height: Responsive.responsiveValue(
+                          context,
+                          mobile: 7.0,
+                          tablet: 7.5,
+                          desktop: 8.0,
+                        ),
                         decoration: BoxDecoration(
                           color: const Color(0xFF22d3ee),
                           shape: BoxShape.circle,
@@ -562,27 +809,56 @@ class _StatCardState extends State<_StatCard> {
                 children: [
                   Text(
                     widget.label,
-                    style: const TextStyle(
-                      color: Color(0xFF64748b),
-                      fontSize: 13,
+                    style: TextStyle(
+                      color: const Color(0xFF64748b),
+                      fontSize: Responsive.responsiveFont(
+                        context,
+                        mobile: 12,
+                        tablet: 12.5,
+                        desktop: 13,
+                      ),
                       fontWeight: FontWeight.w500,
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    widget.value,
-                    style: const TextStyle(
-                      fontSize: 26,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFFe2e8f0),
+                  SizedBox(
+                    height: Responsive.responsiveSpacing(
+                      context,
+                      mobile: 4,
+                      tablet: 5,
+                      desktop: 6,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  Text(
+                    widget.value,
+                    style: TextStyle(
+                      fontSize: Responsive.responsiveFont(
+                        context,
+                        mobile: 22,
+                        tablet: 24,
+                        desktop: 26,
+                      ),
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFFe2e8f0),
+                    ),
+                  ),
+                  SizedBox(
+                    height: Responsive.responsiveSpacing(
+                      context,
+                      mobile: 2,
+                      tablet: 3,
+                      desktop: 4,
+                    ),
+                  ),
                   Text(
                     widget.subtext,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFF475569),
+                    style: TextStyle(
+                      fontSize: Responsive.responsiveFont(
+                        context,
+                        mobile: 10,
+                        tablet: 10.5,
+                        desktop: 11,
+                      ),
+                      color: const Color(0xFF475569),
                     ),
                   ),
                 ],

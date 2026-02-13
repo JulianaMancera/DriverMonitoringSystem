@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:math';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../utils/responsive.dart';
 
 class MonitorScreen extends StatefulWidget {
   const MonitorScreen({super.key});
@@ -110,11 +111,17 @@ class _MonitorScreenState extends State<MonitorScreen>
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    final isDesktop = size.width >= 1024;
+    final isDesktop = Responsive.isDesktop(context);
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(
+        Responsive.responsivePadding(
+          context,
+          mobile: 16,
+          tablet: 20,
+          desktop: 16,
+        ),
+      ),
       child: isDesktop ? _buildDesktopLayout() : _buildMobileLayout(),
     );
   }
@@ -129,12 +136,26 @@ class _MonitorScreenState extends State<MonitorScreen>
           child: Column(
             children: [
               Expanded(child: _buildCameraFeed()),
-              const SizedBox(height: 24),
+              SizedBox(
+                height: Responsive.responsiveSpacing(
+                  context,
+                  mobile: 16,
+                  tablet: 20,
+                  desktop: 24,
+                ),
+              ),
               _buildEnvironmentBar(),
             ],
           ),
         ),
-        const SizedBox(width: 32),
+        SizedBox(
+          width: Responsive.responsiveSpacing(
+            context,
+            mobile: 16,
+            tablet: 24,
+            desktop: 32,
+          ),
+        ),
 
         // Right side - Metrics
         Expanded(
@@ -150,9 +171,23 @@ class _MonitorScreenState extends State<MonitorScreen>
       child: Column(
         children: [
           _buildCameraFeed(),
-          const SizedBox(height: 24),
+          SizedBox(
+            height: Responsive.responsiveSpacing(
+              context,
+              mobile: 16,
+              tablet: 20,
+              desktop: 24,
+            ),
+          ),
           _buildEnvironmentBar(),
-          const SizedBox(height: 24),
+          SizedBox(
+            height: Responsive.responsiveSpacing(
+              context,
+              mobile: 16,
+              tablet: 20,
+              desktop: 24,
+            ),
+          ),
           _buildMetricsSidebar(),
           const SizedBox(height: 96), // Space for bottom nav
         ],
@@ -165,7 +200,14 @@ class _MonitorScreenState extends State<MonitorScreen>
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(
+          Responsive.responsiveBorderRadius(
+            context,
+            mobile: 20,
+            tablet: 22,
+            desktop: 24,
+          ),
+        ),
         boxShadow: [
           const BoxShadow(
             color: Color(0xFF0b1120),
@@ -179,11 +221,25 @@ class _MonitorScreenState extends State<MonitorScreen>
           ),
         ],
       ),
-      padding: const EdgeInsets.all(8),
+      padding: EdgeInsets.all(
+        Responsive.responsivePadding(
+          context,
+          mobile: 6,
+          tablet: 7,
+          desktop: 8,
+        ),
+      ),
       child: AspectRatio(
         aspectRatio: 16 / 9,
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(
+            Responsive.responsiveBorderRadius(
+              context,
+              mobile: 14,
+              tablet: 15,
+              desktop: 16,
+            ),
+          ),
           child: Stack(
             children: [
               // Driver image
@@ -203,11 +259,16 @@ class _MonitorScreenState extends State<MonitorScreen>
                   ),
                   errorWidget: (context, url, error) => Container(
                     color: Colors.black,
-                    child: const Center(
+                    child: Center(
                       child: Icon(
                         Icons.person,
-                        size: 64,
-                        color: Color(0xFF64748b),
+                        size: Responsive.responsiveIconSize(
+                          context,
+                          mobile: 48,
+                          tablet: 56,
+                          desktop: 64,
+                        ),
+                        color: const Color(0xFF64748b),
                       ),
                     ),
                   ),
@@ -243,21 +304,58 @@ class _MonitorScreenState extends State<MonitorScreen>
   }
 
   Widget _buildFaceTrackingBox() {
+    final boxWidth = Responsive.responsiveValue(
+      context,
+      mobile: 140.0,
+      tablet: 170.0,
+      desktop: 200.0,
+    );
+    final boxHeight = Responsive.responsiveValue(
+      context,
+      mobile: 200.0,
+      tablet: 240.0,
+      desktop: 280.0,
+    );
+
     return AnimatedBuilder(
       animation: _faceBoxAnimation,
       builder: (context, child) {
         return Positioned(
-          top: 60 + _faceBoxAnimation.value.dy,
-          left: 120 + _faceBoxAnimation.value.dx,
+          top: Responsive.responsiveValue(
+                context,
+                mobile: 40.0,
+                tablet: 50.0,
+                desktop: 60.0,
+              ) +
+              _faceBoxAnimation.value.dy,
+          left: Responsive.responsiveValue(
+                context,
+                mobile: 80.0,
+                tablet: 100.0,
+                desktop: 120.0,
+              ) +
+              _faceBoxAnimation.value.dx,
           child: Container(
-            width: 200,
-            height: 280,
+            width: boxWidth,
+            height: boxHeight,
             decoration: BoxDecoration(
               border: Border.all(
                 color: const Color(0xFF22d3ee).withOpacity(0.7),
-                width: 2,
+                width: Responsive.responsiveValue(
+                  context,
+                  mobile: 1.5,
+                  tablet: 1.75,
+                  desktop: 2.0,
+                ),
               ),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(
+                Responsive.responsiveBorderRadius(
+                  context,
+                  mobile: 6,
+                  tablet: 7,
+                  desktop: 8,
+                ),
+              ),
               boxShadow: [
                 BoxShadow(
                   color: const Color(0xFF22d3ee).withOpacity(0.3),
@@ -276,22 +374,32 @@ class _MonitorScreenState extends State<MonitorScreen>
 
                 // Label
                 Positioned(
-                  top: -24,
+                  top: -20,
                   left: 0,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: Responsive.responsivePadding(
+                        context,
+                        mobile: 6,
+                        tablet: 7,
+                        desktop: 8,
+                      ),
                       vertical: 2,
                     ),
                     decoration: BoxDecoration(
                       color: const Color(0xFF22d3ee).withOpacity(0.2),
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: const Text(
+                    child: Text(
                       'FACE DETECTED',
                       style: TextStyle(
-                        color: Color(0xFF22d3ee),
-                        fontSize: 10,
+                        color: const Color(0xFF22d3ee),
+                        fontSize: Responsive.responsiveFont(
+                          context,
+                          mobile: 9,
+                          tablet: 9.5,
+                          desktop: 10,
+                        ),
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -314,21 +422,63 @@ class _MonitorScreenState extends State<MonitorScreen>
       child: Transform.translate(
         offset: Offset(isLeft ? -1 : 1, isTop ? -1 : 1),
         child: Container(
-          width: 16,
-          height: 16,
+          width: Responsive.responsiveValue(
+            context,
+            mobile: 14.0,
+            tablet: 15.0,
+            desktop: 16.0,
+          ),
+          height: Responsive.responsiveValue(
+            context,
+            mobile: 14.0,
+            tablet: 15.0,
+            desktop: 16.0,
+          ),
           decoration: BoxDecoration(
             border: Border(
               top: isTop
-                  ? const BorderSide(color: Color(0xFF22d3ee), width: 2)
+                  ? BorderSide(
+                      color: const Color(0xFF22d3ee),
+                      width: Responsive.responsiveValue(
+                        context,
+                        mobile: 1.5,
+                        tablet: 1.75,
+                        desktop: 2.0,
+                      ),
+                    )
                   : BorderSide.none,
               bottom: !isTop
-                  ? const BorderSide(color: Color(0xFF22d3ee), width: 2)
+                  ? BorderSide(
+                      color: const Color(0xFF22d3ee),
+                      width: Responsive.responsiveValue(
+                        context,
+                        mobile: 1.5,
+                        tablet: 1.75,
+                        desktop: 2.0,
+                      ),
+                    )
                   : BorderSide.none,
               left: isLeft
-                  ? const BorderSide(color: Color(0xFF22d3ee), width: 2)
+                  ? BorderSide(
+                      color: const Color(0xFF22d3ee),
+                      width: Responsive.responsiveValue(
+                        context,
+                        mobile: 1.5,
+                        tablet: 1.75,
+                        desktop: 2.0,
+                      ),
+                    )
                   : BorderSide.none,
               right: !isLeft
-                  ? const BorderSide(color: Color(0xFF22d3ee), width: 2)
+                  ? BorderSide(
+                      color: const Color(0xFF22d3ee),
+                      width: Responsive.responsiveValue(
+                        context,
+                        mobile: 1.5,
+                        tablet: 1.75,
+                        desktop: 2.0,
+                      ),
+                    )
                   : BorderSide.none,
             ),
           ),
@@ -349,14 +499,28 @@ class _MonitorScreenState extends State<MonitorScreen>
               child: Transform.scale(
                 scale: _warningAnimation.value,
                 child: Container(
-                  padding: const EdgeInsets.all(24),
+                  padding: EdgeInsets.all(
+                    Responsive.responsivePadding(
+                      context,
+                      mobile: 20,
+                      tablet: 22,
+                      desktop: 24,
+                    ),
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF0f172a).withOpacity(0.9),
                     border: Border.all(
                       color: Colors.red.withOpacity(0.5),
                       width: 1,
                     ),
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(
+                      Responsive.responsiveBorderRadius(
+                        context,
+                        mobile: 14,
+                        tablet: 15,
+                        desktop: 16,
+                      ),
+                    ),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.red.withOpacity(0.4),
@@ -370,24 +534,54 @@ class _MonitorScreenState extends State<MonitorScreen>
                     children: [
                       Icon(
                         Icons.warning_amber_rounded,
-                        size: 64,
+                        size: Responsive.responsiveIconSize(
+                          context,
+                          mobile: 48,
+                          tablet: 56,
+                          desktop: 64,
+                        ),
                         color: Colors.red.shade500,
                       ),
-                      const SizedBox(height: 16),
+                      SizedBox(
+                        height: Responsive.responsiveSpacing(
+                          context,
+                          mobile: 12,
+                          tablet: 14,
+                          desktop: 16,
+                        ),
+                      ),
                       Text(
                         warning!,
                         style: TextStyle(
-                          fontSize: 28,
+                          fontSize: Responsive.responsiveFont(
+                            context,
+                            mobile: 20,
+                            tablet: 24,
+                            desktop: 28,
+                          ),
                           fontWeight: FontWeight.bold,
                           color: Colors.red.shade500,
                           letterSpacing: 3,
                         ),
+                        textAlign: TextAlign.center,
                       ),
-                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: Responsive.responsiveSpacing(
+                          context,
+                          mobile: 6,
+                          tablet: 7,
+                          desktop: 8,
+                        ),
+                      ),
                       Text(
                         'Audible Alert Active',
                         style: TextStyle(
-                          fontSize: 14,
+                          fontSize: Responsive.responsiveFont(
+                            context,
+                            mobile: 12,
+                            tablet: 13,
+                            desktop: 14,
+                          ),
                           color: Colors.red.shade300,
                         ),
                       ),
@@ -405,10 +599,22 @@ class _MonitorScreenState extends State<MonitorScreen>
   // Environment Status Bar
   Widget _buildEnvironmentBar() {
     return Container(
-      height: 96,
+      height: Responsive.responsiveHeight(
+        context,
+        mobile: 80,
+        tablet: 88,
+        desktop: 96,
+      ),
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(
+          Responsive.responsiveBorderRadius(
+            context,
+            mobile: 20,
+            tablet: 22,
+            desktop: 24,
+          ),
+        ),
         boxShadow: [
           const BoxShadow(
             color: Color(0xFF0b1120),
@@ -437,11 +643,16 @@ class _MonitorScreenState extends State<MonitorScreen>
           ),
           Container(
             width: 1,
-            height: 48,
-            decoration: BoxDecoration(
-              color: const Color(0xFF1e293b),
+            height: Responsive.responsiveHeight(
+              context,
+              mobile: 40,
+              tablet: 44,
+              desktop: 48,
+            ),
+            decoration: const BoxDecoration(
+              color: Color(0xFF1e293b),
               boxShadow: [
-                const BoxShadow(
+                BoxShadow(
                   color: Color(0xFF1e293b),
                   offset: Offset(1, 0),
                 ),
@@ -473,22 +684,46 @@ class _MonitorScreenState extends State<MonitorScreen>
       onTap: onToggle,
       borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: const EdgeInsets.all(8.0),
+        padding: EdgeInsets.all(
+          Responsive.responsivePadding(
+            context,
+            mobile: 6,
+            tablet: 7,
+            desktop: 8,
+          ),
+        ),
         child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 48,
-              height: 48,
+              width: Responsive.responsiveValue(
+                context,
+                mobile: 40.0,
+                tablet: 44.0,
+                desktop: 48.0,
+              ),
+              height: Responsive.responsiveValue(
+                context,
+                mobile: 40.0,
+                tablet: 44.0,
+                desktop: 48.0,
+              ),
               decoration: BoxDecoration(
                 color: const Color(0xFF0f172a),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(
+                  Responsive.responsiveBorderRadius(
+                    context,
+                    mobile: 10,
+                    tablet: 11,
+                    desktop: 12,
+                  ),
+                ),
                 boxShadow: active
                     ? [
                         BoxShadow(
                           color: const Color(0xFF0b1120).withOpacity(0.8),
                           offset: const Offset(3, 3),
                           blurRadius: 6,
-
                         ),
                         BoxShadow(
                           color: const Color(0xFF1e293b).withOpacity(0.8),
@@ -511,17 +746,41 @@ class _MonitorScreenState extends State<MonitorScreen>
               ),
               child: Icon(
                 icon,
-                size: 24,
-                color: active ? const Color(0xFF22d3ee) : const Color(0xFF64748b),
+                size: Responsive.responsiveIconSize(
+                  context,
+                  mobile: 20,
+                  tablet: 22,
+                  desktop: 24,
+                ),
+                color: active
+                    ? const Color(0xFF22d3ee)
+                    : const Color(0xFF64748b),
               ),
             ),
-            const SizedBox(width: 16),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-                color: active ? const Color(0xFF22d3ee) : const Color(0xFF64748b),
+            SizedBox(
+              width: Responsive.responsiveSpacing(
+                context,
+                mobile: 8,
+                tablet: 12,
+                desktop: 16,
+              ),
+            ),
+            Flexible(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: Responsive.responsiveFont(
+                    context,
+                    mobile: 13,
+                    tablet: 14,
+                    desktop: 16,
+                  ),
+                  fontWeight: FontWeight.w500,
+                  color: active
+                      ? const Color(0xFF22d3ee)
+                      : const Color(0xFF64748b),
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
@@ -532,35 +791,121 @@ class _MonitorScreenState extends State<MonitorScreen>
 
   // Metrics Sidebar
   Widget _buildMetricsSidebar() {
-    return Column(
-      children: [
-        _buildMetricCard(
-          label: 'Alertness',
-          value: alertness,
-          color: const Color(0xFF22d3ee),
-          icon: Icons.bolt,
-          reverse: false,
-        ),
-        const SizedBox(height: 24),
-        _buildMetricCard(
-          label: 'Drowsiness',
-          value: drowsiness,
-          color: Colors.red.shade500,
-          icon: Icons.visibility_off,
-          reverse: true,
-        ),
-        const SizedBox(height: 24),
-        _buildMetricCard(
-          label: 'Distraction',
-          value: distraction,
-          color: const Color(0xFFfbbf24),
-          icon: Icons.visibility,
-          reverse: true,
-        ),
-        const SizedBox(height: 24),
-        _buildSystemLog(),
-      ],
-    );
+    final isDesktop = Responsive.isDesktop(context);
+    
+    if (isDesktop) {
+      // Desktop: Use Column with Expanded for System Log
+      return Column(
+        children: [
+          _buildMetricCard(
+            label: 'Alertness',
+            value: alertness,
+            color: const Color(0xFF22d3ee),
+            icon: Icons.bolt,
+            reverse: false,
+          ),
+          SizedBox(
+            height: Responsive.responsiveSpacing(
+              context,
+              mobile: 16,
+              tablet: 20,
+              desktop: 24,
+            ),
+          ),
+          _buildMetricCard(
+            label: 'Drowsiness',
+            value: drowsiness,
+            color: Colors.red.shade500,
+            icon: Icons.visibility_off,
+            reverse: true,
+          ),
+          SizedBox(
+            height: Responsive.responsiveSpacing(
+              context,
+              mobile: 16,
+              tablet: 20,
+              desktop: 24,
+            ),
+          ),
+          _buildMetricCard(
+            label: 'Distraction',
+            value: distraction,
+            color: const Color(0xFFfbbf24),
+            icon: Icons.visibility,
+            reverse: true,
+          ),
+          SizedBox(
+            height: Responsive.responsiveSpacing(
+              context,
+              mobile: 16,
+              tablet: 20,
+              desktop: 24,
+            ),
+          ),
+          Expanded(child: _buildSystemLog()),
+        ],
+      );
+    } else {
+      // Mobile/Tablet: Use fixed height for System Log
+      return Column(
+        children: [
+          _buildMetricCard(
+            label: 'Alertness',
+            value: alertness,
+            color: const Color(0xFF22d3ee),
+            icon: Icons.bolt,
+            reverse: false,
+          ),
+          SizedBox(
+            height: Responsive.responsiveSpacing(
+              context,
+              mobile: 16,
+              tablet: 20,
+              desktop: 24,
+            ),
+          ),
+          _buildMetricCard(
+            label: 'Drowsiness',
+            value: drowsiness,
+            color: Colors.red.shade500,
+            icon: Icons.visibility_off,
+            reverse: true,
+          ),
+          SizedBox(
+            height: Responsive.responsiveSpacing(
+              context,
+              mobile: 16,
+              tablet: 20,
+              desktop: 24,
+            ),
+          ),
+          _buildMetricCard(
+            label: 'Distraction',
+            value: distraction,
+            color: const Color(0xFFfbbf24),
+            icon: Icons.visibility,
+            reverse: true,
+          ),
+          SizedBox(
+            height: Responsive.responsiveSpacing(
+              context,
+              mobile: 16,
+              tablet: 20,
+              desktop: 24,
+            ),
+          ),
+          SizedBox(
+            height: Responsive.responsiveHeight(
+              context,
+              mobile: 250,
+              tablet: 300,
+              desktop: 350,
+            ),
+            child: _buildSystemLog(),
+          ),
+        ],
+      );
+    }
   }
 
   Widget _buildMetricCard({
@@ -573,7 +918,14 @@ class _MonitorScreenState extends State<MonitorScreen>
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(
+          Responsive.responsiveBorderRadius(
+            context,
+            mobile: 20,
+            tablet: 22,
+            desktop: 24,
+          ),
+        ),
         boxShadow: [
           const BoxShadow(
             color: Color(0xFF0b1120),
@@ -587,7 +939,14 @@ class _MonitorScreenState extends State<MonitorScreen>
           ),
         ],
       ),
-      padding: const EdgeInsets.all(24),
+      padding: EdgeInsets.all(
+        Responsive.responsivePadding(
+          context,
+          mobile: 20,
+          tablet: 22,
+          desktop: 24,
+        ),
+      ),
       child: Column(
         children: [
           // Header
@@ -597,19 +956,54 @@ class _MonitorScreenState extends State<MonitorScreen>
               Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(8),
+                    padding: EdgeInsets.all(
+                      Responsive.responsivePadding(
+                        context,
+                        mobile: 6,
+                        tablet: 7,
+                        desktop: 8,
+                      ),
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFF1e293b),
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(
+                        Responsive.responsiveBorderRadius(
+                          context,
+                          mobile: 6,
+                          tablet: 7,
+                          desktop: 8,
+                        ),
+                      ),
                     ),
-                    child: Icon(icon, size: 20, color: color),
+                    child: Icon(
+                      icon,
+                      size: Responsive.responsiveIconSize(
+                        context,
+                        mobile: 18,
+                        tablet: 19,
+                        desktop: 20,
+                      ),
+                      color: color,
+                    ),
                   ),
-                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: Responsive.responsiveSpacing(
+                      context,
+                      mobile: 10,
+                      tablet: 11,
+                      desktop: 12,
+                    ),
+                  ),
                   Text(
                     label,
-                    style: const TextStyle(
-                      color: Color(0xFFcbd5e1),
-                      fontSize: 16,
+                    style: TextStyle(
+                      color: const Color(0xFFcbd5e1),
+                      fontSize: Responsive.responsiveFont(
+                        context,
+                        mobile: 15,
+                        tablet: 15.5,
+                        desktop: 16,
+                      ),
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -618,7 +1012,12 @@ class _MonitorScreenState extends State<MonitorScreen>
               Text(
                 '${value.toInt()}%',
                 style: TextStyle(
-                  fontSize: 20,
+                  fontSize: Responsive.responsiveFont(
+                    context,
+                    mobile: 18,
+                    tablet: 19,
+                    desktop: 20,
+                  ),
                   fontWeight: FontWeight.bold,
                   fontFamily: 'monospace',
                   color: color,
@@ -627,14 +1026,33 @@ class _MonitorScreenState extends State<MonitorScreen>
             ],
           ),
 
-          const SizedBox(height: 16),
+          SizedBox(
+            height: Responsive.responsiveSpacing(
+              context,
+              mobile: 12,
+              tablet: 14,
+              desktop: 16,
+            ),
+          ),
 
           // Progress bar
           Container(
-            height: 16,
+            height: Responsive.responsiveHeight(
+              context,
+              mobile: 14,
+              tablet: 15,
+              desktop: 16,
+            ),
             decoration: BoxDecoration(
               color: const Color(0xFF0f172a),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(
+                Responsive.responsiveBorderRadius(
+                  context,
+                  mobile: 6,
+                  tablet: 7,
+                  desktop: 8,
+                ),
+              ),
               boxShadow: [
                 BoxShadow(
                   color: const Color(0xFF0b1120).withOpacity(0.5),
@@ -649,7 +1067,14 @@ class _MonitorScreenState extends State<MonitorScreen>
               ],
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(
+                Responsive.responsiveBorderRadius(
+                  context,
+                  mobile: 6,
+                  tablet: 7,
+                  desktop: 8,
+                ),
+              ),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 500),
                 curve: Curves.easeOut,
@@ -660,7 +1085,14 @@ class _MonitorScreenState extends State<MonitorScreen>
                   child: Container(
                     decoration: BoxDecoration(
                       color: color,
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(
+                        Responsive.responsiveBorderRadius(
+                          context,
+                          mobile: 6,
+                          tablet: 7,
+                          desktop: 8,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -674,53 +1106,82 @@ class _MonitorScreenState extends State<MonitorScreen>
 
   // System Log
   Widget _buildSystemLog() {
-    return Expanded(
-      child: Container(
-        decoration: BoxDecoration(
-          color: const Color(0xFF0f172a),
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF0b1120).withOpacity(0.5),
-              offset: const Offset(4, 4),
-              blurRadius: 8,
-            ),
-            BoxShadow(
-              color: const Color(0xFF1e293b).withOpacity(0.5),
-              offset: const Offset(-4, -4),
-              blurRadius: 8,
-            ),
-          ],
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF0f172a),
+        borderRadius: BorderRadius.circular(
+          Responsive.responsiveBorderRadius(
+            context,
+            mobile: 20,
+            tablet: 22,
+            desktop: 24,
+          ),
         ),
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'SYSTEM LOG',
-              style: TextStyle(
-                color: Color(0xFF94a3b8),
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 1.5,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: ListView(
-                children: [
-                  _buildLogEntry('10:42:01', 'System Initialized', LogType.info),
-                  _buildLogEntry('10:42:05', 'Face Tracking Active', LogType.success),
-                  _buildLogEntry('10:42:15', 'Baseline Established', LogType.info),
-                  if (drowsiness > 30)
-                    _buildLogEntry('10:42:45', 'Microsleep detected', LogType.warning),
-                  if (distraction > 20)
-                    _buildLogEntry('10:42:52', 'Gaze diversion > 2s', LogType.warning),
-                ],
-              ),
-            ),
-          ],
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0b1120).withOpacity(0.5),
+            offset: const Offset(4, 4),
+            blurRadius: 8,
+          ),
+          BoxShadow(
+            color: const Color(0xFF1e293b).withOpacity(0.5),
+            offset: const Offset(-4, -4),
+            blurRadius: 8,
+          ),
+        ],
+      ),
+      padding: EdgeInsets.all(
+        Responsive.responsivePadding(
+          context,
+          mobile: 20,
+          tablet: 22,
+          desktop: 24,
         ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'SYSTEM LOG',
+            style: TextStyle(
+              color: const Color(0xFF94a3b8),
+              fontSize: Responsive.responsiveFont(
+                context,
+                mobile: 11,
+                tablet: 11.5,
+                desktop: 12,
+              ),
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.5,
+            ),
+          ),
+          SizedBox(
+            height: Responsive.responsiveSpacing(
+              context,
+              mobile: 12,
+              tablet: 14,
+              desktop: 16,
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              children: [
+                _buildLogEntry(
+                    '10:42:01', 'System Initialized', LogType.info),
+                _buildLogEntry(
+                    '10:42:05', 'Face Tracking Active', LogType.success),
+                _buildLogEntry(
+                    '10:42:15', 'Baseline Established', LogType.info),
+                if (drowsiness > 30)
+                  _buildLogEntry(
+                      '10:42:45', 'Microsleep detected', LogType.warning),
+                if (distraction > 20)
+                  _buildLogEntry(
+                      '10:42:52', 'Gaze diversion > 2s', LogType.warning),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -740,25 +1201,49 @@ class _MonitorScreenState extends State<MonitorScreen>
     }
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12.0),
+      padding: EdgeInsets.only(
+        bottom: Responsive.responsiveSpacing(
+          context,
+          mobile: 10,
+          tablet: 11,
+          desktop: 12,
+        ),
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             '[$time]',
-            style: const TextStyle(
-              color: Color(0xFF475569),
-              fontSize: 11,
+            style: TextStyle(
+              color: const Color(0xFF475569),
+              fontSize: Responsive.responsiveFont(
+                context,
+                mobile: 10,
+                tablet: 10.5,
+                desktop: 11,
+              ),
               fontFamily: 'monospace',
             ),
           ),
-          const SizedBox(width: 12),
+          SizedBox(
+            width: Responsive.responsiveSpacing(
+              context,
+              mobile: 10,
+              tablet: 11,
+              desktop: 12,
+            ),
+          ),
           Expanded(
             child: Text(
               message,
               style: TextStyle(
                 color: color,
-                fontSize: 11,
+                fontSize: Responsive.responsiveFont(
+                  context,
+                  mobile: 10,
+                  tablet: 10.5,
+                  desktop: 11,
+                ),
                 fontFamily: 'monospace',
               ),
             ),

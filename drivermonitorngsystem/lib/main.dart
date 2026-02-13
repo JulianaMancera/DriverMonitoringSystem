@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'widgets/sidebar.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/monitor_screen.dart';
+import 'utils/responsive.dart';
 
 void main() {
   runApp(const MyApp());
@@ -74,13 +75,11 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Get screen size for responsive design
-    final size = MediaQuery.of(context).size;
-    final isMobile = size.width < 768;
+    final isMobile = Responsive.isMobile(context);
 
     return Scaffold(
       body: Container(
-        // Gradient background (from-[#1e293b] via-[#0f172a] to-[#020617])
+        // Gradient background
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
@@ -94,7 +93,7 @@ class _MainScreenState extends State<MainScreen> {
         ),
         child: Row(
           children: [
-            // Sidebar
+            // Sidebar (hidden on mobile)
             if (!isMobile)
               Sidebar(
                 activeTab: activeTab,
@@ -106,7 +105,7 @@ class _MainScreenState extends State<MainScreen> {
               child: Column(
                 children: [
                   // Header
-                  _buildHeader(isMobile),
+                  _buildHeader(context),
                   
                   // Content Area
                   Expanded(
@@ -130,11 +129,23 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  Widget _buildHeader(bool isMobile) {
+  Widget _buildHeader(BuildContext context) {
+    final isMobile = Responsive.isMobile(context);
+
     return Container(
-      height: isMobile ? 64 : 80,
+      height: Responsive.responsiveHeight(
+        context,
+        mobile: 64,
+        tablet: 72,
+        desktop: 80,
+      ),
       padding: EdgeInsets.symmetric(
-        horizontal: isMobile ? 16 : 32,
+        horizontal: Responsive.responsivePadding(
+          context,
+          mobile: 16,
+          tablet: 24,
+          desktop: 32,
+        ),
       ),
       decoration: const BoxDecoration(
         color: Color(0xFF0f172a),
@@ -143,38 +154,58 @@ class _MainScreenState extends State<MainScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           // Title section
-          Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                isMobile ? _getHeaderTitleMobile() : _getHeaderTitle(),
-                style: TextStyle(
-                  fontSize: isMobile ? 18 : 24,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFFf1f5f9),
-                ),
-              ),
-              const SizedBox(height: 4),
-              RichText(
-                text: const TextSpan(
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isMobile ? _getHeaderTitleMobile() : _getHeaderTitle(),
                   style: TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF64748b),
-                  ),
-                  children: [
-                    TextSpan(text: 'Connected: '),
-                    TextSpan(
-                      text: 'TES-X92',
-                      style: TextStyle(
-                        fontFamily: 'monospace',
-                        color: Color(0xFF22d3ee),
-                      ),
+                    fontSize: Responsive.responsiveFont(
+                      context,
+                      mobile: 18,
+                      tablet: 20,
+                      desktop: 24,
                     ),
-                  ],
+                    fontWeight: FontWeight.bold,
+                    color: const Color(0xFFf1f5f9),
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-            ],
+                SizedBox(
+                  height: Responsive.responsiveSpacing(
+                    context,
+                    mobile: 4,
+                    tablet: 4,
+                    desktop: 4,
+                  ),
+                ),
+                RichText(
+                  text: TextSpan(
+                    style: TextStyle(
+                      fontSize: Responsive.responsiveFont(
+                        context,
+                        mobile: 11,
+                        tablet: 11.5,
+                        desktop: 12,
+                      ),
+                      color: const Color(0xFF64748b),
+                    ),
+                    children: const [
+                      TextSpan(text: 'Connected: '),
+                      TextSpan(
+                        text: 'TES-X92',
+                        style: TextStyle(
+                          fontFamily: 'monospace',
+                          color: Color(0xFF22d3ee),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
           
           // Status indicators
@@ -182,15 +213,24 @@ class _MainScreenState extends State<MainScreen> {
             children: [
               if (!isMobile)
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: Responsive.responsivePadding(
+                      context,
+                      mobile: 12,
+                      tablet: 14,
+                      desktop: 16,
+                    ),
+                    vertical: Responsive.responsivePadding(
+                      context,
+                      mobile: 6,
+                      tablet: 7,
+                      desktop: 8,
+                    ),
                   ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF0f172a),
                     borderRadius: BorderRadius.circular(12),
                     boxShadow: [
-                      // Inset shadow effect
                       BoxShadow(
                         color: const Color(0xFF0b1120).withOpacity(0.8),
                         offset: const Offset(3, 3),
@@ -204,21 +244,44 @@ class _MainScreenState extends State<MainScreen> {
                       ),
                     ],
                   ),
-                  child: const Text(
+                  child: Text(
                     'SYSTEM ACTIVE',
                     style: TextStyle(
-                      fontSize: 14,
-                      color: Color(0xFF22d3ee),
+                      fontSize: Responsive.responsiveFont(
+                        context,
+                        mobile: 12,
+                        tablet: 13,
+                        desktop: 14,
+                      ),
+                      color: const Color(0xFF22d3ee),
                       fontFamily: 'monospace',
                     ),
                   ),
                 ),
-              if (!isMobile) const SizedBox(width: 16),
+              if (!isMobile)
+                SizedBox(
+                  width: Responsive.responsiveSpacing(
+                    context,
+                    mobile: 12,
+                    tablet: 14,
+                    desktop: 16,
+                  ),
+                ),
               
               // Status indicator circle
               Container(
-                width: isMobile ? 32 : 40,
-                height: isMobile ? 32 : 40,
+                width: Responsive.responsiveValue(
+                  context,
+                  mobile: 32.0,
+                  tablet: 36.0,
+                  desktop: 40.0,
+                ),
+                height: Responsive.responsiveValue(
+                  context,
+                  mobile: 32.0,
+                  tablet: 36.0,
+                  desktop: 40.0,
+                ),
                 decoration: BoxDecoration(
                   color: const Color(0xFF0f172a),
                   shape: BoxShape.circle,
@@ -237,8 +300,18 @@ class _MainScreenState extends State<MainScreen> {
                 ),
                 child: Center(
                   child: Container(
-                    width: isMobile ? 8 : 12,
-                    height: isMobile ? 8 : 12,
+                    width: Responsive.responsiveValue(
+                      context,
+                      mobile: 8.0,
+                      tablet: 10.0,
+                      desktop: 12.0,
+                    ),
+                    height: Responsive.responsiveValue(
+                      context,
+                      mobile: 8.0,
+                      tablet: 10.0,
+                      desktop: 12.0,
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFF10b981),
                       shape: BoxShape.circle,
@@ -271,20 +344,36 @@ class _MainScreenState extends State<MainScreen> {
         return Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: const [
+            children: [
               Text(
                 'Module Under Development',
                 style: TextStyle(
-                  fontSize: 20,
-                  color: Color(0xFF475569),
+                  fontSize: Responsive.responsiveFont(
+                    context,
+                    mobile: 18,
+                    tablet: 19,
+                    desktop: 20,
+                  ),
+                  color: const Color(0xFF475569),
                 ),
               ),
-              SizedBox(height: 8),
+              SizedBox(
+                height: Responsive.responsiveSpacing(
+                  context,
+                  mobile: 8,
+                  desktop: 8,
+                ),
+              ),
               Text(
                 'Please return to Dashboard or Monitor',
                 style: TextStyle(
-                  fontSize: 14,
-                  color: Color(0xFF475569),
+                  fontSize: Responsive.responsiveFont(
+                    context,
+                    mobile: 13,
+                    tablet: 13.5,
+                    desktop: 14,
+                  ),
+                  color: const Color(0xFF475569),
                 ),
               ),
             ],
