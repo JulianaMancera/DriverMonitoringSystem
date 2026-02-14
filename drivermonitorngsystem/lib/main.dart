@@ -196,7 +196,7 @@ class _MainScreenState extends State<MainScreen> {
                     children: const [
                       TextSpan(text: 'Connected: '),
                       TextSpan(
-                        text: 'TES-X92',
+                        text: 'USER',
                         style: TextStyle(
                           fontFamily: 'monospace',
                           color: Color(0xFF22d3ee),
