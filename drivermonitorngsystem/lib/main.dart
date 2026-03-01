@@ -5,10 +5,10 @@ import 'screens/monitor_screen.dart';
 import 'screens/analytics_screen.dart';
 import 'utils/responsive.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
 }
-
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 

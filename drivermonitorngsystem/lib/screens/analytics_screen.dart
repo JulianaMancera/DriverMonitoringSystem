@@ -11,7 +11,7 @@ class AnalyticsScreen extends StatefulWidget {
 
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
   String selectedTimeRange = '7 Days';
-  
+
   @override
   Widget build(BuildContext context) {
     final isMobile = Responsive.isMobile(context);
@@ -32,7 +32,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           children: [
             // Time Range Selector
             _buildTimeRangeSelector(),
-            
+
             SizedBox(
               height: Responsive.responsiveSpacing(
                 context,
@@ -44,7 +44,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
             // Summary Cards
             _buildSummaryCards(isMobile, isTablet),
-            
+
             SizedBox(
               height: Responsive.responsiveSpacing(
                 context,
@@ -61,20 +61,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               _buildDesktopChartsLayout(),
 
             SizedBox(
-              height: Responsive.responsiveSpacing(
-                context,
-                mobile: 24,
-                tablet: 28,
-                desktop: 32,
-              ),
-            ),
-
-            // Lighting Condition Analysis (Thesis Focus)
-            _buildLightingAnalysis(),
-
-            SizedBox(
               height: isMobile ? 96 : 32,
-            ), // Extra padding for mobile bottom nav
+            ),
           ],
         ),
       ),
@@ -130,7 +118,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
   Widget _buildTimeRangeButton(String label) {
     final isSelected = selectedTimeRange == label;
-    
+
     return InkWell(
       onTap: () {
         setState(() {
@@ -320,13 +308,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             desktop: 24,
           ),
         ),
-        boxShadow: [
-          const BoxShadow(
+        boxShadow: const [
+          BoxShadow(
             color: Color(0xFF0b1120),
             offset: Offset(8, 8),
             blurRadius: 16,
           ),
-          const BoxShadow(
+          BoxShadow(
             color: Color(0xFF1e293b),
             offset: Offset(-8, -8),
             blurRadius: 16,
@@ -344,9 +332,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header section with title and legend
           if (Responsive.isMobile(context))
-            // Mobile: Stack vertically
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -374,7 +360,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               ],
             )
           else
-            // Desktop/Tablet: Side by side
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -394,7 +379,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 Row(
                   children: [
                     _buildLegendItem('Drowsiness', const Color(0xFFef4444)),
-                    SizedBox(width: Responsive.responsiveSpacing(context, mobile: 12)),
+                    SizedBox(
+                        width: Responsive.responsiveSpacing(context,
+                            mobile: 12)),
                     _buildLegendItem('Distraction', const Color(0xFFfbbf24)),
                   ],
                 ),
@@ -437,8 +424,17 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       reservedSize: 30,
                       interval: 1,
                       getTitlesWidget: (value, meta) {
-                        const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-                        if (value.toInt() >= 0 && value.toInt() < days.length) {
+                        const days = [
+                          'Mon',
+                          'Tue',
+                          'Wed',
+                          'Thu',
+                          'Fri',
+                          'Sat',
+                          'Sun'
+                        ];
+                        if (value.toInt() >= 0 &&
+                            value.toInt() < days.length) {
                           return Padding(
                             padding: const EdgeInsets.only(top: 8.0),
                             child: Text(
@@ -487,7 +483,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 minY: 0,
                 maxY: 20,
                 lineBarsData: [
-                  // Drowsiness line
                   LineChartBarData(
                     spots: const [
                       FlSpot(0, 8),
@@ -515,7 +510,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                     ),
                     belowBarData: BarAreaData(show: false),
                   ),
-                  // Distraction line
                   LineChartBarData(
                     spots: const [
                       FlSpot(0, 4),
@@ -599,13 +593,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             desktop: 24,
           ),
         ),
-        boxShadow: [
-          const BoxShadow(
+        boxShadow: const [
+          BoxShadow(
             color: Color(0xFF0b1120),
             offset: Offset(8, 8),
             blurRadius: 16,
           ),
-          const BoxShadow(
+          BoxShadow(
             color: Color(0xFF1e293b),
             offset: Offset(-8, -8),
             blurRadius: 16,
@@ -662,8 +656,16 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                     sideTitles: SideTitles(
                       showTitles: true,
                       getTitlesWidget: (value, meta) {
-                        const hours = ['6AM', '9AM', '12PM', '3PM', '6PM', '9PM'];
-                        if (value.toInt() >= 0 && value.toInt() < hours.length) {
+                        const hours = [
+                          '6AM',
+                          '9AM',
+                          '12PM',
+                          '3PM',
+                          '6PM',
+                          '9PM'
+                        ];
+                        if (value.toInt() >= 0 &&
+                            value.toInt() < hours.length) {
                           return Padding(
                             padding: const EdgeInsets.only(top: 8.0),
                             child: Text(
@@ -759,125 +761,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       ],
     );
   }
-
-  // Lighting Condition Analysis
-  Widget _buildLightingAnalysis() {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(
-          Responsive.responsiveBorderRadius(
-            context,
-            mobile: 20,
-            tablet: 22,
-            desktop: 24,
-          ),
-        ),
-        boxShadow: [
-          const BoxShadow(
-            color: Color(0xFF0b1120),
-            offset: Offset(8, 8),
-            blurRadius: 16,
-          ),
-          const BoxShadow(
-            color: Color(0xFF1e293b),
-            offset: Offset(-8, -8),
-            blurRadius: 16,
-          ),
-        ],
-      ),
-      padding: EdgeInsets.all(
-        Responsive.responsivePadding(
-          context,
-          mobile: 20,
-          tablet: 22,
-          desktop: 24,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                Icons.wb_sunny_outlined,
-                size: Responsive.responsiveIconSize(
-                  context,
-                  mobile: 20,
-                  tablet: 22,
-                  desktop: 24,
-                ),
-                color: const Color(0xFF22d3ee),
-              ),
-              SizedBox(width: Responsive.responsiveSpacing(context, mobile: 8)),
-              Text(
-                'Performance by Lighting Condition',
-                style: TextStyle(
-                  fontSize: Responsive.responsiveFont(
-                    context,
-                    mobile: 16,
-                    tablet: 17,
-                    desktop: 18,
-                  ),
-                  fontWeight: FontWeight.w600,
-                  color: const Color(0xFFcbd5e1),
-                ),
-              ),
-            ],
-          ),
-          SizedBox(
-            height: Responsive.responsiveSpacing(
-              context,
-              mobile: 20,
-              tablet: 22,
-              desktop: 24,
-            ),
-          ),
-          GridView.count(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: 2,
-            mainAxisSpacing: Responsive.responsiveSpacing(context, mobile: 12),
-            crossAxisSpacing: Responsive.responsiveSpacing(context, mobile: 12),
-            childAspectRatio: Responsive.responsiveValue(
-              context,
-              mobile: 1.3,
-              tablet: 1.6,
-              desktop: 2.2,
-            ),
-            children: [
-              _buildLightingCard(
-                'Day',
-                '96.5%',
-                Icons.wb_sunny,
-                const Color(0xFFfbbf24),
-              ),
-              _buildLightingCard(
-                'Night',
-                '94.2%',
-                Icons.nightlight_round,
-                const Color(0xFF6366f1),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLightingCard(
-    String label,
-    String accuracy,
-    IconData icon,
-    Color color,
-  ) {
-    return _HoverableLightingCard(
-      label: label,
-      accuracy: accuracy,
-      icon: icon,
-      color: color,
-    );
-  }
 }
 
 // Hoverable Summary Card with neumorphic hover effect
@@ -923,7 +806,6 @@ class _HoverableSummaryCardState extends State<_HoverableSummaryCard> {
           ),
           boxShadow: isHovered
               ? [
-                  // Hovered - inset neumorphic
                   BoxShadow(
                     color: const Color(0xFF0b1120).withOpacity(0.8),
                     offset: const Offset(-3, -3),
@@ -936,7 +818,6 @@ class _HoverableSummaryCardState extends State<_HoverableSummaryCard> {
                   ),
                 ]
               : [
-                  // Normal - raised neumorphic
                   const BoxShadow(
                     color: Color(0xFF0b1120),
                     offset: Offset(6, 6),
@@ -1080,142 +961,6 @@ class _HoverableSummaryCardState extends State<_HoverableSummaryCard> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// Hoverable Lighting Card with neumorphic hover effect
-class _HoverableLightingCard extends StatefulWidget {
-  final String label;
-  final String accuracy;
-  final IconData icon;
-  final Color color;
-
-  const _HoverableLightingCard({
-    required this.label,
-    required this.accuracy,
-    required this.icon,
-    required this.color,
-  });
-
-  @override
-  State<_HoverableLightingCard> createState() => _HoverableLightingCardState();
-}
-
-class _HoverableLightingCardState extends State<_HoverableLightingCard> {
-  bool isHovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => isHovered = true),
-      onExit: (_) => setState(() => isHovered = false),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeInOut,
-        decoration: BoxDecoration(
-          color: const Color(0xFF1e293b),
-          borderRadius: BorderRadius.circular(
-            Responsive.responsiveBorderRadius(
-              context,
-              mobile: 14,
-              tablet: 16,
-              desktop: 18,
-            ),
-          ),
-          boxShadow: isHovered
-              ? [
-                  // Hovered - inset neumorphic
-                  BoxShadow(
-                    color: const Color(0xFF0b1120).withOpacity(0.8),
-                    offset: const Offset(-2, -2),
-                    blurRadius: 4,
-                  ),
-                  BoxShadow(
-                    color: const Color(0xFF334155).withOpacity(0.5),
-                    offset: const Offset(2, 2),
-                    blurRadius: 4,
-                  ),
-                ]
-              : [
-                  // Normal - subtle raised
-                  const BoxShadow(
-                    color: Color(0xFF0b1120),
-                    offset: Offset(3, 3),
-                    blurRadius: 6,
-                  ),
-                  const BoxShadow(
-                    color: Color(0xFF334155),
-                    offset: Offset(-3, -3),
-                    blurRadius: 6,
-                  ),
-                ],
-        ),
-        padding: EdgeInsets.all(
-          Responsive.responsivePadding(
-            context,
-            mobile: 12,
-            tablet: 14,
-            desktop: 16,
-          ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              widget.icon,
-              size: Responsive.responsiveIconSize(
-                context,
-                mobile: 28,
-                tablet: 32,
-                desktop: 36,
-              ),
-              color: widget.color,
-            ),
-            SizedBox(
-              height: Responsive.responsiveSpacing(
-                context,
-                mobile: 8,
-                tablet: 10,
-                desktop: 12,
-              ),
-            ),
-            Text(
-              widget.accuracy,
-              style: TextStyle(
-                fontSize: Responsive.responsiveFont(
-                  context,
-                  mobile: 18,
-                  tablet: 20,
-                  desktop: 22,
-                ),
-                fontWeight: FontWeight.bold,
-                color: widget.color,
-              ),
-            ),
-            SizedBox(
-              height: Responsive.responsiveSpacing(
-                context,
-                mobile: 4,
-                tablet: 5,
-                desktop: 6,
-              ),
-            ),
-            Text(
-              widget.label,
-              style: TextStyle(
-                fontSize: Responsive.responsiveFont(
-                  context,
-                  mobile: 11,
-                  tablet: 12,
-                  desktop: 13,
-                ),
-                color: const Color(0xFF94a3b8),
-              ),
             ),
           ],
         ),

@@ -610,7 +610,7 @@ class DashboardScreen extends StatelessWidget {
                 lineTouchData: LineTouchData(
                   touchTooltipData: LineTouchTooltipData(
                     getTooltipColor: (touchedSpot) => const Color(0xFF0f172a),
-                    tooltipRoundedRadius: 12,
+                    tooltipBorderRadius: BorderRadius.circular(12),
                     tooltipPadding: const EdgeInsets.all(8),
                     getTooltipItems: (List<LineBarSpot> touchedBarSpots) {
                       return touchedBarSpots.map((barSpot) {
