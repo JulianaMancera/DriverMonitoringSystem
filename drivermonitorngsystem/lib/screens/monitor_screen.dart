@@ -14,28 +14,21 @@ class MonitorScreen extends StatefulWidget {
 
 class _MonitorScreenState extends State<MonitorScreen>
     with TickerProviderStateMixin {
-  // Metrics state
   double alertness = 85;
   double drowsiness = 12;
   double distraction = 5;
 
-  // Environment state
   bool clearGlasses = false;
   bool isRecording = false;
 
-  // Camera state
   CameraController? _cameraController;
   List<CameraDescription> _cameras = [];
   bool _cameraInitialized = false;
   String? _cameraError;
 
-  // Warning state
   String? warning;
-
-  // Timer for simulation
   Timer? _simulationTimer;
 
-  // Animation controllers
   late AnimationController _faceBoxController;
   late Animation<Offset> _faceBoxAnimation;
   late AnimationController _warningController;
@@ -46,7 +39,6 @@ class _MonitorScreenState extends State<MonitorScreen>
   @override
   void initState() {
     super.initState();
-
     _initCamera();
 
     _faceBoxController = AnimationController(
@@ -58,19 +50,15 @@ class _MonitorScreenState extends State<MonitorScreen>
       begin: Offset.zero,
       end: const Offset(10, 5),
     ).animate(CurvedAnimation(
-      parent: _faceBoxController,
-      curve: Curves.easeInOut,
-    ));
+        parent: _faceBoxController, curve: Curves.easeInOut));
 
     _warningController = AnimationController(
       duration: const Duration(milliseconds: 1000),
       vsync: this,
     )..repeat(reverse: true);
 
-    _warningAnimation = Tween<double>(
-      begin: 0.8,
-      end: 1.0,
-    ).animate(_warningController);
+    _warningAnimation =
+        Tween<double>(begin: 0.8, end: 1.0).animate(_warningController);
 
     _startSimulation();
   }
@@ -96,31 +84,23 @@ class _MonitorScreenState extends State<MonitorScreen>
       );
 
       await _cameraController!.initialize();
-
-      if (mounted) {
-        setState(() => _cameraInitialized = true);
-      }
+      if (mounted) setState(() => _cameraInitialized = true);
     } catch (e) {
-      if (mounted) {
-        setState(() => _cameraError = 'Camera error: $e');
-      }
+      if (mounted) setState(() => _cameraError = 'Camera error: $e');
     }
   }
 
   Future<void> _toggleRecording() async {
     if (_cameraController == null || !_cameraInitialized) return;
-
     try {
       if (isRecording) {
         final file = await _cameraController!.stopVideoRecording();
         setState(() => isRecording = false);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Recording saved: ${file.path}'),
-              backgroundColor: const Color(0xFF10b981),
-            ),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Recording saved: ${file.path}'),
+            backgroundColor: const Color(0xFF10b981),
+          ));
         }
       } else {
         await _cameraController!.startVideoRecording();
@@ -134,12 +114,12 @@ class _MonitorScreenState extends State<MonitorScreen>
   void _startSimulation() {
     _simulationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       setState(() {
-        drowsiness = (drowsiness + (_random.nextDouble() * 4 - 1.5))
-            .clamp(0.0, 100.0);
-        alertness = (100 - drowsiness - (_random.nextDouble() * 5))
-            .clamp(0.0, 100.0);
-        distraction = (distraction + (_random.nextDouble() * 6 - 3))
-            .clamp(0.0, 100.0);
+        drowsiness =
+            (drowsiness + (_random.nextDouble() * 4 - 1.5)).clamp(0.0, 100.0);
+        alertness =
+            (100 - drowsiness - (_random.nextDouble() * 5)).clamp(0.0, 100.0);
+        distraction =
+            (distraction + (_random.nextDouble() * 6 - 3)).clamp(0.0, 100.0);
 
         if (drowsiness > 40) {
           warning = "DROWSINESS DETECTED";
@@ -164,78 +144,48 @@ class _MonitorScreenState extends State<MonitorScreen>
   @override
   Widget build(BuildContext context) {
     final isDesktop = Responsive.isDesktop(context);
+    final isLandscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
 
     return Container(
       padding: EdgeInsets.all(
         Responsive.responsivePadding(
-            context, mobile: 16, tablet: 20, desktop: 16),
+            context, mobile: 12, tablet: 16, desktop: 16),
       ),
-      child: isDesktop ? _buildDesktopLayout() : _buildMobileLayout(),
+      child: isDesktop
+          ? _buildDesktopLayout()
+          : isLandscape
+              ? _buildLandscapeLayout()
+              : _buildPortraitLayout(),
     );
   }
 
-  Widget _buildDesktopLayout() {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          flex: 8,
-          child: Column(
-            children: [
-              Expanded(child: _buildCameraFeed()),
-              SizedBox(
-                height: Responsive.responsiveSpacing(
-                    context, mobile: 16, tablet: 20, desktop: 24),
-              ),
-              _buildEnvironmentBar(),
-            ],
-          ),
-        ),
-        SizedBox(
-          width: Responsive.responsiveSpacing(
-              context, mobile: 16, tablet: 24, desktop: 32),
-        ),
-        Expanded(flex: 4, child: _buildMetricsSidebar()),
-      ],
-    );
-  }
-
-  Widget _buildMobileLayout() {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PORTRAIT: fixed-height square-ish box, cover fill (no stretch), metrics below
+  // ─────────────────────────────────────────────────────────────────────────────
+  Widget _buildPortraitLayout() {
     return SingleChildScrollView(
       child: Column(
         children: [
-          _buildCameraFeed(),
-          SizedBox(
-            height: Responsive.responsiveSpacing(
-                context, mobile: 16, tablet: 20, desktop: 24),
-          ),
+          _buildPortraitCameraBox(),
+          const SizedBox(height: 12),
           _buildEnvironmentBar(),
-          SizedBox(
-            height: Responsive.responsiveSpacing(
-                context, mobile: 16, tablet: 20, desktop: 24),
-          ),
-          _buildMetricsSidebar(),
+          const SizedBox(height: 12),
+          _buildMetricsSidebar(isLandscape: false),
           const SizedBox(height: 96),
         ],
       ),
     );
   }
 
-  //  Camera Feed 
-  Widget _buildCameraFeed() {
-   final double rawRatio = _cameraInitialized
-    ? _cameraController!.value.aspectRatio
-    : 3 / 4;
-
-   final double aspectRatio = rawRatio > 1 ? 1 / rawRatio : rawRatio;
-
+  /// Fixed-height box. Camera fills it with BoxFit.cover — no stretching.
+  Widget _buildPortraitCameraBox() {
     return Container(
+      height: 280,
+      width: double.infinity,
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(
-          Responsive.responsiveBorderRadius(
-              context, mobile: 20, tablet: 22, desktop: 24),
-        ),
+        borderRadius: BorderRadius.circular(20),
         boxShadow: const [
           BoxShadow(
               color: Color(0xFF0b1120), offset: Offset(8, 8), blurRadius: 16),
@@ -245,79 +195,95 @@ class _MonitorScreenState extends State<MonitorScreen>
               blurRadius: 16),
         ],
       ),
-      padding: EdgeInsets.all(
-        Responsive.responsivePadding(
-            context, mobile: 6, tablet: 7, desktop: 8),
+      padding: const EdgeInsets.all(6),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // Cover fill — camera fills the box without stretching
+            _buildCoverCamera(),
+            _buildGradientOverlay(),
+            if (isRecording) _buildRecBadge(),
+            _buildFaceTrackingBox(),
+            if (warning != null) _buildWarningOverlay(),
+          ],
+        ),
       ),
-      // AspectRatio now uses the real camera ratio — no more stretching
-      child: AspectRatio(
-        aspectRatio: aspectRatio,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(
-            Responsive.responsiveBorderRadius(
-                context, mobile: 14, tablet: 15, desktop: 16),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // LANDSCAPE: camera uses its NATIVE landscape ratio, controls on the right
+  // ─────────────────────────────────────────────────────────────────────────────
+  Widget _buildLandscapeLayout() {
+    // Native landscape ratio from camera (e.g. 16/9 = 1.77)
+    // Don't invert — in landscape we WANT the wide view
+    final double cameraRatio = _cameraInitialized
+        ? _cameraController!.value.aspectRatio
+        : 16 / 9;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Left: landscape camera — fills height, ratio-correct width
+        Expanded(
+          flex: 6,
+          child: Column(
+            children: [
+              Expanded(
+                child: _buildLandscapeCameraBox(cameraRatio),
+              ),
+              const SizedBox(height: 8),
+              _buildEnvironmentBar(),
+            ],
           ),
+        ),
+        const SizedBox(width: 12),
+        // Right: scrollable metrics
+        Expanded(
+          flex: 4,
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                _buildMetricsSidebar(isLandscape: true),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Landscape camera — AspectRatio with native landscape ratio, no stretching
+  Widget _buildLandscapeCameraBox(double cameraRatio) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF0f172a),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: const [
+          BoxShadow(
+              color: Color(0xFF0b1120), offset: Offset(8, 8), blurRadius: 16),
+          BoxShadow(
+              color: Color(0xFF1e293b),
+              offset: Offset(-8, -8),
+              blurRadius: 16),
+        ],
+      ),
+      padding: const EdgeInsets.all(6),
+      // AspectRatio with the LANDSCAPE ratio — fills width naturally in landscape
+      child: AspectRatio(
+        aspectRatio: cameraRatio,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(14),
           child: Stack(
             fit: StackFit.expand,
             children: [
-              _buildCameraPreview(),
-
-              // Gradient overlay
-              Positioned.fill(
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.transparent,
-                        const Color(0xFF0f172a).withOpacity(0.5),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-
-              // REC badge
-              if (isRecording)
-                Positioned(
-                  top: 12,
-                  right: 12,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.red.withOpacity(0.85),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: const BoxDecoration(
-                            color: Colors.white,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        const Text(
-                          'REC',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
+              _buildCoverCamera(),
+              _buildGradientOverlay(),
+              if (isRecording) _buildRecBadge(),
               _buildFaceTrackingBox(),
-
               if (warning != null) _buildWarningOverlay(),
             ],
           ),
@@ -326,7 +292,81 @@ class _MonitorScreenState extends State<MonitorScreen>
     );
   }
 
-  Widget _buildCameraPreview() {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // DESKTOP
+  // ─────────────────────────────────────────────────────────────────────────────
+  Widget _buildDesktopLayout() {
+    final double rawRatio = _cameraInitialized
+        ? _cameraController!.value.aspectRatio
+        : 16 / 9;
+    final double aspectRatio = rawRatio > 1 ? 1 / rawRatio : rawRatio;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          flex: 8,
+          child: Column(
+            children: [
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0f172a),
+                    borderRadius: BorderRadius.circular(
+                        Responsive.responsiveBorderRadius(
+                            context,
+                            mobile: 20,
+                            tablet: 22,
+                            desktop: 24)),
+                    boxShadow: const [
+                      BoxShadow(
+                          color: Color(0xFF0b1120),
+                          offset: Offset(8, 8),
+                          blurRadius: 16),
+                      BoxShadow(
+                          color: Color(0xFF1e293b),
+                          offset: Offset(-8, -8),
+                          blurRadius: 16),
+                    ],
+                  ),
+                  padding: const EdgeInsets.all(8),
+                  child: AspectRatio(
+                    aspectRatio: aspectRatio,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          _buildCoverCamera(),
+                          _buildGradientOverlay(),
+                          if (isRecording) _buildRecBadge(),
+                          _buildFaceTrackingBox(),
+                          if (warning != null) _buildWarningOverlay(),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              SizedBox(
+                  height: Responsive.responsiveSpacing(
+                      context, mobile: 16, tablet: 20, desktop: 24)),
+              _buildEnvironmentBar(),
+            ],
+          ),
+        ),
+        SizedBox(
+            width: Responsive.responsiveSpacing(
+                context, mobile: 16, tablet: 24, desktop: 32)),
+        Expanded(flex: 4, child: _buildMetricsSidebar(isLandscape: false)),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CAMERA PREVIEW — BoxFit.cover so it fills ANY container shape without stretch
+  // ─────────────────────────────────────────────────────────────────────────────
+  Widget _buildCoverCamera() {
     if (!_cameraInitialized && _cameraError == null) {
       return Container(
         color: Colors.black,
@@ -336,10 +376,8 @@ class _MonitorScreenState extends State<MonitorScreen>
             children: [
               CircularProgressIndicator(color: Color(0xFF22d3ee)),
               SizedBox(height: 12),
-              Text(
-                'Initializing camera…',
-                style: TextStyle(color: Color(0xFF64748b), fontSize: 13),
-              ),
+              Text('Initializing camera…',
+                  style: TextStyle(color: Color(0xFF64748b), fontSize: 13)),
             ],
           ),
         ),
@@ -356,12 +394,10 @@ class _MonitorScreenState extends State<MonitorScreen>
               const Icon(Icons.videocam_off,
                   color: Color(0xFF64748b), size: 48),
               const SizedBox(height: 12),
-              Text(
-                _cameraError!,
-                style:
-                    const TextStyle(color: Color(0xFF64748b), fontSize: 13),
-                textAlign: TextAlign.center,
-              ),
+              Text(_cameraError!,
+                  style: const TextStyle(
+                      color: Color(0xFF64748b), fontSize: 13),
+                  textAlign: TextAlign.center),
               const SizedBox(height: 12),
               TextButton(
                 onPressed: _initCamera,
@@ -374,50 +410,107 @@ class _MonitorScreenState extends State<MonitorScreen>
       );
     }
 
-    // Mirror the front camera horizontally
-    return Transform(
-      alignment: Alignment.center,
-      transform: Matrix4.rotationY(3.14159),
-      child: CameraPreview(_cameraController!),
+    final double rawRatio = _cameraController!.value.aspectRatio;
+
+    // FittedBox with cover:
+    // We give CameraPreview its native size, then FittedBox.cover
+    // scales it up to fill the container — no distortion, just cropping edges.
+    return ClipRect(
+      child: FittedBox(
+        fit: BoxFit.cover,
+        child: SizedBox(
+          // Native camera dimensions (use landscape values always)
+          width: rawRatio * 1000,
+          height: 1000,
+          child: Transform(
+            alignment: Alignment.center,
+            transform: Matrix4.rotationY(3.14159), // mirror front cam
+            child: CameraPreview(_cameraController!),
+          ),
+        ),
+      ),
     );
   }
 
-  // ── Face Tracking Box ────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SHARED WIDGETS
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  Widget _buildGradientOverlay() {
+    return Positioned.fill(
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.transparent,
+              const Color(0xFF0f172a).withOpacity(0.4),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRecBadge() {
+    return Positioned(
+      top: 12,
+      right: 12,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.red.withOpacity(0.85),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: const BoxDecoration(
+                  color: Colors.white, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 6),
+            const Text('REC',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2)),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildFaceTrackingBox() {
-    final boxWidth = Responsive.responsiveValue(
-        context, mobile: 120.0, tablet: 150.0, desktop: 200.0);
-    final boxHeight = Responsive.responsiveValue(
-        context, mobile: 160.0, tablet: 200.0, desktop: 280.0);
+    final isLandscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
+    final boxW = isLandscape ? 110.0 : 110.0;
+    final boxH = isLandscape ? 140.0 : 150.0;
+    final startTop = isLandscape ? 15.0 : 25.0;
+    final startLeft = isLandscape ? 50.0 : 55.0;
 
     return AnimatedBuilder(
       animation: _faceBoxAnimation,
       builder: (context, child) {
         return Positioned(
-          top: Responsive.responsiveValue(
-                  context, mobile: 30.0, tablet: 40.0, desktop: 60.0) +
-              _faceBoxAnimation.value.dy,
-          left: Responsive.responsiveValue(
-                  context, mobile: 60.0, tablet: 80.0, desktop: 120.0) +
-              _faceBoxAnimation.value.dx,
+          top: startTop + _faceBoxAnimation.value.dy,
+          left: startLeft + _faceBoxAnimation.value.dx,
           child: Container(
-            width: boxWidth,
-            height: boxHeight,
+            width: boxW,
+            height: boxH,
             decoration: BoxDecoration(
               border: Border.all(
-                color: const Color(0xFF22d3ee).withOpacity(0.7),
-                width: Responsive.responsiveValue(
-                    context, mobile: 1.5, tablet: 1.75, desktop: 2.0),
-              ),
-              borderRadius: BorderRadius.circular(
-                Responsive.responsiveBorderRadius(
-                    context, mobile: 6, tablet: 7, desktop: 8),
-              ),
+                  color: const Color(0xFF22d3ee).withOpacity(0.7), width: 1.5),
+              borderRadius: BorderRadius.circular(6),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF22d3ee).withOpacity(0.3),
-                  blurRadius: 20,
-                  spreadRadius: 2,
-                ),
+                    color: const Color(0xFF22d3ee).withOpacity(0.3),
+                    blurRadius: 20,
+                    spreadRadius: 2),
               ],
             ),
             child: Stack(
@@ -427,27 +520,20 @@ class _MonitorScreenState extends State<MonitorScreen>
                 _buildCornerMarker(Alignment.bottomLeft),
                 _buildCornerMarker(Alignment.bottomRight),
                 Positioned(
-                  top: -20,
+                  top: -18,
                   left: 0,
                   child: Container(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: Responsive.responsivePadding(
-                          context, mobile: 6, tablet: 7, desktop: 8),
-                      vertical: 2,
-                    ),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
                       color: const Color(0xFF22d3ee).withOpacity(0.2),
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: Text(
-                      'FACE DETECTED',
-                      style: TextStyle(
-                        color: const Color(0xFF22d3ee),
-                        fontSize: Responsive.responsiveFont(
-                            context, mobile: 9, tablet: 9.5, desktop: 10),
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    child: const Text('FACE DETECTED',
+                        style: TextStyle(
+                            color: Color(0xFF22d3ee),
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold)),
                   ),
                 ),
               ],
@@ -461,31 +547,26 @@ class _MonitorScreenState extends State<MonitorScreen>
   Widget _buildCornerMarker(Alignment alignment) {
     final isTop = alignment.y < 0;
     final isLeft = alignment.x < 0;
-    final bw = Responsive.responsiveValue(
-        context, mobile: 1.5, tablet: 1.75, desktop: 2.0);
-
     return Align(
       alignment: alignment,
       child: Transform.translate(
         offset: Offset(isLeft ? -1 : 1, isTop ? -1 : 1),
         child: Container(
-          width: Responsive.responsiveValue(
-              context, mobile: 14.0, tablet: 15.0, desktop: 16.0),
-          height: Responsive.responsiveValue(
-              context, mobile: 14.0, tablet: 15.0, desktop: 16.0),
+          width: 14,
+          height: 14,
           decoration: BoxDecoration(
             border: Border(
               top: isTop
-                  ? BorderSide(color: const Color(0xFF22d3ee), width: bw)
+                  ? const BorderSide(color: Color(0xFF22d3ee), width: 1.5)
                   : BorderSide.none,
               bottom: !isTop
-                  ? BorderSide(color: const Color(0xFF22d3ee), width: bw)
+                  ? const BorderSide(color: Color(0xFF22d3ee), width: 1.5)
                   : BorderSide.none,
               left: isLeft
-                  ? BorderSide(color: const Color(0xFF22d3ee), width: bw)
+                  ? const BorderSide(color: Color(0xFF22d3ee), width: 1.5)
                   : BorderSide.none,
               right: !isLeft
-                  ? BorderSide(color: const Color(0xFF22d3ee), width: bw)
+                  ? const BorderSide(color: Color(0xFF22d3ee), width: 1.5)
                   : BorderSide.none,
             ),
           ),
@@ -506,15 +587,12 @@ class _MonitorScreenState extends State<MonitorScreen>
               child: Transform.scale(
                 scale: _warningAnimation.value,
                 child: Container(
-                  padding: EdgeInsets.all(Responsive.responsivePadding(
-                      context, mobile: 20, tablet: 22, desktop: 24)),
+                  padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
                     color: const Color(0xFF0f172a).withOpacity(0.9),
                     border: Border.all(
                         color: Colors.red.withOpacity(0.5), width: 1),
-                    borderRadius: BorderRadius.circular(
-                        Responsive.responsiveBorderRadius(
-                            context, mobile: 14, tablet: 15, desktop: 16)),
+                    borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
                           color: Colors.red.withOpacity(0.4),
@@ -526,34 +604,22 @@ class _MonitorScreenState extends State<MonitorScreen>
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(Icons.warning_amber_rounded,
-                          size: Responsive.responsiveIconSize(
-                              context, mobile: 48, tablet: 56, desktop: 64),
-                          color: Colors.red.shade500),
-                      SizedBox(
-                          height: Responsive.responsiveSpacing(
-                              context, mobile: 12, tablet: 14, desktop: 16)),
+                          size: 48, color: Colors.red.shade500),
+                      const SizedBox(height: 12),
                       Text(
                         warning!,
                         style: TextStyle(
-                          fontSize: Responsive.responsiveFont(
-                              context, mobile: 20, tablet: 24, desktop: 28),
+                          fontSize: 20,
                           fontWeight: FontWeight.bold,
                           color: Colors.red.shade500,
                           letterSpacing: 3,
                         ),
                         textAlign: TextAlign.center,
                       ),
-                      SizedBox(
-                          height: Responsive.responsiveSpacing(
-                              context, mobile: 6, tablet: 7, desktop: 8)),
-                      Text(
-                        'Audible Alert Active',
-                        style: TextStyle(
-                          fontSize: Responsive.responsiveFont(
-                              context, mobile: 12, tablet: 13, desktop: 14),
-                          color: Colors.red.shade300,
-                        ),
-                      ),
+                      const SizedBox(height: 6),
+                      Text('Audible Alert Active',
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.red.shade300)),
                     ],
                   ),
                 ),
@@ -567,13 +633,14 @@ class _MonitorScreenState extends State<MonitorScreen>
 
   // ── Environment Bar ──────────────────────────────────────────────────────────
   Widget _buildEnvironmentBar() {
+    final isLandscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
+
     return Container(
-      height: Responsive.responsiveHeight(
-          context, mobile: 80, tablet: 88, desktop: 96),
+      height: isLandscape ? 56 : 72,
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(Responsive.responsiveBorderRadius(
-            context, mobile: 20, tablet: 22, desktop: 24)),
+        borderRadius: BorderRadius.circular(20),
         boxShadow: const [
           BoxShadow(
               color: Color(0xFF0b1120), offset: Offset(6, 6), blurRadius: 12),
@@ -592,12 +659,7 @@ class _MonitorScreenState extends State<MonitorScreen>
             label: 'Clear Glasses',
             onToggle: () => setState(() => clearGlasses = !clearGlasses),
           ),
-          Container(
-            width: 1,
-            height: Responsive.responsiveHeight(
-                context, mobile: 40, tablet: 44, desktop: 48),
-            color: const Color(0xFF1e293b),
-          ),
+          Container(width: 1, height: 36, color: const Color(0xFF1e293b)),
           _buildRecordButton(),
         ],
       ),
@@ -609,22 +671,17 @@ class _MonitorScreenState extends State<MonitorScreen>
       onTap: _toggleRecording,
       borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: EdgeInsets.all(Responsive.responsivePadding(
-            context, mobile: 6, tablet: 7, desktop: 8)),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             AnimatedContainer(
               duration: const Duration(milliseconds: 300),
-              width: Responsive.responsiveValue(
-                  context, mobile: 40.0, tablet: 44.0, desktop: 48.0),
-              height: Responsive.responsiveValue(
-                  context, mobile: 40.0, tablet: 44.0, desktop: 48.0),
+              width: 36,
+              height: 36,
               decoration: BoxDecoration(
                 color: const Color(0xFF0f172a),
-                borderRadius: BorderRadius.circular(
-                    Responsive.responsiveBorderRadius(
-                        context, mobile: 10, tablet: 11, desktop: 12)),
+                borderRadius: BorderRadius.circular(10),
                 boxShadow: isRecording
                     ? [
                         BoxShadow(
@@ -645,19 +702,15 @@ class _MonitorScreenState extends State<MonitorScreen>
               ),
               child: Icon(
                 isRecording ? Icons.stop_circle : Icons.fiber_manual_record,
-                size: Responsive.responsiveIconSize(
-                    context, mobile: 20, tablet: 22, desktop: 24),
+                size: 18,
                 color: isRecording ? Colors.red : const Color(0xFF64748b),
               ),
             ),
-            SizedBox(
-                width: Responsive.responsiveSpacing(
-                    context, mobile: 8, tablet: 12, desktop: 16)),
+            const SizedBox(width: 8),
             Text(
               isRecording ? 'Stop Rec' : 'Record',
               style: TextStyle(
-                fontSize: Responsive.responsiveFont(
-                    context, mobile: 13, tablet: 14, desktop: 16),
+                fontSize: 13,
                 fontWeight: FontWeight.w500,
                 color: isRecording ? Colors.red : const Color(0xFF64748b),
               ),
@@ -678,21 +731,16 @@ class _MonitorScreenState extends State<MonitorScreen>
       onTap: onToggle,
       borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: EdgeInsets.all(Responsive.responsivePadding(
-            context, mobile: 6, tablet: 7, desktop: 8)),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: Responsive.responsiveValue(
-                  context, mobile: 40.0, tablet: 44.0, desktop: 48.0),
-              height: Responsive.responsiveValue(
-                  context, mobile: 40.0, tablet: 44.0, desktop: 48.0),
+              width: 36,
+              height: 36,
               decoration: BoxDecoration(
                 color: const Color(0xFF0f172a),
-                borderRadius: BorderRadius.circular(
-                    Responsive.responsiveBorderRadius(
-                        context, mobile: 10, tablet: 11, desktop: 12)),
+                borderRadius: BorderRadius.circular(10),
                 boxShadow: active
                     ? [
                         BoxShadow(
@@ -715,29 +763,20 @@ class _MonitorScreenState extends State<MonitorScreen>
                             blurRadius: 8),
                       ],
               ),
-              child: Icon(
-                icon,
-                size: Responsive.responsiveIconSize(
-                    context, mobile: 20, tablet: 22, desktop: 24),
-                color:
-                    active ? const Color(0xFF22d3ee) : const Color(0xFF64748b),
-              ),
-            ),
-            SizedBox(
-                width: Responsive.responsiveSpacing(
-                    context, mobile: 8, tablet: 12, desktop: 16)),
-            Flexible(
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: Responsive.responsiveFont(
-                      context, mobile: 13, tablet: 14, desktop: 16),
-                  fontWeight: FontWeight.w500,
+              child: Icon(icon,
+                  size: 18,
                   color: active
                       ? const Color(0xFF22d3ee)
-                      : const Color(0xFF64748b),
-                ),
-                overflow: TextOverflow.ellipsis,
+                      : const Color(0xFF64748b)),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color:
+                    active ? const Color(0xFF22d3ee) : const Color(0xFF64748b),
               ),
             ),
           ],
@@ -747,46 +786,31 @@ class _MonitorScreenState extends State<MonitorScreen>
   }
 
   // ── Metrics Sidebar ──────────────────────────────────────────────────────────
-  Widget _buildMetricsSidebar() {
-    final isDesktop = Responsive.isDesktop(context);
-    final spacing = SizedBox(
-        height: Responsive.responsiveSpacing(
-            context, mobile: 16, tablet: 20, desktop: 24));
-
-    final cards = [
-      _buildMetricCard(
-          label: 'Alertness',
-          value: alertness,
-          color: const Color(0xFF22d3ee),
-          icon: Icons.bolt,
-          reverse: false),
-      spacing,
-      _buildMetricCard(
-          label: 'Drowsiness',
-          value: drowsiness,
-          color: Colors.red.shade500,
-          icon: Icons.visibility_off,
-          reverse: true),
-      spacing,
-      _buildMetricCard(
-          label: 'Distraction',
-          value: distraction,
-          color: const Color(0xFFfbbf24),
-          icon: Icons.visibility,
-          reverse: true),
-      spacing,
-    ];
+  Widget _buildMetricsSidebar({required bool isLandscape}) {
+    const spacing = SizedBox(height: 10);
+    final logHeight = isLandscape ? 180.0 : 220.0;
 
     return Column(
       children: [
-        ...cards,
-        isDesktop
-            ? Expanded(child: _buildSystemLog())
-            : SizedBox(
-                height: Responsive.responsiveHeight(
-                    context, mobile: 250, tablet: 300, desktop: 350),
-                child: _buildSystemLog(),
-              ),
+        _buildMetricCard(
+            label: 'Alertness',
+            value: alertness,
+            color: const Color(0xFF22d3ee),
+            icon: Icons.bolt),
+        spacing,
+        _buildMetricCard(
+            label: 'Drowsiness',
+            value: drowsiness,
+            color: Colors.red.shade500,
+            icon: Icons.visibility_off),
+        spacing,
+        _buildMetricCard(
+            label: 'Distraction',
+            value: distraction,
+            color: const Color(0xFFfbbf24),
+            icon: Icons.visibility),
+        spacing,
+        SizedBox(height: logHeight, child: _buildSystemLog()),
       ],
     );
   }
@@ -796,13 +820,11 @@ class _MonitorScreenState extends State<MonitorScreen>
     required double value,
     required Color color,
     required IconData icon,
-    required bool reverse,
   }) {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(Responsive.responsiveBorderRadius(
-            context, mobile: 20, tablet: 22, desktop: 24)),
+        borderRadius: BorderRadius.circular(16),
         boxShadow: const [
           BoxShadow(
               color: Color(0xFF0b1120), offset: Offset(6, 6), blurRadius: 12),
@@ -812,8 +834,7 @@ class _MonitorScreenState extends State<MonitorScreen>
               blurRadius: 12),
         ],
       ),
-      padding: EdgeInsets.all(Responsive.responsivePadding(
-          context, mobile: 20, tablet: 22, desktop: 24)),
+      padding: const EdgeInsets.all(14),
       child: Column(
         children: [
           Row(
@@ -822,52 +843,35 @@ class _MonitorScreenState extends State<MonitorScreen>
               Row(
                 children: [
                   Container(
-                    padding: EdgeInsets.all(Responsive.responsivePadding(
-                        context, mobile: 6, tablet: 7, desktop: 8)),
+                    padding: const EdgeInsets.all(6),
                     decoration: BoxDecoration(
                       color: const Color(0xFF1e293b),
-                      borderRadius: BorderRadius.circular(
-                          Responsive.responsiveBorderRadius(
-                              context, mobile: 6, tablet: 7, desktop: 8)),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Icon(icon,
-                        size: Responsive.responsiveIconSize(
-                            context, mobile: 18, tablet: 19, desktop: 20),
-                        color: color),
+                    child: Icon(icon, size: 16, color: color),
                   ),
-                  SizedBox(
-                      width: Responsive.responsiveSpacing(
-                          context, mobile: 10, tablet: 11, desktop: 12)),
+                  const SizedBox(width: 8),
                   Text(label,
-                      style: TextStyle(
-                        color: const Color(0xFFcbd5e1),
-                        fontSize: Responsive.responsiveFont(
-                            context, mobile: 15, tablet: 15.5, desktop: 16),
-                        fontWeight: FontWeight.w500,
-                      )),
+                      style: const TextStyle(
+                          color: Color(0xFFcbd5e1),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500)),
                 ],
               ),
               Text('${value.toInt()}%',
                   style: TextStyle(
-                    fontSize: Responsive.responsiveFont(
-                        context, mobile: 18, tablet: 19, desktop: 20),
-                    fontWeight: FontWeight.bold,
-                    fontFamily: 'monospace',
-                    color: color,
-                  )),
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      fontFamily: 'monospace',
+                      color: color)),
             ],
           ),
-          SizedBox(
-              height: Responsive.responsiveSpacing(
-                  context, mobile: 12, tablet: 14, desktop: 16)),
+          const SizedBox(height: 10),
           Container(
-            height: Responsive.responsiveHeight(
-                context, mobile: 14, tablet: 15, desktop: 16),
+            height: 10,
             decoration: BoxDecoration(
               color: const Color(0xFF0f172a),
-              borderRadius: BorderRadius.circular(
-                  Responsive.responsiveBorderRadius(
-                      context, mobile: 6, tablet: 7, desktop: 8)),
+              borderRadius: BorderRadius.circular(5),
               boxShadow: [
                 BoxShadow(
                     color: const Color(0xFF0b1120).withOpacity(0.5),
@@ -880,9 +884,7 @@ class _MonitorScreenState extends State<MonitorScreen>
               ],
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(
-                  Responsive.responsiveBorderRadius(
-                      context, mobile: 6, tablet: 7, desktop: 8)),
+              borderRadius: BorderRadius.circular(5),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 500),
                 curve: Curves.easeOut,
@@ -891,13 +893,9 @@ class _MonitorScreenState extends State<MonitorScreen>
                 child: FractionallySizedBox(
                   widthFactor: value / 100,
                   child: Container(
-                    decoration: BoxDecoration(
-                      color: color,
-                      borderRadius: BorderRadius.circular(
-                          Responsive.responsiveBorderRadius(
-                              context, mobile: 6, tablet: 7, desktop: 8)),
-                    ),
-                  ),
+                      decoration: BoxDecoration(
+                          color: color,
+                          borderRadius: BorderRadius.circular(5))),
                 ),
               ),
             ),
@@ -911,8 +909,7 @@ class _MonitorScreenState extends State<MonitorScreen>
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(Responsive.responsiveBorderRadius(
-            context, mobile: 20, tablet: 22, desktop: 24)),
+        borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
               color: const Color(0xFF0b1120).withOpacity(0.5),
@@ -924,22 +921,17 @@ class _MonitorScreenState extends State<MonitorScreen>
               blurRadius: 8),
         ],
       ),
-      padding: EdgeInsets.all(Responsive.responsivePadding(
-          context, mobile: 20, tablet: 22, desktop: 24)),
+      padding: const EdgeInsets.all(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('SYSTEM LOG',
+          const Text('SYSTEM LOG',
               style: TextStyle(
-                color: const Color(0xFF94a3b8),
-                fontSize: Responsive.responsiveFont(
-                    context, mobile: 11, tablet: 11.5, desktop: 12),
-                fontWeight: FontWeight.w600,
-                letterSpacing: 1.5,
-              )),
-          SizedBox(
-              height: Responsive.responsiveSpacing(
-                  context, mobile: 12, tablet: 14, desktop: 16)),
+                  color: Color(0xFF94a3b8),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.5)),
+          const SizedBox(height: 10),
           Expanded(
             child: ListView(
               children: [
@@ -980,30 +972,20 @@ class _MonitorScreenState extends State<MonitorScreen>
     }
 
     return Padding(
-      padding: EdgeInsets.only(
-          bottom: Responsive.responsiveSpacing(
-              context, mobile: 10, tablet: 11, desktop: 12)),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('[$time]',
-              style: TextStyle(
-                color: const Color(0xFF475569),
-                fontSize: Responsive.responsiveFont(
-                    context, mobile: 10, tablet: 10.5, desktop: 11),
-                fontFamily: 'monospace',
-              )),
-          SizedBox(
-              width: Responsive.responsiveSpacing(
-                  context, mobile: 10, tablet: 11, desktop: 12)),
+              style: const TextStyle(
+                  color: Color(0xFF475569),
+                  fontSize: 10,
+                  fontFamily: 'monospace')),
+          const SizedBox(width: 8),
           Expanded(
             child: Text(message,
                 style: TextStyle(
-                  color: color,
-                  fontSize: Responsive.responsiveFont(
-                      context, mobile: 10, tablet: 10.5, desktop: 11),
-                  fontFamily: 'monospace',
-                )),
+                    color: color, fontSize: 10, fontFamily: 'monospace')),
           ),
         ],
       ),
