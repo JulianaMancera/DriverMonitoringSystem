@@ -49,8 +49,8 @@ class _MonitorScreenState extends State<MonitorScreen>
     _faceBoxAnimation = Tween<Offset>(
       begin: Offset.zero,
       end: const Offset(10, 5),
-    ).animate(CurvedAnimation(
-        parent: _faceBoxController, curve: Curves.easeInOut));
+    ).animate(
+        CurvedAnimation(parent: _faceBoxController, curve: Curves.easeInOut));
 
     _warningController = AnimationController(
       duration: const Duration(milliseconds: 1000),
@@ -141,6 +141,22 @@ class _MonitorScreenState extends State<MonitorScreen>
     super.dispose();
   }
 
+  // ── Get correct preview dimensions based on orientation ──────────────────────
+  // Android cameras always report landscape previewSize (width > height).
+  // In portrait we swap them so FittedBox.cover fills portrait containers properly.
+  Size _getPreviewSize(bool isLandscape) {
+    if (!_cameraInitialized) {
+      return isLandscape ? const Size(1920, 1080) : const Size(1080, 1920);
+    }
+    final ps = _cameraController!.value.previewSize!;
+    // ps.width >= ps.height always on Android (landscape native)
+    if (isLandscape) {
+      return Size(ps.width, ps.height); // keep landscape
+    } else {
+      return Size(ps.height, ps.width); // swap → portrait
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDesktop = Responsive.isDesktop(context);
@@ -161,15 +177,18 @@ class _MonitorScreenState extends State<MonitorScreen>
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // PORTRAIT: fixed-height square-ish box, cover fill (no stretch), metrics below
+  // PORTRAIT
   // ─────────────────────────────────────────────────────────────────────────────
   Widget _buildPortraitLayout() {
     return SingleChildScrollView(
       child: Column(
         children: [
-          _buildPortraitCameraBox(),
+          _buildCameraContainer(
+            height: 280,
+            isLandscape: false,
+          ),
           const SizedBox(height: 12),
-          _buildEnvironmentBar(),
+          _buildEnvironmentBar(isLandscape: false),
           const SizedBox(height: 12),
           _buildMetricsSidebar(isLandscape: false),
           const SizedBox(height: 96),
@@ -178,10 +197,119 @@ class _MonitorScreenState extends State<MonitorScreen>
     );
   }
 
-  /// Fixed-height box. Camera fills it with BoxFit.cover — no stretching.
-  Widget _buildPortraitCameraBox() {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // LANDSCAPE
+  // ─────────────────────────────────────────────────────────────────────────────
+  Widget _buildLandscapeLayout() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          flex: 55,
+          child: Column(
+            children: [
+              Expanded(
+                child: _buildCameraContainer(
+                  isLandscape: true,
+                  // no fixed height — fills Expanded
+                ),
+              ),
+              const SizedBox(height: 8),
+              _buildEnvironmentBar(isLandscape: true),
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          flex: 45,
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                _buildMetricsSidebar(isLandscape: true),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // DESKTOP
+  // ─────────────────────────────────────────────────────────────────────────────
+  Widget _buildDesktopLayout() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          flex: 8,
+          child: Column(
+            children: [
+              Expanded(
+                child: _buildCameraContainer(isLandscape: true),
+              ),
+              SizedBox(
+                  height: Responsive.responsiveSpacing(
+                      context, mobile: 16, tablet: 20, desktop: 24)),
+              _buildEnvironmentBar(isLandscape: false),
+            ],
+          ),
+        ),
+        SizedBox(
+            width: Responsive.responsiveSpacing(
+                context, mobile: 16, tablet: 24, desktop: 32)),
+        Expanded(
+            flex: 4,
+            child: _buildMetricsSidebar(isLandscape: false)),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CAMERA CONTAINER — wraps camera with correct fill behavior
+  // ─────────────────────────────────────────────────────────────────────────────
+  Widget _buildCameraContainer({
+    double? height,
+    required bool isLandscape,
+  }) {
+    final previewSize = _getPreviewSize(isLandscape);
+
+    Widget cameraWidget = ClipRect(
+      child: FittedBox(
+        fit: BoxFit.cover,
+        child: SizedBox(
+          // Give FittedBox the CORRECT oriented dimensions
+          // so it scales/crops properly to fill the container
+          width: previewSize.width,
+          height: previewSize.height,
+          child: Transform(
+            alignment: Alignment.center,
+            transform: Matrix4.rotationY(3.14159), // mirror front cam
+            child: _cameraInitialized
+                ? CameraPreview(_cameraController!)
+                : _buildCameraFallback(),
+          ),
+        ),
+      ),
+    );
+
+    Widget inner = ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          cameraWidget,
+          _buildGradientOverlay(),
+          if (isRecording) _buildRecBadge(),
+          _buildFaceTrackingBox(isLandscape: isLandscape),
+          if (warning != null) _buildWarningOverlay(),
+        ],
+      ),
+    );
+
     return Container(
-      height: 280,
+      height: height, // null = fills Expanded parent
       width: double.infinity,
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
@@ -196,194 +324,11 @@ class _MonitorScreenState extends State<MonitorScreen>
         ],
       ),
       padding: const EdgeInsets.all(6),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // Cover fill — camera fills the box without stretching
-            _buildCoverCamera(),
-            _buildGradientOverlay(),
-            if (isRecording) _buildRecBadge(),
-            _buildFaceTrackingBox(),
-            if (warning != null) _buildWarningOverlay(),
-          ],
-        ),
-      ),
+      child: inner,
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // LANDSCAPE: camera uses its NATIVE landscape ratio, controls on the right
-  // ─────────────────────────────────────────────────────────────────────────────
-  Widget _buildLandscapeLayout() {
-    // Native landscape ratio from camera (e.g. 16/9 = 1.77)
-    // Don't invert — in landscape we WANT the wide view
-    final double cameraRatio = _cameraInitialized
-        ? _cameraController!.value.aspectRatio
-        : 16 / 9;
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Left: landscape camera — fills height, ratio-correct width
-        Expanded(
-          flex: 6,
-          child: Column(
-            children: [
-              Expanded(
-                child: _buildLandscapeCameraBox(cameraRatio),
-              ),
-              const SizedBox(height: 8),
-              _buildEnvironmentBar(),
-            ],
-          ),
-        ),
-        const SizedBox(width: 12),
-        // Right: scrollable metrics
-        Expanded(
-          flex: 4,
-          child: SingleChildScrollView(
-            child: Column(
-              children: [
-                _buildMetricsSidebar(isLandscape: true),
-                const SizedBox(height: 8),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// Landscape camera — AspectRatio with native landscape ratio, no stretching
-  Widget _buildLandscapeCameraBox(double cameraRatio) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: const [
-          BoxShadow(
-              color: Color(0xFF0b1120), offset: Offset(8, 8), blurRadius: 16),
-          BoxShadow(
-              color: Color(0xFF1e293b),
-              offset: Offset(-8, -8),
-              blurRadius: 16),
-        ],
-      ),
-      padding: const EdgeInsets.all(6),
-      // AspectRatio with the LANDSCAPE ratio — fills width naturally in landscape
-      child: AspectRatio(
-        aspectRatio: cameraRatio,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              _buildCoverCamera(),
-              _buildGradientOverlay(),
-              if (isRecording) _buildRecBadge(),
-              _buildFaceTrackingBox(),
-              if (warning != null) _buildWarningOverlay(),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // DESKTOP
-  // ─────────────────────────────────────────────────────────────────────────────
-  Widget _buildDesktopLayout() {
-    final double rawRatio = _cameraInitialized
-        ? _cameraController!.value.aspectRatio
-        : 16 / 9;
-    final double aspectRatio = rawRatio > 1 ? 1 / rawRatio : rawRatio;
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          flex: 8,
-          child: Column(
-            children: [
-              Expanded(
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0f172a),
-                    borderRadius: BorderRadius.circular(
-                        Responsive.responsiveBorderRadius(
-                            context,
-                            mobile: 20,
-                            tablet: 22,
-                            desktop: 24)),
-                    boxShadow: const [
-                      BoxShadow(
-                          color: Color(0xFF0b1120),
-                          offset: Offset(8, 8),
-                          blurRadius: 16),
-                      BoxShadow(
-                          color: Color(0xFF1e293b),
-                          offset: Offset(-8, -8),
-                          blurRadius: 16),
-                    ],
-                  ),
-                  padding: const EdgeInsets.all(8),
-                  child: AspectRatio(
-                    aspectRatio: aspectRatio,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          _buildCoverCamera(),
-                          _buildGradientOverlay(),
-                          if (isRecording) _buildRecBadge(),
-                          _buildFaceTrackingBox(),
-                          if (warning != null) _buildWarningOverlay(),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              SizedBox(
-                  height: Responsive.responsiveSpacing(
-                      context, mobile: 16, tablet: 20, desktop: 24)),
-              _buildEnvironmentBar(),
-            ],
-          ),
-        ),
-        SizedBox(
-            width: Responsive.responsiveSpacing(
-                context, mobile: 16, tablet: 24, desktop: 32)),
-        Expanded(flex: 4, child: _buildMetricsSidebar(isLandscape: false)),
-      ],
-    );
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // CAMERA PREVIEW — BoxFit.cover so it fills ANY container shape without stretch
-  // ─────────────────────────────────────────────────────────────────────────────
-  Widget _buildCoverCamera() {
-    if (!_cameraInitialized && _cameraError == null) {
-      return Container(
-        color: Colors.black,
-        child: const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(color: Color(0xFF22d3ee)),
-              SizedBox(height: 12),
-              Text('Initializing camera…',
-                  style: TextStyle(color: Color(0xFF64748b), fontSize: 13)),
-            ],
-          ),
-        ),
-      );
-    }
-
+  Widget _buildCameraFallback() {
     if (_cameraError != null) {
       return Container(
         color: Colors.black,
@@ -409,31 +354,24 @@ class _MonitorScreenState extends State<MonitorScreen>
         ),
       );
     }
-
-    final double rawRatio = _cameraController!.value.aspectRatio;
-
-    // FittedBox with cover:
-    // We give CameraPreview its native size, then FittedBox.cover
-    // scales it up to fill the container — no distortion, just cropping edges.
-    return ClipRect(
-      child: FittedBox(
-        fit: BoxFit.cover,
-        child: SizedBox(
-          // Native camera dimensions (use landscape values always)
-          width: rawRatio * 1000,
-          height: 1000,
-          child: Transform(
-            alignment: Alignment.center,
-            transform: Matrix4.rotationY(3.14159), // mirror front cam
-            child: CameraPreview(_cameraController!),
-          ),
+    return Container(
+      color: Colors.black,
+      child: const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(color: Color(0xFF22d3ee)),
+            SizedBox(height: 12),
+            Text('Initializing camera…',
+                style: TextStyle(color: Color(0xFF64748b), fontSize: 13)),
+          ],
         ),
       ),
     );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // SHARED WIDGETS
+  // SHARED UI WIDGETS
   // ─────────────────────────────────────────────────────────────────────────────
 
   Widget _buildGradientOverlay() {
@@ -485,13 +423,11 @@ class _MonitorScreenState extends State<MonitorScreen>
     );
   }
 
-  Widget _buildFaceTrackingBox() {
-    final isLandscape =
-        MediaQuery.of(context).orientation == Orientation.landscape;
-    final boxW = isLandscape ? 110.0 : 110.0;
-    final boxH = isLandscape ? 140.0 : 150.0;
+  Widget _buildFaceTrackingBox({required bool isLandscape}) {
+    final boxW = isLandscape ? 120.0 : 110.0;
+    final boxH = isLandscape ? 150.0 : 150.0;
     final startTop = isLandscape ? 15.0 : 25.0;
-    final startLeft = isLandscape ? 50.0 : 55.0;
+    final startLeft = isLandscape ? 60.0 : 55.0;
 
     return AnimatedBuilder(
       animation: _faceBoxAnimation,
@@ -609,11 +545,10 @@ class _MonitorScreenState extends State<MonitorScreen>
                       Text(
                         warning!,
                         style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.red.shade500,
-                          letterSpacing: 3,
-                        ),
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red.shade500,
+                            letterSpacing: 3),
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 6),
@@ -631,13 +566,10 @@ class _MonitorScreenState extends State<MonitorScreen>
     );
   }
 
-  // ── Environment Bar ──────────────────────────────────────────────────────────
-  Widget _buildEnvironmentBar() {
-    final isLandscape =
-        MediaQuery.of(context).orientation == Orientation.landscape;
-
+  // ── Environment Bar — equal width buttons ────────────────────────────────────
+  Widget _buildEnvironmentBar({required bool isLandscape}) {
     return Container(
-      height: isLandscape ? 56 : 72,
+      height: isLandscape ? 52 : 68,
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.circular(20),
@@ -651,136 +583,133 @@ class _MonitorScreenState extends State<MonitorScreen>
         ],
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _buildStatusItem(
-            active: clearGlasses,
-            icon: Icons.visibility,
-            label: 'Clear Glasses',
-            onToggle: () => setState(() => clearGlasses = !clearGlasses),
+          // ── Clear Glasses — Expanded so it takes exactly half ──
+          Expanded(
+            child: InkWell(
+              onTap: () => setState(() => clearGlasses = !clearGlasses),
+              borderRadius: const BorderRadius.horizontal(
+                  left: Radius.circular(20)),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: isLandscape ? 32 : 36,
+                    height: isLandscape ? 32 : 36,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0f172a),
+                      borderRadius: BorderRadius.circular(10),
+                      boxShadow: clearGlasses
+                          ? [
+                              BoxShadow(
+                                  color:
+                                      const Color(0xFF0b1120).withOpacity(0.8),
+                                  offset: const Offset(3, 3),
+                                  blurRadius: 6),
+                              BoxShadow(
+                                  color:
+                                      const Color(0xFF1e293b).withOpacity(0.8),
+                                  offset: const Offset(-3, -3),
+                                  blurRadius: 6),
+                            ]
+                          : const [
+                              BoxShadow(
+                                  color: Color(0xFF0b1120),
+                                  offset: Offset(4, 4),
+                                  blurRadius: 8),
+                              BoxShadow(
+                                  color: Color(0xFF1e293b),
+                                  offset: Offset(-4, -4),
+                                  blurRadius: 8),
+                            ],
+                    ),
+                    child: Icon(Icons.visibility,
+                        size: isLandscape ? 16 : 18,
+                        color: clearGlasses
+                            ? const Color(0xFF22d3ee)
+                            : const Color(0xFF64748b)),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Clear Glasses',
+                    style: TextStyle(
+                      fontSize: isLandscape ? 12 : 13,
+                      fontWeight: FontWeight.w500,
+                      color: clearGlasses
+                          ? const Color(0xFF22d3ee)
+                          : const Color(0xFF64748b),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-          Container(width: 1, height: 36, color: const Color(0xFF1e293b)),
-          _buildRecordButton(),
+
+          // Divider
+          Container(
+              width: 1,
+              height: isLandscape ? 28 : 36,
+              color: const Color(0xFF1e293b)),
+
+          // ── Record — Expanded so it takes exactly half ──
+          Expanded(
+            child: InkWell(
+              onTap: _toggleRecording,
+              borderRadius: const BorderRadius.horizontal(
+                  right: Radius.circular(20)),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    width: isLandscape ? 32 : 36,
+                    height: isLandscape ? 32 : 36,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0f172a),
+                      borderRadius: BorderRadius.circular(10),
+                      boxShadow: isRecording
+                          ? [
+                              BoxShadow(
+                                  color: Colors.red.withOpacity(0.5),
+                                  blurRadius: 12,
+                                  spreadRadius: 2),
+                            ]
+                          : const [
+                              BoxShadow(
+                                  color: Color(0xFF0b1120),
+                                  offset: Offset(4, 4),
+                                  blurRadius: 8),
+                              BoxShadow(
+                                  color: Color(0xFF1e293b),
+                                  offset: Offset(-4, -4),
+                                  blurRadius: 8),
+                            ],
+                    ),
+                    child: Icon(
+                      isRecording
+                          ? Icons.stop_circle
+                          : Icons.fiber_manual_record,
+                      size: isLandscape ? 16 : 18,
+                      color:
+                          isRecording ? Colors.red : const Color(0xFF64748b),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    isRecording ? 'Stop Rec' : 'Record',
+                    style: TextStyle(
+                      fontSize: isLandscape ? 12 : 13,
+                      fontWeight: FontWeight.w500,
+                      color: isRecording
+                          ? Colors.red
+                          : const Color(0xFF64748b),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildRecordButton() {
-    return InkWell(
-      onTap: _toggleRecording,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: const Color(0xFF0f172a),
-                borderRadius: BorderRadius.circular(10),
-                boxShadow: isRecording
-                    ? [
-                        BoxShadow(
-                            color: Colors.red.withOpacity(0.5),
-                            blurRadius: 12,
-                            spreadRadius: 2),
-                      ]
-                    : const [
-                        BoxShadow(
-                            color: Color(0xFF0b1120),
-                            offset: Offset(4, 4),
-                            blurRadius: 8),
-                        BoxShadow(
-                            color: Color(0xFF1e293b),
-                            offset: Offset(-4, -4),
-                            blurRadius: 8),
-                      ],
-              ),
-              child: Icon(
-                isRecording ? Icons.stop_circle : Icons.fiber_manual_record,
-                size: 18,
-                color: isRecording ? Colors.red : const Color(0xFF64748b),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              isRecording ? 'Stop Rec' : 'Record',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: isRecording ? Colors.red : const Color(0xFF64748b),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatusItem({
-    required bool active,
-    required IconData icon,
-    required String label,
-    required VoidCallback onToggle,
-  }) {
-    return InkWell(
-      onTap: onToggle,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: const Color(0xFF0f172a),
-                borderRadius: BorderRadius.circular(10),
-                boxShadow: active
-                    ? [
-                        BoxShadow(
-                            color: const Color(0xFF0b1120).withOpacity(0.8),
-                            offset: const Offset(3, 3),
-                            blurRadius: 6),
-                        BoxShadow(
-                            color: const Color(0xFF1e293b).withOpacity(0.8),
-                            offset: const Offset(-3, -3),
-                            blurRadius: 6),
-                      ]
-                    : const [
-                        BoxShadow(
-                            color: Color(0xFF0b1120),
-                            offset: Offset(4, 4),
-                            blurRadius: 8),
-                        BoxShadow(
-                            color: Color(0xFF1e293b),
-                            offset: Offset(-4, -4),
-                            blurRadius: 8),
-                      ],
-              ),
-              child: Icon(icon,
-                  size: 18,
-                  color: active
-                      ? const Color(0xFF22d3ee)
-                      : const Color(0xFF64748b)),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color:
-                    active ? const Color(0xFF22d3ee) : const Color(0xFF64748b),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -788,7 +717,7 @@ class _MonitorScreenState extends State<MonitorScreen>
   // ── Metrics Sidebar ──────────────────────────────────────────────────────────
   Widget _buildMetricsSidebar({required bool isLandscape}) {
     const spacing = SizedBox(height: 10);
-    final logHeight = isLandscape ? 180.0 : 220.0;
+    final logHeight = isLandscape ? 160.0 : 200.0;
 
     return Column(
       children: [
@@ -935,7 +864,8 @@ class _MonitorScreenState extends State<MonitorScreen>
           Expanded(
             child: ListView(
               children: [
-                _buildLogEntry('10:42:01', 'System Initialized', LogType.info),
+                _buildLogEntry(
+                    '10:42:01', 'System Initialized', LogType.info),
                 _buildLogEntry(
                     '10:42:05', 'Face Tracking Active', LogType.success),
                 _buildLogEntry(
@@ -985,7 +915,9 @@ class _MonitorScreenState extends State<MonitorScreen>
           Expanded(
             child: Text(message,
                 style: TextStyle(
-                    color: color, fontSize: 10, fontFamily: 'monospace')),
+                    color: color,
+                    fontSize: 10,
+                    fontFamily: 'monospace')),
           ),
         ],
       ),
