@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'widgets/sidebar.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/monitor_screen.dart';
@@ -7,8 +8,16 @@ import 'utils/responsive.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Lock app to portrait only — prevents landscape overlap
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
+
   runApp(const MyApp());
 }
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -35,7 +44,7 @@ class MainScreen extends StatefulWidget {
 }
 
 class _MainScreenState extends State<MainScreen> {
-  String activeTab = 'home'; // State management
+  String activeTab = 'home';
 
   void setActiveTab(String tab) {
     setState(() {
@@ -43,7 +52,6 @@ class _MainScreenState extends State<MainScreen> {
     });
   }
 
-  // Helper method to get header title
   String _getHeaderTitle() {
     switch (activeTab) {
       case 'home':
@@ -80,7 +88,6 @@ class _MainScreenState extends State<MainScreen> {
 
     return Scaffold(
       body: Container(
-        // Gradient background
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
@@ -94,21 +101,15 @@ class _MainScreenState extends State<MainScreen> {
         ),
         child: Row(
           children: [
-            // Sidebar (hidden on mobile)
             if (!isMobile)
               Sidebar(
                 activeTab: activeTab,
                 onTabChanged: setActiveTab,
               ),
-            
-            // Main content
             Expanded(
               child: Column(
                 children: [
-                  // Header
                   _buildHeader(context),
-                  
-                  // Content Area
                   Expanded(
                     child: _buildContent(),
                   ),
@@ -118,8 +119,6 @@ class _MainScreenState extends State<MainScreen> {
           ],
         ),
       ),
-      
-      // Bottom navigation for mobile
       bottomNavigationBar: isMobile
           ? Sidebar(
               activeTab: activeTab,
@@ -154,7 +153,6 @@ class _MainScreenState extends State<MainScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // Title section
           Expanded(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -208,8 +206,6 @@ class _MainScreenState extends State<MainScreen> {
               ],
             ),
           ),
-          
-          // Status indicators
           Row(
             children: [
               if (!isMobile)
@@ -268,8 +264,6 @@ class _MainScreenState extends State<MainScreen> {
                     desktop: 16,
                   ),
                 ),
-              
-              // Status indicator circle
               Container(
                 width: Responsive.responsiveValue(
                   context,
@@ -286,13 +280,13 @@ class _MainScreenState extends State<MainScreen> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF0f172a),
                   shape: BoxShape.circle,
-                  boxShadow: [
-                    const BoxShadow(
+                  boxShadow: const [
+                    BoxShadow(
                       color: Color(0xFF0b1120),
                       offset: Offset(3, 3),
                       blurRadius: 6,
                     ),
-                    const BoxShadow(
+                    BoxShadow(
                       color: Color(0xFF1e293b),
                       offset: Offset(-3, -3),
                       blurRadius: 6,

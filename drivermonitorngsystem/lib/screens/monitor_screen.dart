@@ -20,8 +20,8 @@ class _MonitorScreenState extends State<MonitorScreen>
   double distraction = 5;
 
   // Environment state
-  bool clearGlasses = false;   // renamed from sunglasses
-  bool isRecording = false;    // replaces isDay
+  bool clearGlasses = false;
+  bool isRecording = false;
 
   // Camera state
   CameraController? _cameraController;
@@ -49,7 +49,6 @@ class _MonitorScreenState extends State<MonitorScreen>
 
     _initCamera();
 
-    // Face box animation
     _faceBoxController = AnimationController(
       duration: const Duration(seconds: 4),
       vsync: this,
@@ -63,7 +62,6 @@ class _MonitorScreenState extends State<MonitorScreen>
       curve: Curves.easeInOut,
     ));
 
-    // Warning pulse animation
     _warningController = AnimationController(
       duration: const Duration(milliseconds: 1000),
       vsync: this,
@@ -85,7 +83,6 @@ class _MonitorScreenState extends State<MonitorScreen>
         return;
       }
 
-      // Prefer front camera for driver monitoring
       final front = _cameras.firstWhere(
         (c) => c.lensDirection == CameraLensDirection.front,
         orElse: () => _cameras.first,
@@ -95,6 +92,7 @@ class _MonitorScreenState extends State<MonitorScreen>
         front,
         ResolutionPreset.high,
         enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.jpeg,
       );
 
       await _cameraController!.initialize();
@@ -169,7 +167,8 @@ class _MonitorScreenState extends State<MonitorScreen>
 
     return Container(
       padding: EdgeInsets.all(
-        Responsive.responsivePadding(context, mobile: 16, tablet: 20, desktop: 16),
+        Responsive.responsivePadding(
+            context, mobile: 16, tablet: 20, desktop: 16),
       ),
       child: isDesktop ? _buildDesktopLayout() : _buildMobileLayout(),
     );
@@ -222,8 +221,14 @@ class _MonitorScreenState extends State<MonitorScreen>
     );
   }
 
-  // ── Camera Feed ──────────────────────────────────────────────────────────────
+  //  Camera Feed 
   Widget _buildCameraFeed() {
+   final double rawRatio = _cameraInitialized
+    ? _cameraController!.value.aspectRatio
+    : 3 / 4;
+
+   final double aspectRatio = rawRatio > 1 ? 1 / rawRatio : rawRatio;
+
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
@@ -235,14 +240,18 @@ class _MonitorScreenState extends State<MonitorScreen>
           BoxShadow(
               color: Color(0xFF0b1120), offset: Offset(8, 8), blurRadius: 16),
           BoxShadow(
-              color: Color(0xFF1e293b), offset: Offset(-8, -8), blurRadius: 16),
+              color: Color(0xFF1e293b),
+              offset: Offset(-8, -8),
+              blurRadius: 16),
         ],
       ),
       padding: EdgeInsets.all(
-        Responsive.responsivePadding(context, mobile: 6, tablet: 7, desktop: 8),
+        Responsive.responsivePadding(
+            context, mobile: 6, tablet: 7, desktop: 8),
       ),
+      // AspectRatio now uses the real camera ratio — no more stretching
       child: AspectRatio(
-        aspectRatio: 16 / 9,
+        aspectRatio: aspectRatio,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(
             Responsive.responsiveBorderRadius(
@@ -251,7 +260,6 @@ class _MonitorScreenState extends State<MonitorScreen>
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // ── Live camera or fallback ──
               _buildCameraPreview(),
 
               // Gradient overlay
@@ -270,7 +278,7 @@ class _MonitorScreenState extends State<MonitorScreen>
                 ),
               ),
 
-              // Recording indicator badge (top-right)
+              // REC badge
               if (isRecording)
                 Positioned(
                   top: 12,
@@ -319,7 +327,6 @@ class _MonitorScreenState extends State<MonitorScreen>
   }
 
   Widget _buildCameraPreview() {
-    // Camera initializing
     if (!_cameraInitialized && _cameraError == null) {
       return Container(
         color: Colors.black,
@@ -329,15 +336,16 @@ class _MonitorScreenState extends State<MonitorScreen>
             children: [
               CircularProgressIndicator(color: Color(0xFF22d3ee)),
               SizedBox(height: 12),
-              Text('Initializing camera…',
-                  style: TextStyle(color: Color(0xFF64748b), fontSize: 13)),
+              Text(
+                'Initializing camera…',
+                style: TextStyle(color: Color(0xFF64748b), fontSize: 13),
+              ),
             ],
           ),
         ),
       );
     }
 
-    // Camera error
     if (_cameraError != null) {
       return Container(
         color: Colors.black,
@@ -345,12 +353,15 @@ class _MonitorScreenState extends State<MonitorScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.videocam_off, color: Color(0xFF64748b), size: 48),
+              const Icon(Icons.videocam_off,
+                  color: Color(0xFF64748b), size: 48),
               const SizedBox(height: 12),
-              Text(_cameraError!,
-                  style: const TextStyle(
-                      color: Color(0xFF64748b), fontSize: 13),
-                  textAlign: TextAlign.center),
+              Text(
+                _cameraError!,
+                style:
+                    const TextStyle(color: Color(0xFF64748b), fontSize: 13),
+                textAlign: TextAlign.center,
+              ),
               const SizedBox(height: 12),
               TextButton(
                 onPressed: _initCamera,
@@ -363,30 +374,30 @@ class _MonitorScreenState extends State<MonitorScreen>
       );
     }
 
-    // Live preview — mirror front camera
+    // Mirror the front camera horizontally
     return Transform(
       alignment: Alignment.center,
-      transform: Matrix4.rotationY(3.14159), // mirror effect
+      transform: Matrix4.rotationY(3.14159),
       child: CameraPreview(_cameraController!),
     );
   }
 
-  // ── Face Tracking Box (unchanged logic) ─────────────────────────────────────
+  // ── Face Tracking Box ────────────────────────────────────────────────────────
   Widget _buildFaceTrackingBox() {
     final boxWidth = Responsive.responsiveValue(
-        context, mobile: 140.0, tablet: 170.0, desktop: 200.0);
+        context, mobile: 120.0, tablet: 150.0, desktop: 200.0);
     final boxHeight = Responsive.responsiveValue(
-        context, mobile: 200.0, tablet: 240.0, desktop: 280.0);
+        context, mobile: 160.0, tablet: 200.0, desktop: 280.0);
 
     return AnimatedBuilder(
       animation: _faceBoxAnimation,
       builder: (context, child) {
         return Positioned(
           top: Responsive.responsiveValue(
-                  context, mobile: 40.0, tablet: 50.0, desktop: 60.0) +
+                  context, mobile: 30.0, tablet: 40.0, desktop: 60.0) +
               _faceBoxAnimation.value.dy,
           left: Responsive.responsiveValue(
-                  context, mobile: 80.0, tablet: 100.0, desktop: 120.0) +
+                  context, mobile: 60.0, tablet: 80.0, desktop: 120.0) +
               _faceBoxAnimation.value.dx,
           child: Container(
             width: boxWidth,
@@ -499,8 +510,8 @@ class _MonitorScreenState extends State<MonitorScreen>
                       context, mobile: 20, tablet: 22, desktop: 24)),
                   decoration: BoxDecoration(
                     color: const Color(0xFF0f172a).withOpacity(0.9),
-                    border:
-                        Border.all(color: Colors.red.withOpacity(0.5), width: 1),
+                    border: Border.all(
+                        color: Colors.red.withOpacity(0.5), width: 1),
                     borderRadius: BorderRadius.circular(
                         Responsive.responsiveBorderRadius(
                             context, mobile: 14, tablet: 15, desktop: 16)),
@@ -561,36 +572,32 @@ class _MonitorScreenState extends State<MonitorScreen>
           context, mobile: 80, tablet: 88, desktop: 96),
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(
-            Responsive.responsiveBorderRadius(
-                context, mobile: 20, tablet: 22, desktop: 24)),
+        borderRadius: BorderRadius.circular(Responsive.responsiveBorderRadius(
+            context, mobile: 20, tablet: 22, desktop: 24)),
         boxShadow: const [
           BoxShadow(
               color: Color(0xFF0b1120), offset: Offset(6, 6), blurRadius: 12),
           BoxShadow(
-              color: Color(0xFF1e293b), offset: Offset(-6, -6), blurRadius: 12),
+              color: Color(0xFF1e293b),
+              offset: Offset(-6, -6),
+              blurRadius: 12),
         ],
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          // ── Clear Glasses toggle ──
           _buildStatusItem(
             active: clearGlasses,
-            icon: Icons.visibility,          // glasses icon
+            icon: Icons.visibility,
             label: 'Clear Glasses',
             onToggle: () => setState(() => clearGlasses = !clearGlasses),
           ),
-
-          // Divider
           Container(
             width: 1,
             height: Responsive.responsiveHeight(
                 context, mobile: 40, tablet: 44, desktop: 48),
             color: const Color(0xFF1e293b),
           ),
-
-          // ── Record button ──
           _buildRecordButton(),
         ],
       ),
@@ -607,7 +614,6 @@ class _MonitorScreenState extends State<MonitorScreen>
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Animated record icon
             AnimatedContainer(
               duration: const Duration(milliseconds: 300),
               width: Responsive.responsiveValue(
@@ -713,9 +719,8 @@ class _MonitorScreenState extends State<MonitorScreen>
                 icon,
                 size: Responsive.responsiveIconSize(
                     context, mobile: 20, tablet: 22, desktop: 24),
-                color: active
-                    ? const Color(0xFF22d3ee)
-                    : const Color(0xFF64748b),
+                color:
+                    active ? const Color(0xFF22d3ee) : const Color(0xFF64748b),
               ),
             ),
             SizedBox(
@@ -741,7 +746,7 @@ class _MonitorScreenState extends State<MonitorScreen>
     );
   }
 
-  // ── Metrics Sidebar (unchanged) ──────────────────────────────────────────────
+  // ── Metrics Sidebar ──────────────────────────────────────────────────────────
   Widget _buildMetricsSidebar() {
     final isDesktop = Responsive.isDesktop(context);
     final spacing = SizedBox(
@@ -796,9 +801,8 @@ class _MonitorScreenState extends State<MonitorScreen>
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(
-            Responsive.responsiveBorderRadius(
-                context, mobile: 20, tablet: 22, desktop: 24)),
+        borderRadius: BorderRadius.circular(Responsive.responsiveBorderRadius(
+            context, mobile: 20, tablet: 22, desktop: 24)),
         boxShadow: const [
           BoxShadow(
               color: Color(0xFF0b1120), offset: Offset(6, 6), blurRadius: 12),
@@ -907,9 +911,8 @@ class _MonitorScreenState extends State<MonitorScreen>
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(
-            Responsive.responsiveBorderRadius(
-                context, mobile: 20, tablet: 22, desktop: 24)),
+        borderRadius: BorderRadius.circular(Responsive.responsiveBorderRadius(
+            context, mobile: 20, tablet: 22, desktop: 24)),
         boxShadow: [
           BoxShadow(
               color: const Color(0xFF0b1120).withOpacity(0.5),
