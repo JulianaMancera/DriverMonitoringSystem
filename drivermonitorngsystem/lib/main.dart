@@ -25,7 +25,6 @@ void main() async {
   await DatabaseHelper.instance.database;
 
   runApp(
-    // Riverpod wrapper — required for state management
     const ProviderScope(
       child: BantayDriveApp(),
     ),
@@ -43,7 +42,7 @@ class BantayDriveApp extends StatelessWidget {
       theme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: const Color(0xFF080E1A),
-        fontFamily: 'SF Pro Display', // falls back to system default
+        fontFamily: 'SF Pro Display',
         colorScheme: const ColorScheme.dark(
           primary: Color(0xFF00D4FF),
           secondary: Color(0xFF00D4FF),
@@ -60,7 +59,6 @@ class BantayDriveApp extends StatelessWidget {
 // MAIN SHELL — Bottom Navigation
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Riverpod provider for current nav index
 final navIndexProvider = StateProvider<int>((ref) => 0);
 
 class MainShell extends ConsumerWidget {
@@ -80,9 +78,12 @@ class MainShell extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: const Color(0xFF080E1A),
-      body: IndexedStack(
-        index: currentIndex,
-        children: _screens,
+      // ✅ FIX: SafeArea here keeps all screens below the status bar
+      body: SafeArea(
+        child: IndexedStack(
+          index: currentIndex,
+          children: _screens,
+        ),
       ),
       bottomNavigationBar: _BottomNav(
         currentIndex: currentIndex,
@@ -92,6 +93,10 @@ class MainShell extends ConsumerWidget {
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BOTTOM NAV
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _BottomNav extends StatelessWidget {
   final int currentIndex;
@@ -121,11 +126,11 @@ class _BottomNav extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _NavItem(icon: Icons.home_rounded, index: 0, currentIndex: currentIndex, onTap: onTap),
-              _NavItem(icon: Icons.videocam_rounded, index: 1, currentIndex: currentIndex, onTap: onTap),
+              _NavItem(icon: Icons.home_rounded,     index: 0, currentIndex: currentIndex, onTap: onTap),
+              _NavItem(icon: Icons.videocam_rounded,  index: 1, currentIndex: currentIndex, onTap: onTap),
               _NavItem(icon: Icons.bar_chart_rounded, index: 2, currentIndex: currentIndex, onTap: onTap),
-              _NavItem(icon: Icons.settings_rounded, index: 3, currentIndex: currentIndex, onTap: onTap),
-              _NavItem(icon: Icons.person_rounded, index: 4, currentIndex: currentIndex, onTap: onTap),
+              _NavItem(icon: Icons.settings_rounded,  index: 3, currentIndex: currentIndex, onTap: onTap),
+              _NavItem(icon: Icons.person_rounded,    index: 4, currentIndex: currentIndex, onTap: onTap),
             ],
           ),
         ),
@@ -170,9 +175,10 @@ class _NavItem extends StatelessWidget {
   }
 }
 
-// Profile placeholder (replace later with real profile screen)
+// Profile placeholder
 class ProfilePlaceholder extends StatelessWidget {
   const ProfilePlaceholder({super.key});
+
   @override
   Widget build(BuildContext context) => const Scaffold(
         backgroundColor: Color(0xFF080E1A),

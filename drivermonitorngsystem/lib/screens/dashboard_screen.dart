@@ -3,19 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../core/database/database_helper.dart';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// RIVERPOD PROVIDER
-// ─────────────────────────────────────────────────────────────────────────────
+import '../utils/responsive.dart';
 
 final dashboardProvider =
     FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
   return await DatabaseHelper.instance.getDashboardSummary();
 });
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DASHBOARD SCREEN
-// ─────────────────────────────────────────────────────────────────────────────
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -30,7 +23,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    // Auto-refresh every 30 seconds
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       ref.invalidate(dashboardProvider);
     });
@@ -46,33 +38,27 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Widget build(BuildContext context) {
     final dashAsync = ref.watch(dashboardProvider);
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF080E1A),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(),
-            Expanded(
-              child: dashAsync.when(
-                loading: () => const Center(
-                  child: CircularProgressIndicator(
-                    color: Color(0xFF00D4FF),
-                  ),
-                ),
-                error: (e, _) => Center(
-                  child: Text('Error loading data',
-                      style: TextStyle(color: Colors.white54)),
-                ),
-                data: (data) => _buildContent(data),
-              ),
+    // No Scaffold/SafeArea — nav shell handles that
+    return Column(
+      children: [
+        _buildHeader(),
+        Expanded(
+          child: dashAsync.when(
+            loading: () => const Center(
+              child: CircularProgressIndicator(color: Color(0xFF22d3ee)),
             ),
-          ],
+            error: (e, _) => const Center(
+              child: Text('Error loading data',
+                  style: TextStyle(color: Colors.white54)),
+            ),
+            data: (data) => _buildContent(context, data),
+          ),
         ),
-      ),
+      ],
     );
   }
 
-  // ── HEADER ────────────────────────────────────────────────────────────────
+  // ── HEADER ──
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
@@ -123,147 +109,195 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ],
             ),
           ),
-          const SizedBox(height: 12),
-          // Cyan progress bar
-          Container(
-            height: 3,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(2),
-              gradient: const LinearGradient(
-                colors: [Color(0xFF00D4FF), Color(0xFF0066FF)],
-              ),
-            ),
-          ),
+
         ],
       ),
     );
   }
 
-  // ── SCROLLABLE CONTENT ────────────────────────────────────────────────────
-  Widget _buildContent(Map<String, dynamic> data) {
-    final safetyScore = (data['safety_score'] as double? ?? 0.0);
-    final totalDriveHrs = (data['total_drive_hrs'] as double? ?? 0.0);
-    final alertsLast24h = (data['alerts_last_24h'] as int? ?? 0);
-    final safetyStreak = (data['safety_streak_days'] as int? ?? 0);
-    final avgAlertness = (data['avg_alertness_pct'] as double? ?? 0.0);
-    final snapshots =
-        (data['alertness_snapshots'] as List<Map<String, dynamic>>?) ?? [];
+  // ── MAIN SCROLLABLE CONTENT ──
+  Widget _buildContent(BuildContext context, Map<String, dynamic> data) {
+    final safetyScore   = data['safety_score']        as double? ?? 0.0;
+    final totalDriveHrs = data['total_drive_hrs']      as double? ?? 0.0;
+    final alertsLast24h = data['alerts_last_24h']      as int?    ?? 0;
+    final safetyStreak  = data['safety_streak_days']   as int?    ?? 0;
+    final avgAlertness  = data['avg_alertness_pct']    as double? ?? 0.0;
+    final snapshots = (data['alertness_snapshots'] as List<Map<String, dynamic>>?) ?? [];
 
-    // Determine score label
     String scoreLabel = 'EXCELLENT';
-    if (safetyScore < 60) scoreLabel = 'POOR';
+    if (safetyScore < 60)      scoreLabel = 'POOR';
     else if (safetyScore < 75) scoreLabel = 'FAIR';
     else if (safetyScore < 90) scoreLabel = 'GOOD';
 
+    final isMobile = Responsive.isMobile(context);
+
     return RefreshIndicator(
-      color: const Color(0xFF00D4FF),
-      backgroundColor: const Color(0xFF0D1627),
+      color: const Color(0xFF22d3ee),
+      backgroundColor: const Color(0xFF0f172a),
       onRefresh: () async => ref.invalidate(dashboardProvider),
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: EdgeInsets.symmetric(
+          horizontal: Responsive.responsivePadding(context, mobile: 16, tablet: 24, desktop: 32),
+        ),
         child: Column(
           children: [
-            const SizedBox(height: 8),
-
-            // Safety Score Gauge
-            _buildSafetyGauge(safetyScore, scoreLabel),
-
-            const SizedBox(height: 20),
-
-            // 4 Stat Cards
-            _buildStatCards(
-              totalDriveHrs: totalDriveHrs,
-              alertsLast24h: alertsLast24h,
-              safetyStreak: safetyStreak,
-              avgAlertness: avgAlertness,
+            LayoutBuilder(
+              builder: (context, constraints) {
+                if (isMobile || Responsive.isTablet(context)) {
+                  return Column(
+                    children: [
+                      _buildSafetyScoreCard(context, safetyScore, scoreLabel),
+                      SizedBox(height: Responsive.responsiveSpacing(context, mobile: 16, tablet: 20, desktop: 24)),
+                      _buildQuickStatsGrid(
+                        context,
+                        totalDriveHrs: totalDriveHrs,
+                        alertsLast24h: alertsLast24h,
+                        safetyStreak: safetyStreak,
+                        avgAlertness: avgAlertness,
+                      ),
+                    ],
+                  );
+                } else {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        flex: 4,
+                        child: _buildSafetyScoreCard(context, safetyScore, scoreLabel),
+                      ),
+                      SizedBox(width: Responsive.responsiveSpacing(context, mobile: 16, tablet: 24, desktop: 32)),
+                      Expanded(
+                        flex: 8,
+                        child: _buildQuickStatsGrid(
+                          context,
+                          totalDriveHrs: totalDriveHrs,
+                          alertsLast24h: alertsLast24h,
+                          safetyStreak: safetyStreak,
+                          avgAlertness: avgAlertness,
+                        ),
+                      ),
+                    ],
+                  );
+                }
+              },
             ),
-
-            const SizedBox(height: 20),
-
-            // Alertness History Chart
-            _buildAlertnessChart(snapshots),
-
-            const SizedBox(height: 24),
+            SizedBox(height: Responsive.responsiveSpacing(context, mobile: 16, tablet: 20, desktop: 24)),
+            _buildAlertnessChart(context, snapshots),
+            SizedBox(height: isMobile ? 96 : 32),
           ],
         ),
       ),
     );
   }
 
-  // ── SAFETY GAUGE ──────────────────────────────────────────────────────────
-  Widget _buildSafetyGauge(double score, String label) {
-    return Container(
-      padding: const EdgeInsets.all(28),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0D1627),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.06)),
+  // ── SAFETY SCORE CARD ──
+  Widget _buildSafetyScoreCard(BuildContext context, double score, String label) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF0f172a),
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: const [
+            BoxShadow(color: Color(0xFF0b1120), offset: Offset(10, 10),   blurRadius: 16),
+            BoxShadow(color: Color(0xFF1e293b), offset: Offset(-10, -10), blurRadius: 16),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Gradient top bar
+            Container(
+              height: 6,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(colors: [Color(0xFF22d3ee), Color(0xFF3b82f6)]),
+              ),
+            ),
+            // Score content — tight padding, no extra space
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'SAFETY SCORE',
+                    style: TextStyle(
+                      color: const Color(0xFF94a3b8),
+                      fontSize: Responsive.responsiveFont(context, mobile: 13, tablet: 15, desktop: 17),
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _buildCircularScoreIndicator(context, score, label),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
-      child: Column(
+    );
+  }
+
+  // ── CIRCULAR SCORE INDICATOR ──
+  Widget _buildCircularScoreIndicator(BuildContext context, double score, String label) {
+    const outerSize    = 130.0;
+    const progressSize = 120.0;
+    const innerSize    = 98.0;
+
+    return SizedBox(
+      width: outerSize,
+      height: outerSize,
+      child: Stack(
+        alignment: Alignment.center,
         children: [
-          const Text(
-            'SAFETY SCORE',
-            style: TextStyle(
-              color: Colors.white54,
-              fontSize: 13,
-              letterSpacing: 2,
-              fontWeight: FontWeight.w500,
+          Container(
+            width: outerSize, height: outerSize,
+            decoration: BoxDecoration(
+              color: Colors.transparent,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(color: const Color(0xFF0b1120).withOpacity(0.8), offset: const Offset(6, 6),   blurRadius: 12),
+                BoxShadow(color: const Color(0xFF1e293b).withOpacity(0.8), offset: const Offset(-6, -6), blurRadius: 12),
+              ],
             ),
           ),
-          const SizedBox(height: 24),
           SizedBox(
-            width: 180,
-            height: 180,
-            child: Stack(
-              alignment: Alignment.center,
+            width: progressSize, height: progressSize,
+            child: CircularProgressIndicator(
+              value: score / 100,
+              strokeWidth: 7,
+              backgroundColor: const Color(0xFF1e293b),
+              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF22d3ee)),
+              strokeCap: StrokeCap.round,
+            ),
+          ),
+          Container(
+            width: innerSize, height: innerSize,
+            decoration: const BoxDecoration(
+              color: Color(0xFF0f172a),
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(color: Color(0xFF0b1120), offset: Offset(6, 6),   blurRadius: 12),
+                BoxShadow(color: Color(0xFF1e293b), offset: Offset(-6, -6), blurRadius: 12),
+              ],
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Background circle
-                SizedBox(
-                  width: 180,
-                  height: 180,
-                  child: CircularProgressIndicator(
-                    value: 1.0,
-                    strokeWidth: 12,
-                    backgroundColor: Colors.white.withOpacity(0.06),
-                    valueColor: const AlwaysStoppedAnimation(Colors.transparent),
+                Text(
+                  score.toStringAsFixed(0),
+                  style: TextStyle(
+                    fontSize: Responsive.responsiveFont(context, mobile: 34, tablet: 38, desktop: 42),
+                    fontWeight: FontWeight.bold,
+                    color: const Color(0xFF22d3ee),
                   ),
                 ),
-                // Score arc
-                SizedBox(
-                  width: 180,
-                  height: 180,
-                  child: CircularProgressIndicator(
-                    value: score / 100,
-                    strokeWidth: 12,
-                    strokeCap: StrokeCap.round,
-                    backgroundColor: Colors.transparent,
-                    valueColor: const AlwaysStoppedAnimation(Color(0xFF00D4FF)),
-                  ),
-                ),
-                // Score text
-                Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      score.toStringAsFixed(0),
-                      style: const TextStyle(
-                        color: Color(0xFF00D4FF),
-                        fontSize: 52,
-                        fontWeight: FontWeight.w800,
-                        height: 1,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      label,
-                      style: const TextStyle(
-                        color: Colors.white54,
-                        fontSize: 13,
-                        letterSpacing: 1.5,
-                      ),
-                    ),
-                  ],
+                const SizedBox(height: 2),
+                Text(
+                  label,
+                  style: const TextStyle(fontSize: 10, color: Color(0xFF64748b), letterSpacing: 1.5),
                 ),
               ],
             ),
@@ -273,171 +307,123 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  // ── STAT CARDS ─────────────────────────────────────────────────────────────
-  Widget _buildStatCards({
+  // ── QUICK STATS GRID ──
+  Widget _buildQuickStatsGrid(
+    BuildContext context, {
     required double totalDriveHrs,
-    required int alertsLast24h,
-    required int safetyStreak,
+    required int    alertsLast24h,
+    required int    safetyStreak,
     required double avgAlertness,
   }) {
-    return Column(
+    return GridView.count(
+      crossAxisCount: 2,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: 12,
+      crossAxisSpacing: 12,
+      childAspectRatio: Responsive.responsiveValue(context, mobile: 1.05, tablet: 1.4, desktop: 2.1),
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: _StatCard(
-                icon: Icons.schedule_rounded,
-                title: 'Total Drive Time',
-                value: '${totalDriveHrs.toStringAsFixed(1)} hrs',
-                subtitle: 'Last 30 days',
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _StatCard(
-                icon: Icons.shield_outlined,
-                title: 'Alert Triggered',
-                value: '$alertsLast24h',
-                subtitle: 'Last 24 hours',
-                hasIndicator: alertsLast24h > 0,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _StatCard(
-                icon: Icons.local_fire_department_rounded,
-                title: 'Safety Streak',
-                value: '$safetyStreak days',
-                subtitle: safetyStreak > 0 ? 'No incidents' : 'Stay alert!',
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _StatCard(
-                icon: Icons.trending_up_rounded,
-                title: 'Avg Alertness',
-                value: '${avgAlertness.toStringAsFixed(0)}%',
-                subtitle: 'Last 7 days',
-              ),
-            ),
-          ],
-        ),
+        _StatCard(icon: Icons.access_time_outlined,         label: 'Total Drive Time', value: '${totalDriveHrs.toStringAsFixed(1)} hrs', subtext: 'Last 30 days',   accent: false),
+        _StatCard(icon: Icons.shield_outlined,               label: 'Alert Triggered',  value: '$alertsLast24h',                           subtext: 'Last 24 hours',  accent: true),
+        _StatCard(icon: Icons.local_fire_department_outlined,label: 'Safety Streak',    value: '$safetyStreak days',                        subtext: safetyStreak > 0 ? 'No incidents' : 'Stay alert!', accent: false),
+        _StatCard(icon: Icons.trending_up,                   label: 'Avg Alertness',    value: '${avgAlertness.toStringAsFixed(0)}%',        subtext: 'Last 7 days',   accent: false),
       ],
     );
   }
 
-  // ── ALERTNESS HISTORY CHART ───────────────────────────────────────────────
-  Widget _buildAlertnessChart(List<Map<String, dynamic>> snapshots) {
-    // Build chart spots from snapshots
-    List<FlSpot> spots = [];
+  // ── ALERTNESS HISTORY CHART ──
+  Widget _buildAlertnessChart(BuildContext context, List<Map<String, dynamic>> snapshots) {
+    late final List<FlSpot>  spots;
+    late final List<String>  timeLabels;
+
     if (snapshots.isEmpty) {
-      // Placeholder data when no sessions yet
-      spots = [
-        const FlSpot(0, 85),
-        const FlSpot(1, 90),
-        const FlSpot(2, 88),
-        const FlSpot(3, 92),
-        const FlSpot(4, 85),
-        const FlSpot(5, 80),
-        const FlSpot(6, 83),
-      ];
+      spots      = const [FlSpot(0,95),FlSpot(1,92),FlSpot(2,88),FlSpot(3,94),FlSpot(4,85),FlSpot(5,78),FlSpot(6,82)];
+      timeLabels = const ['10:00','10:10','10:20','10:30','10:40','10:50','11:00'];
     } else {
+      spots = []; timeLabels = [];
       for (int i = 0; i < snapshots.length; i++) {
-        spots.add(FlSpot(
-          i.toDouble(),
-          (snapshots[i]['alertness_pct'] as double? ?? 0.0),
-        ));
+        spots.add(FlSpot(i.toDouble(), snapshots[i]['alertness_pct'] as double? ?? 0.0));
+        timeLabels.add(snapshots[i]['time_label'] as String? ?? '$i');
       }
     }
 
     return Container(
-      padding: const EdgeInsets.all(20),
+      height: Responsive.responsiveHeight(context, mobile: 280, tablet: 300, desktop: 320),
       decoration: BoxDecoration(
-        color: const Color(0xFF0D1627),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.06)),
+        color: const Color(0xFF0f172a),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: const [
+          BoxShadow(color: Color(0xFF0b1120), offset: Offset(10, 10),   blurRadius: 16),
+          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-10, -10), blurRadius: 16),
+        ],
       ),
+      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Alertness History',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 20),
-          SizedBox(
-            height: 160,
+          const Text('Alertness History',
+              style: TextStyle(color: Color(0xFFcbd5e1), fontSize: 15, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 16),
+          Expanded(
             child: LineChart(
               LineChartData(
                 gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: false,
-                  horizontalInterval: 10,
-                  getDrawingHorizontalLine: (value) => FlLine(
-                    color: Colors.white.withOpacity(0.05),
-                    strokeWidth: 1,
-                  ),
+                  show: true, drawVerticalLine: false, horizontalInterval: 10,
+                  getDrawingHorizontalLine: (_) => FlLine(color: const Color(0xFF1e293b), strokeWidth: 1, dashArray: [3,3]),
                 ),
                 titlesData: FlTitlesData(
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 32,
-                      interval: 10,
-                      getTitlesWidget: (value, meta) => Text(
-                        '${value.toInt()}',
-                        style: const TextStyle(
-                          color: Colors.white38,
-                          fontSize: 10,
-                        ),
-                      ),
-                    ),
-                  ),
+                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  topTitles:   const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
-                      showTitles: false,
+                      showTitles: true, reservedSize: 30, interval: 1,
+                      getTitlesWidget: (value, meta) {
+                        final idx = value.toInt();
+                        if (idx >= 0 && idx < timeLabels.length) {
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 8.0),
+                            child: Text(timeLabels[idx], style: const TextStyle(color: Color(0xFF64748b), fontSize: 10)),
+                          );
+                        }
+                        return const Text('');
+                      },
                     ),
                   ),
-                  topTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  rightTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true, interval: 10, reservedSize: 40,
+                      getTitlesWidget: (value, meta) => Text(value.toInt().toString(),
+                          style: const TextStyle(color: Color(0xFF64748b), fontSize: 10)),
+                    ),
                   ),
                 ),
                 borderData: FlBorderData(show: false),
-                minY: 50,
-                maxY: 100,
+                minX: 0, maxX: (spots.length - 1).toDouble(), minY: 50, maxY: 100,
                 lineBarsData: [
                   LineChartBarData(
-                    spots: spots,
-                    isCurved: true,
-                    curveSmoothness: 0.35,
-                    color: const Color(0xFF00D4FF),
-                    barWidth: 2.5,
-                    isStrokeCapRound: true,
-                    dotData: const FlDotData(show: false),
+                    spots: spots, isCurved: true,
+                    color: const Color(0xFF22d3ee), barWidth: 2.5,
+                    isStrokeCapRound: true, dotData: const FlDotData(show: false),
                     belowBarData: BarAreaData(
                       show: true,
                       gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          const Color(0xFF00D4FF).withOpacity(0.25),
-                          const Color(0xFF00D4FF).withOpacity(0.0),
-                        ],
+                        colors: [const Color(0xFF22d3ee).withOpacity(0.3), const Color(0xFF22d3ee).withOpacity(0.0)],
+                        begin: Alignment.topCenter, end: Alignment.bottomCenter,
                       ),
                     ),
                   ),
                 ],
+                lineTouchData: LineTouchData(
+                  touchTooltipData: LineTouchTooltipData(
+                    getTooltipColor: (_) => const Color(0xFF0f172a),
+                    tooltipBorderRadius: BorderRadius.circular(12),
+                    tooltipPadding: const EdgeInsets.all(8),
+                    getTooltipItems: (spots) => spots.map((s) => LineTooltipItem(
+                      s.y.toInt().toString(),
+                      const TextStyle(color: Color(0xFF22d3ee), fontWeight: FontWeight.bold),
+                    )).toList(),
+                  ),
+                ),
               ),
             ),
           ),
@@ -447,88 +433,95 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────
 // REUSABLE STAT CARD WIDGET
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────
 
-class _StatCard extends StatelessWidget {
+class _StatCard extends StatefulWidget {
   final IconData icon;
-  final String title;
-  final String value;
-  final String subtitle;
-  final bool hasIndicator;
+  final String label, value, subtext;
+  final bool accent;
 
   const _StatCard({
-    required this.icon,
-    required this.title,
-    required this.value,
-    required this.subtitle,
-    this.hasIndicator = false,
+    required this.icon, required this.label,
+    required this.value, required this.subtext, required this.accent,
   });
 
   @override
+  State<_StatCard> createState() => _StatCardState();
+}
+
+class _StatCardState extends State<_StatCard> {
+  bool isHovered = false;
+
+  @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0D1627),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.06)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => isHovered = true),
+      onExit:  (_) => setState(() => isHovered = false),
+      child: GestureDetector(
+        onTap: () {},
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          decoration: BoxDecoration(
+            color: const Color(0xFF0f172a),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: isHovered
+                ? const [
+                    BoxShadow(color: Color(0xFF0b1120), offset: Offset(-3,-3), blurRadius: 6),
+                    BoxShadow(color: Color(0xFF1e293b), offset: Offset(3,3),   blurRadius: 6),
+                  ]
+                : const [
+                    BoxShadow(color: Color(0xFF0b1120), offset: Offset(5,5),   blurRadius: 10),
+                    BoxShadow(color: Color(0xFF1e293b), offset: Offset(-5,-5), blurRadius: 10),
+                  ],
+          ),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.07),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(icon, color: Colors.white54, size: 18),
-              ),
-              if (hasIndicator) ...[
-                const SizedBox(width: 6),
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF00D4FF),
-                    shape: BoxShape.circle,
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(9),
+                    decoration: BoxDecoration(
+                      color: widget.accent
+                          ? const Color(0xFF22d3ee).withOpacity(0.1)
+                          : const Color(0xFF1e293b),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(widget.icon, size: 20,
+                        color: widget.accent ? const Color(0xFF22d3ee) : const Color(0xFF64748b)),
                   ),
-                ),
-              ],
+                  if (widget.accent) ...[
+                    const SizedBox(width: 10),
+                    Container(
+                      width: 8, height: 8,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF22d3ee),
+                        shape: BoxShape.circle,
+                        boxShadow: [BoxShadow(color: const Color(0xFF22d3ee).withOpacity(0.6), blurRadius: 8, spreadRadius: 2)],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(widget.label,   style: const TextStyle(color: Color(0xFF64748b), fontSize: 12, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 4),
+                  Text(widget.value,   style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFFe2e8f0))),
+                  const SizedBox(height: 2),
+                  Text(widget.subtext, style: const TextStyle(fontSize: 11, color: Color(0xFF475569))),
+                ],
+              ),
             ],
           ),
-          const SizedBox(height: 16),
-          Text(
-            title,
-            style: const TextStyle(
-              color: Colors.white54,
-              fontSize: 12,
-              fontWeight: FontWeight.w400,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 22,
-              fontWeight: FontWeight.w700,
-              height: 1.1,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            subtitle,
-            style: const TextStyle(
-              color: Colors.white38,
-              fontSize: 11,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
