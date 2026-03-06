@@ -19,11 +19,16 @@ final analyticsDataProvider =
 // ANALYTICS SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
 
-class AnalyticsScreen extends ConsumerWidget {
+class AnalyticsScreen extends ConsumerStatefulWidget {
   const AnalyticsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AnalyticsScreen> createState() => _AnalyticsScreenState();
+}
+
+class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
+  @override
+  Widget build(BuildContext context) {
     final analyticsAsync = ref.watch(analyticsDataProvider);
     final selectedDays = ref.watch(analyticsFilterProvider);
 
@@ -32,7 +37,7 @@ class AnalyticsScreen extends ConsumerWidget {
       body: SafeArea(
         child: Column(
           children: [
-            _buildHeader(ref, selectedDays),
+            _buildHeader(selectedDays),
             Expanded(
               child: analyticsAsync.when(
                 loading: () => const Center(
@@ -52,7 +57,7 @@ class AnalyticsScreen extends ConsumerWidget {
   }
 
   // ── HEADER + FILTER TABS ──────────────────────────────────────────────────
-  Widget _buildHeader(WidgetRef ref, int? selectedDays) {
+  Widget _buildHeader(int? selectedDays) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
       child: Column(
@@ -159,7 +164,11 @@ class AnalyticsScreen extends ConsumerWidget {
     return RefreshIndicator(
       color: const Color(0xFF00D4FF),
       backgroundColor: const Color(0xFF0D1627),
-      onRefresh: () async {},
+      onRefresh: () async {
+        ref.invalidate(analyticsDataProvider); // ✅ now works — ref is in scope
+        // Wait for the new data to load
+        await ref.read(analyticsDataProvider.future);
+      },
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -171,7 +180,6 @@ class AnalyticsScreen extends ConsumerWidget {
               totalAlerts: totalAlerts,
               drowsinessEvents: drowsinessEvents,
               distractionEvents: distractionEvents,
-              data: data,
             ),
 
             const SizedBox(height: 20),
@@ -197,9 +205,7 @@ class AnalyticsScreen extends ConsumerWidget {
     required int totalAlerts,
     required int drowsinessEvents,
     required int distractionEvents,
-    required Map<String, dynamic> data,
   }) {
-    // Compute % change labels (placeholder logic — extend with prev period)
     return Column(
       children: [
         Row(
@@ -255,12 +261,10 @@ class AnalyticsScreen extends ConsumerWidget {
 
   // ── TRENDS LINE CHART ─────────────────────────────────────────────────────
   Widget _buildTrendsChart(List<Map<String, dynamic>> dailyTrends) {
-    // Build spots from DB data
     List<FlSpot> drowsySpots = [];
     List<FlSpot> distractedSpots = [];
 
     if (dailyTrends.isEmpty) {
-      // Placeholder data
       drowsySpots = [
         const FlSpot(0, 8), const FlSpot(1, 5), const FlSpot(2, 10),
         const FlSpot(3, 7), const FlSpot(4, 6), const FlSpot(5, 4),
@@ -284,7 +288,6 @@ class AnalyticsScreen extends ConsumerWidget {
       }
     }
 
-    // Day labels
     final dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
     return Container(
@@ -369,7 +372,6 @@ class AnalyticsScreen extends ConsumerWidget {
                 minY: 0,
                 maxY: 20,
                 lineBarsData: [
-                  // Drowsiness line
                   LineChartBarData(
                     spots: drowsySpots,
                     isCurved: true,
@@ -387,7 +389,6 @@ class AnalyticsScreen extends ConsumerWidget {
                     ),
                     belowBarData: BarAreaData(show: false),
                   ),
-                  // Distraction line
                   LineChartBarData(
                     spots: distractedSpots,
                     isCurved: true,
@@ -416,20 +417,17 @@ class AnalyticsScreen extends ConsumerWidget {
 
   // ── HOURLY BAR CHART ──────────────────────────────────────────────────────
   Widget _buildHourlyChart(List<Map<String, dynamic>> hourlyDist) {
-    // Build bar groups from DB data
     final hourLabels = ['6AM', '9AM', '12PM', '3PM', '6PM', '9PM'];
     final hourValues = [6, 9, 12, 15, 18, 21];
 
     List<BarChartGroupData> barGroups = [];
 
     if (hourlyDist.isEmpty) {
-      // Placeholder data
       final placeholders = [2, 7, 5, 9, 12, 6];
       for (int i = 0; i < hourLabels.length; i++) {
         barGroups.add(_buildBarGroup(i, placeholders[i].toDouble()));
       }
     } else {
-      // Map DB hours to our 6 display slots
       final hourMap = <int, int>{};
       for (final row in hourlyDist) {
         hourMap[row['hour'] as int] = row['count'] as int;
