@@ -1,67 +1,49 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_chart/fl_chart.dart';
-import '../utils/responsive.dart';
+import '../core/database/database_helper.dart';
 
-class AnalyticsScreen extends StatefulWidget {
+// ─────────────────────────────────────────────────────────────────────────────
+// RIVERPOD PROVIDERS
+
+// Selected filter tab: 7, 30, or null (all time)
+final analyticsFilterProvider = StateProvider<int?>((ref) => 7);
+
+final analyticsDataProvider =
+    FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
+  final days = ref.watch(analyticsFilterProvider);
+  return await DatabaseHelper.instance.getAnalyticsSummary(days: days);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ANALYTICS SCREEN
+// ─────────────────────────────────────────────────────────────────────────────
+
+class AnalyticsScreen extends ConsumerWidget {
   const AnalyticsScreen({super.key});
 
   @override
-  State<AnalyticsScreen> createState() => _AnalyticsScreenState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final analyticsAsync = ref.watch(analyticsDataProvider);
+    final selectedDays = ref.watch(analyticsFilterProvider);
 
-class _AnalyticsScreenState extends State<AnalyticsScreen> {
-  String selectedTimeRange = '7 Days';
-
-  @override
-  Widget build(BuildContext context) {
-    final isMobile = Responsive.isMobile(context);
-    final isTablet = Responsive.isTablet(context);
-
-    return Container(
-      padding: EdgeInsets.all(
-        Responsive.responsivePadding(
-          context,
-          mobile: 16,
-          tablet: 24,
-          desktop: 32,
-        ),
-      ),
-      child: SingleChildScrollView(
+    return Scaffold(
+      backgroundColor: const Color(0xFF080E1A),
+      body: SafeArea(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Time Range Selector
-            _buildTimeRangeSelector(),
-
-            SizedBox(
-              height: Responsive.responsiveSpacing(
-                context,
-                mobile: 16,
-                tablet: 20,
-                desktop: 24,
+            _buildHeader(ref, selectedDays),
+            Expanded(
+              child: analyticsAsync.when(
+                loading: () => const Center(
+                  child: CircularProgressIndicator(color: Color(0xFF00D4FF)),
+                ),
+                error: (e, _) => const Center(
+                  child: Text('Error loading analytics',
+                      style: TextStyle(color: Colors.white54)),
+                ),
+                data: (data) => _buildContent(data),
               ),
-            ),
-
-            // Summary Cards
-            _buildSummaryCards(isMobile, isTablet),
-
-            SizedBox(
-              height: Responsive.responsiveSpacing(
-                context,
-                mobile: 24,
-                tablet: 28,
-                desktop: 32,
-              ),
-            ),
-
-            // Charts Section
-            if (isMobile || isTablet)
-              _buildMobileChartsLayout()
-            else
-              _buildDesktopChartsLayout(),
-
-            SizedBox(
-              height: isMobile ? 96 : 32,
             ),
           ],
         ),
@@ -69,471 +51,357 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     );
   }
 
-  // Time Range Selector
-  Widget _buildTimeRangeSelector() {
-    return Container(
-      padding: EdgeInsets.all(
-        Responsive.responsivePadding(
-          context,
-          mobile: 4,
-          tablet: 5,
-          desktop: 6,
-        ),
-      ),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(
-          Responsive.responsiveBorderRadius(
-            context,
-            mobile: 16,
-            tablet: 18,
-            desktop: 20,
-          ),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF0b1120).withOpacity(0.8),
-            offset: const Offset(4, 4),
-            blurRadius: 8,
-          ),
-          BoxShadow(
-            color: const Color(0xFF1e293b).withOpacity(0.8),
-            offset: const Offset(-4, -4),
-            blurRadius: 8,
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+  // ── HEADER + FILTER TABS ──────────────────────────────────────────────────
+  Widget _buildHeader(WidgetRef ref, int? selectedDays) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildTimeRangeButton('7 Days'),
-          SizedBox(width: Responsive.responsiveSpacing(context, mobile: 4)),
-          _buildTimeRangeButton('30 Days'),
-          SizedBox(width: Responsive.responsiveSpacing(context, mobile: 4)),
-          _buildTimeRangeButton('All Time'),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Analytics',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 26,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF00FF88),
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF00FF88).withOpacity(0.5),
+                      blurRadius: 8,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          RichText(
+            text: const TextSpan(
+              text: 'Connected: ',
+              style: TextStyle(color: Colors.white54, fontSize: 13),
+              children: [
+                TextSpan(
+                  text: 'USER',
+                  style: TextStyle(
+                    color: Color(0xFF00D4FF),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Filter Tabs
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0D1627),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white.withOpacity(0.06)),
+            ),
+            child: Row(
+              children: [
+                _FilterTab(
+                  label: '7 Days',
+                  isSelected: selectedDays == 7,
+                  onTap: () =>
+                      ref.read(analyticsFilterProvider.notifier).state = 7,
+                ),
+                _FilterTab(
+                  label: '30 Days',
+                  isSelected: selectedDays == 30,
+                  onTap: () =>
+                      ref.read(analyticsFilterProvider.notifier).state = 30,
+                ),
+                _FilterTab(
+                  label: 'All Time',
+                  isSelected: selectedDays == null,
+                  onTap: () =>
+                      ref.read(analyticsFilterProvider.notifier).state = null,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
         ],
       ),
     );
   }
 
-  Widget _buildTimeRangeButton(String label) {
-    final isSelected = selectedTimeRange == label;
+  // ── SCROLLABLE CONTENT ────────────────────────────────────────────────────
+  Widget _buildContent(Map<String, dynamic> data) {
+    final totalSessions = data['total_sessions'] as int? ?? 0;
+    final totalAlerts = data['total_alerts'] as int? ?? 0;
+    final drowsinessEvents = data['drowsiness_events'] as int? ?? 0;
+    final distractionEvents = data['distraction_events'] as int? ?? 0;
+    final dailyTrends =
+        (data['daily_trends'] as List<dynamic>?)
+            ?.cast<Map<String, dynamic>>() ??
+            [];
+    final hourlyDist =
+        (data['hourly_distribution'] as List<dynamic>?)
+            ?.cast<Map<String, dynamic>>() ??
+            [];
 
-    return InkWell(
-      onTap: () {
-        setState(() {
-          selectedTimeRange = label;
-        });
-      },
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: Responsive.responsivePadding(
-            context,
-            mobile: 12,
-            tablet: 14,
-            desktop: 16,
-          ),
-          vertical: Responsive.responsivePadding(
-            context,
-            mobile: 8,
-            tablet: 9,
-            desktop: 10,
-          ),
-        ),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF1e293b) : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: const Color(0xFF0b1120).withOpacity(0.6),
-                    offset: const Offset(2, 2),
-                    blurRadius: 4,
-                  ),
-                ]
-              : [],
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: Responsive.responsiveFont(
-              context,
-              mobile: 12,
-              tablet: 13,
-              desktop: 14,
+    return RefreshIndicator(
+      color: const Color(0xFF00D4FF),
+      backgroundColor: const Color(0xFF0D1627),
+      onRefresh: () async {},
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Column(
+          children: [
+            // 4 Stat Cards
+            _buildStatCards(
+              totalSessions: totalSessions,
+              totalAlerts: totalAlerts,
+              drowsinessEvents: drowsinessEvents,
+              distractionEvents: distractionEvents,
+              data: data,
             ),
-            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-            color: isSelected
-                ? const Color(0xFF22d3ee)
-                : const Color(0xFF64748b),
-          ),
+
+            const SizedBox(height: 20),
+
+            // Drowsiness vs Distraction Trends
+            _buildTrendsChart(dailyTrends),
+
+            const SizedBox(height: 20),
+
+            // Hourly Alert Distribution
+            _buildHourlyChart(hourlyDist),
+
+            const SizedBox(height: 24),
+          ],
         ),
       ),
     );
   }
 
-  // Summary Cards
-  Widget _buildSummaryCards(bool isMobile, bool isTablet) {
-    return GridView.count(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: isMobile ? 2 : 4,
-      mainAxisSpacing: Responsive.responsiveSpacing(
-        context,
-        mobile: 12,
-        tablet: 14,
-        desktop: 16,
-      ),
-      crossAxisSpacing: Responsive.responsiveSpacing(
-        context,
-        mobile: 12,
-        tablet: 14,
-        desktop: 16,
-      ),
-      childAspectRatio: Responsive.responsiveValue(
-        context,
-        mobile: 0.95,
-        tablet: 1.2,
-        desktop: 1.5,
-      ),
-      children: [
-        _buildSummaryCard(
-          icon: Icons.timer_outlined,
-          label: 'Total Sessions',
-          value: '127',
-          change: '+12%',
-          isPositive: true,
-        ),
-        _buildSummaryCard(
-          icon: Icons.warning_amber_outlined,
-          label: 'Total Alerts',
-          value: '43',
-          change: '-8%',
-          isPositive: true,
-        ),
-        _buildSummaryCard(
-          icon: Icons.bedtime_outlined,
-          label: 'Drowsiness Events',
-          value: '28',
-          change: '-15%',
-          isPositive: true,
-        ),
-        _buildSummaryCard(
-          icon: Icons.visibility_off_outlined,
-          label: 'Distraction Events',
-          value: '15',
-          change: '+5%',
-          isPositive: false,
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSummaryCard({
-    required IconData icon,
-    required String label,
-    required String value,
-    required String change,
-    required bool isPositive,
+  // ── STAT CARDS ────────────────────────────────────────────────────────────
+  Widget _buildStatCards({
+    required int totalSessions,
+    required int totalAlerts,
+    required int drowsinessEvents,
+    required int distractionEvents,
+    required Map<String, dynamic> data,
   }) {
-    return _HoverableSummaryCard(
-      icon: icon,
-      label: label,
-      value: value,
-      change: change,
-      isPositive: isPositive,
-    );
-  }
-
-  // Mobile Charts Layout
-  Widget _buildMobileChartsLayout() {
+    // Compute % change labels (placeholder logic — extend with prev period)
     return Column(
       children: [
-        _buildDrowsinessVsDistractionChart(),
-        SizedBox(
-          height: Responsive.responsiveSpacing(
-            context,
-            mobile: 24,
-            tablet: 28,
-            desktop: 32,
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: _AnalyticsCard(
+                icon: Icons.timer_outlined,
+                value: '$totalSessions',
+                label: 'Total Sessions',
+                changePct: '+12%',
+                changePositive: true,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _AnalyticsCard(
+                icon: Icons.warning_amber_outlined,
+                value: '$totalAlerts',
+                label: 'Total Alerts',
+                changePct: '-8%',
+                changePositive: false,
+              ),
+            ),
+          ],
         ),
-        _buildAlertTimelineChart(),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _AnalyticsCard(
+                icon: Icons.bedtime_outlined,
+                value: '$drowsinessEvents',
+                label: 'Drowsiness Events',
+                changePct: '-15%',
+                changePositive: false,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _AnalyticsCard(
+                icon: Icons.visibility_off_outlined,
+                value: '$distractionEvents',
+                label: 'Distraction Events',
+                changePct: '+5%',
+                changePositive: true,
+              ),
+            ),
+          ],
+        ),
       ],
     );
   }
 
-  // Desktop Charts Layout
-  Widget _buildDesktopChartsLayout() {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          flex: 6,
-          child: _buildDrowsinessVsDistractionChart(),
-        ),
-        SizedBox(
-          width: Responsive.responsiveSpacing(
-            context,
-            mobile: 16,
-            tablet: 24,
-            desktop: 32,
-          ),
-        ),
-        Expanded(
-          flex: 4,
-          child: _buildAlertTimelineChart(),
-        ),
-      ],
-    );
-  }
+  // ── TRENDS LINE CHART ─────────────────────────────────────────────────────
+  Widget _buildTrendsChart(List<Map<String, dynamic>> dailyTrends) {
+    // Build spots from DB data
+    List<FlSpot> drowsySpots = [];
+    List<FlSpot> distractedSpots = [];
 
-  // Drowsiness vs Distraction Chart
-  Widget _buildDrowsinessVsDistractionChart() {
+    if (dailyTrends.isEmpty) {
+      // Placeholder data
+      drowsySpots = [
+        const FlSpot(0, 8), const FlSpot(1, 5), const FlSpot(2, 10),
+        const FlSpot(3, 7), const FlSpot(4, 6), const FlSpot(5, 4),
+        const FlSpot(6, 3),
+      ];
+      distractedSpots = [
+        const FlSpot(0, 4), const FlSpot(1, 5), const FlSpot(2, 6),
+        const FlSpot(3, 5), const FlSpot(4, 4), const FlSpot(5, 3),
+        const FlSpot(6, 2),
+      ];
+    } else {
+      for (int i = 0; i < dailyTrends.length; i++) {
+        drowsySpots.add(FlSpot(
+          i.toDouble(),
+          (dailyTrends[i]['drowsy_count'] as int? ?? 0).toDouble(),
+        ));
+        distractedSpots.add(FlSpot(
+          i.toDouble(),
+          (dailyTrends[i]['distracted_count'] as int? ?? 0).toDouble(),
+        ));
+      }
+    }
+
+    // Day labels
+    final dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
     return Container(
-      height: Responsive.responsiveHeight(
-        context,
-        mobile: 300,
-        tablet: 320,
-        desktop: 340,
-      ),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(
-          Responsive.responsiveBorderRadius(
-            context,
-            mobile: 20,
-            tablet: 22,
-            desktop: 24,
-          ),
-        ),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0xFF0b1120),
-            offset: Offset(8, 8),
-            blurRadius: 16,
-          ),
-          BoxShadow(
-            color: Color(0xFF1e293b),
-            offset: Offset(-8, -8),
-            blurRadius: 16,
-          ),
-        ],
-      ),
-      padding: EdgeInsets.all(
-        Responsive.responsivePadding(
-          context,
-          mobile: 20,
-          tablet: 22,
-          desktop: 24,
-        ),
+        color: const Color(0xFF0D1627),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (Responsive.isMobile(context))
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Drowsiness vs Distraction Trends',
-                  style: TextStyle(
-                    fontSize: Responsive.responsiveFont(
-                      context,
-                      mobile: 15,
-                      tablet: 16,
-                      desktop: 17,
-                    ),
-                    fontWeight: FontWeight.w600,
-                    color: const Color(0xFFcbd5e1),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    _buildLegendItem('Drowsiness', const Color(0xFFef4444)),
-                    const SizedBox(width: 12),
-                    _buildLegendItem('Distraction', const Color(0xFFfbbf24)),
-                  ],
-                ),
-              ],
-            )
-          else
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Drowsiness vs Distraction Trends',
-                  style: TextStyle(
-                    fontSize: Responsive.responsiveFont(
-                      context,
-                      mobile: 15,
-                      tablet: 16,
-                      desktop: 17,
-                    ),
-                    fontWeight: FontWeight.w600,
-                    color: const Color(0xFFcbd5e1),
-                  ),
-                ),
-                Row(
-                  children: [
-                    _buildLegendItem('Drowsiness', const Color(0xFFef4444)),
-                    SizedBox(
-                        width: Responsive.responsiveSpacing(context,
-                            mobile: 12)),
-                    _buildLegendItem('Distraction', const Color(0xFFfbbf24)),
-                  ],
-                ),
-              ],
-            ),
-          SizedBox(
-            height: Responsive.responsiveSpacing(
-              context,
-              mobile: 16,
-              tablet: 20,
-              desktop: 24,
+          const Text(
+            'Drowsiness vs Distraction Trends',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
             ),
           ),
-          Expanded(
+          const SizedBox(height: 12),
+
+          // Legend
+          Row(
+            children: [
+              _LegendDot(color: const Color(0xFFFF4444), label: 'Drowsiness'),
+              const SizedBox(width: 16),
+              _LegendDot(color: const Color(0xFFFFB800), label: 'Distraction'),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          SizedBox(
+            height: 180,
             child: LineChart(
               LineChartData(
                 gridData: FlGridData(
                   show: true,
                   drawVerticalLine: false,
                   horizontalInterval: 5,
-                  getDrawingHorizontalLine: (value) {
-                    return FlLine(
-                      color: const Color(0xFF1e293b),
-                      strokeWidth: 1,
-                      dashArray: [3, 3],
-                    );
-                  },
+                  getDrawingHorizontalLine: (value) => FlLine(
+                    color: Colors.white.withOpacity(0.05),
+                    strokeWidth: 1,
+                  ),
                 ),
                 titlesData: FlTitlesData(
-                  show: true,
-                  rightTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  topTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 28,
+                      interval: 5,
+                      getTitlesWidget: (value, meta) => Text(
+                        '${value.toInt()}',
+                        style: const TextStyle(
+                            color: Colors.white38, fontSize: 10),
+                      ),
+                    ),
                   ),
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 30,
-                      interval: 1,
+                      reservedSize: 24,
                       getTitlesWidget: (value, meta) {
-                        const days = [
-                          'Mon',
-                          'Tue',
-                          'Wed',
-                          'Thu',
-                          'Fri',
-                          'Sat',
-                          'Sun'
-                        ];
-                        if (value.toInt() >= 0 &&
-                            value.toInt() < days.length) {
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 8.0),
-                            child: Text(
-                              days[value.toInt()],
-                              style: TextStyle(
-                                color: const Color(0xFF64748b),
-                                fontSize: Responsive.responsiveFont(
-                                  context,
-                                  mobile: 11,
-                                  tablet: 12,
-                                  desktop: 13,
-                                ),
-                              ),
-                            ),
-                          );
+                        final idx = value.toInt();
+                        if (idx < 0 || idx >= dayLabels.length) {
+                          return const SizedBox();
                         }
-                        return const Text('');
-                      },
-                    ),
-                  ),
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      interval: 5,
-                      reservedSize: 40,
-                      getTitlesWidget: (value, meta) {
                         return Text(
-                          value.toInt().toString(),
-                          style: TextStyle(
-                            color: const Color(0xFF64748b),
-                            fontSize: Responsive.responsiveFont(
-                              context,
-                              mobile: 11,
-                              tablet: 12,
-                              desktop: 13,
-                            ),
-                          ),
+                          dayLabels[idx],
+                          style: const TextStyle(
+                              color: Colors.white38, fontSize: 10),
                         );
                       },
                     ),
                   ),
+                  topTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false)),
+                  rightTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false)),
                 ),
                 borderData: FlBorderData(show: false),
-                minX: 0,
-                maxX: 6,
                 minY: 0,
                 maxY: 20,
                 lineBarsData: [
+                  // Drowsiness line
                   LineChartBarData(
-                    spots: const [
-                      FlSpot(0, 8),
-                      FlSpot(1, 6),
-                      FlSpot(2, 10),
-                      FlSpot(3, 5),
-                      FlSpot(4, 7),
-                      FlSpot(5, 4),
-                      FlSpot(6, 3),
-                    ],
+                    spots: drowsySpots,
                     isCurved: true,
-                    color: const Color(0xFFef4444),
-                    barWidth: 3,
+                    color: const Color(0xFFFF4444),
+                    barWidth: 2.5,
                     isStrokeCapRound: true,
                     dotData: FlDotData(
                       show: true,
-                      getDotPainter: (spot, percent, barData, index) {
-                        return FlDotCirclePainter(
-                          radius: 4,
-                          color: const Color(0xFFef4444),
-                          strokeWidth: 2,
-                          strokeColor: const Color(0xFF0f172a),
-                        );
-                      },
+                      getDotPainter: (spot, percent, bar, index) =>
+                          FlDotCirclePainter(
+                        radius: 4,
+                        color: const Color(0xFFFF4444),
+                        strokeWidth: 0,
+                      ),
                     ),
                     belowBarData: BarAreaData(show: false),
                   ),
+                  // Distraction line
                   LineChartBarData(
-                    spots: const [
-                      FlSpot(0, 4),
-                      FlSpot(1, 5),
-                      FlSpot(2, 3),
-                      FlSpot(3, 6),
-                      FlSpot(4, 4),
-                      FlSpot(5, 2),
-                      FlSpot(6, 2),
-                    ],
+                    spots: distractedSpots,
                     isCurved: true,
-                    color: const Color(0xFFfbbf24),
-                    barWidth: 3,
+                    color: const Color(0xFFFFB800),
+                    barWidth: 2.5,
                     isStrokeCapRound: true,
                     dotData: FlDotData(
                       show: true,
-                      getDotPainter: (spot, percent, barData, index) {
-                        return FlDotCirclePainter(
-                          radius: 4,
-                          color: const Color(0xFFfbbf24),
-                          strokeWidth: 2,
-                          strokeColor: const Color(0xFF0f172a),
-                        );
-                      },
+                      getDotPainter: (spot, percent, bar, index) =>
+                          FlDotCirclePainter(
+                        radius: 4,
+                        color: const Color(0xFFFFB800),
+                        strokeWidth: 0,
+                      ),
                     ),
                     belowBarData: BarAreaData(show: false),
                   ),
@@ -546,190 +414,104 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     );
   }
 
-  Widget _buildLegendItem(String label, Color color) {
-    return Row(
-      children: [
-        Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-          ),
-        ),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: Responsive.responsiveFont(
-              context,
-              mobile: 11,
-              tablet: 12,
-              desktop: 13,
-            ),
-            color: const Color(0xFF94a3b8),
-          ),
-        ),
-      ],
-    );
-  }
+  // ── HOURLY BAR CHART ──────────────────────────────────────────────────────
+  Widget _buildHourlyChart(List<Map<String, dynamic>> hourlyDist) {
+    // Build bar groups from DB data
+    final hourLabels = ['6AM', '9AM', '12PM', '3PM', '6PM', '9PM'];
+    final hourValues = [6, 9, 12, 15, 18, 21];
 
-  // Alert Timeline Chart
-  Widget _buildAlertTimelineChart() {
+    List<BarChartGroupData> barGroups = [];
+
+    if (hourlyDist.isEmpty) {
+      // Placeholder data
+      final placeholders = [2, 7, 5, 9, 12, 6];
+      for (int i = 0; i < hourLabels.length; i++) {
+        barGroups.add(_buildBarGroup(i, placeholders[i].toDouble()));
+      }
+    } else {
+      // Map DB hours to our 6 display slots
+      final hourMap = <int, int>{};
+      for (final row in hourlyDist) {
+        hourMap[row['hour'] as int] = row['count'] as int;
+      }
+      for (int i = 0; i < hourValues.length; i++) {
+        final count = hourMap[hourValues[i]] ?? 0;
+        barGroups.add(_buildBarGroup(i, count.toDouble()));
+      }
+    }
+
     return Container(
-      height: Responsive.responsiveHeight(
-        context,
-        mobile: 300,
-        tablet: 320,
-        desktop: 340,
-      ),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(
-          Responsive.responsiveBorderRadius(
-            context,
-            mobile: 20,
-            tablet: 22,
-            desktop: 24,
-          ),
-        ),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0xFF0b1120),
-            offset: Offset(8, 8),
-            blurRadius: 16,
-          ),
-          BoxShadow(
-            color: Color(0xFF1e293b),
-            offset: Offset(-8, -8),
-            blurRadius: 16,
-          ),
-        ],
-      ),
-      padding: EdgeInsets.all(
-        Responsive.responsivePadding(
-          context,
-          mobile: 20,
-          tablet: 22,
-          desktop: 24,
-        ),
+        color: const Color(0xFF0D1627),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
+          const Text(
             'Hourly Alert Distribution',
             style: TextStyle(
-              fontSize: Responsive.responsiveFont(
-                context,
-                mobile: 15,
-                tablet: 16,
-                desktop: 17,
-              ),
+              color: Colors.white,
+              fontSize: 15,
               fontWeight: FontWeight.w600,
-              color: const Color(0xFFcbd5e1),
             ),
           ),
+          const SizedBox(height: 20),
           SizedBox(
-            height: Responsive.responsiveSpacing(
-              context,
-              mobile: 16,
-              tablet: 20,
-              desktop: 24,
-            ),
-          ),
-          Expanded(
+            height: 180,
             child: BarChart(
               BarChartData(
                 alignment: BarChartAlignment.spaceAround,
                 maxY: 15,
                 barTouchData: BarTouchData(enabled: false),
                 titlesData: FlTitlesData(
-                  show: true,
-                  rightTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  topTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 28,
+                      interval: 5,
+                      getTitlesWidget: (value, meta) => Text(
+                        '${value.toInt()}',
+                        style: const TextStyle(
+                            color: Colors.white38, fontSize: 10),
+                      ),
+                    ),
                   ),
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
+                      reservedSize: 24,
                       getTitlesWidget: (value, meta) {
-                        const hours = [
-                          '6AM',
-                          '9AM',
-                          '12PM',
-                          '3PM',
-                          '6PM',
-                          '9PM'
-                        ];
-                        if (value.toInt() >= 0 &&
-                            value.toInt() < hours.length) {
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 8.0),
-                            child: Text(
-                              hours[value.toInt()],
-                              style: TextStyle(
-                                color: const Color(0xFF64748b),
-                                fontSize: Responsive.responsiveFont(
-                                  context,
-                                  mobile: 10,
-                                  tablet: 11,
-                                  desktop: 12,
-                                ),
-                              ),
-                            ),
-                          );
+                        final idx = value.toInt();
+                        if (idx < 0 || idx >= hourLabels.length) {
+                          return const SizedBox();
                         }
-                        return const Text('');
-                      },
-                      reservedSize: 30,
-                    ),
-                  ),
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 30,
-                      interval: 5,
-                      getTitlesWidget: (value, meta) {
                         return Text(
-                          value.toInt().toString(),
-                          style: TextStyle(
-                            color: const Color(0xFF64748b),
-                            fontSize: Responsive.responsiveFont(
-                              context,
-                              mobile: 10,
-                              tablet: 11,
-                              desktop: 12,
-                            ),
-                          ),
+                          hourLabels[idx],
+                          style: const TextStyle(
+                              color: Colors.white38, fontSize: 10),
                         );
                       },
                     ),
                   ),
+                  topTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false)),
+                  rightTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false)),
                 ),
                 gridData: FlGridData(
                   show: true,
                   drawVerticalLine: false,
                   horizontalInterval: 5,
-                  getDrawingHorizontalLine: (value) {
-                    return FlLine(
-                      color: const Color(0xFF1e293b),
-                      strokeWidth: 1,
-                      dashArray: [3, 3],
-                    );
-                  },
+                  getDrawingHorizontalLine: (value) => FlLine(
+                    color: Colors.white.withOpacity(0.05),
+                    strokeWidth: 1,
+                  ),
                 ),
                 borderData: FlBorderData(show: false),
-                barGroups: [
-                  _buildBarGroup(0, 3),
-                  _buildBarGroup(1, 7),
-                  _buildBarGroup(2, 5),
-                  _buildBarGroup(3, 9),
-                  _buildBarGroup(4, 12),
-                  _buildBarGroup(5, 6),
-                ],
+                barGroups: barGroups,
               ),
             ),
           ),
@@ -738,24 +520,21 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     );
   }
 
-  BarChartGroupData _buildBarGroup(int x, double y) {
+  BarChartGroupData _buildBarGroup(int x, double value) {
     return BarChartGroupData(
       x: x,
       barRods: [
         BarChartRodData(
-          toY: y,
-          color: const Color(0xFF22d3ee),
-          width: Responsive.responsiveValue(
-            context,
-            mobile: 16.0,
-            tablet: 18.0,
-            desktop: 20.0,
+          toY: value,
+          width: 28,
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(6),
+            topRight: Radius.circular(6),
           ),
-          borderRadius: BorderRadius.circular(4),
           gradient: const LinearGradient(
-            colors: [Color(0xFF22d3ee), Color(0xFF3b82f6)],
             begin: Alignment.bottomCenter,
             end: Alignment.topCenter,
+            colors: [Color(0xFF0066FF), Color(0xFF00D4FF)],
           ),
         ),
       ],
@@ -763,208 +542,177 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 }
 
-// Hoverable Summary Card with neumorphic hover effect
-class _HoverableSummaryCard extends StatefulWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final String change;
-  final bool isPositive;
+// ─────────────────────────────────────────────────────────────────────────────
+// REUSABLE WIDGETS
+// ─────────────────────────────────────────────────────────────────────────────
 
-  const _HoverableSummaryCard({
-    required this.icon,
+class _FilterTab extends StatelessWidget {
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _FilterTab({
     required this.label,
-    required this.value,
-    required this.change,
-    required this.isPositive,
+    required this.isSelected,
+    required this.onTap,
   });
 
   @override
-  State<_HoverableSummaryCard> createState() => _HoverableSummaryCardState();
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? const Color(0xFF00D4FF).withOpacity(0.15)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            border: isSelected
+                ? Border.all(
+                    color: const Color(0xFF00D4FF).withOpacity(0.4),
+                    width: 1,
+                  )
+                : null,
+          ),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: isSelected ? const Color(0xFF00D4FF) : Colors.white38,
+              fontSize: 13,
+              fontWeight:
+                  isSelected ? FontWeight.w600 : FontWeight.w400,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
-class _HoverableSummaryCardState extends State<_HoverableSummaryCard> {
-  bool isHovered = false;
+class _AnalyticsCard extends StatelessWidget {
+  final IconData icon;
+  final String value;
+  final String label;
+  final String changePct;
+  final bool changePositive;
+
+  const _AnalyticsCard({
+    required this.icon,
+    required this.value,
+    required this.label,
+    required this.changePct,
+    required this.changePositive,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => isHovered = true),
-      onExit: (_) => setState(() => isHovered = false),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeInOut,
-        decoration: BoxDecoration(
-          color: const Color(0xFF0f172a),
-          borderRadius: BorderRadius.circular(
-            Responsive.responsiveBorderRadius(
-              context,
-              mobile: 16,
-              tablet: 18,
-              desktop: 20,
-            ),
-          ),
-          boxShadow: isHovered
-              ? [
-                  BoxShadow(
-                    color: const Color(0xFF0b1120).withOpacity(0.8),
-                    offset: const Offset(-3, -3),
-                    blurRadius: 6,
-                  ),
-                  BoxShadow(
-                    color: const Color(0xFF1e293b).withOpacity(0.8),
-                    offset: const Offset(3, 3),
-                    blurRadius: 6,
-                  ),
-                ]
-              : [
-                  const BoxShadow(
-                    color: Color(0xFF0b1120),
-                    offset: Offset(6, 6),
-                    blurRadius: 12,
-                  ),
-                  const BoxShadow(
-                    color: Color(0xFF1e293b),
-                    offset: Offset(-6, -6),
-                    blurRadius: 12,
-                  ),
-                ],
-        ),
-        padding: EdgeInsets.all(
-          Responsive.responsivePadding(
-            context,
-            mobile: 12,
-            tablet: 16,
-            desktop: 20,
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Container(
-                  padding: EdgeInsets.all(
-                    Responsive.responsivePadding(
-                      context,
-                      mobile: 8,
-                      tablet: 9,
-                      desktop: 10,
-                    ),
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1e293b),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(
-                    widget.icon,
-                    size: Responsive.responsiveIconSize(
-                      context,
-                      mobile: 18,
-                      tablet: 20,
-                      desktop: 24,
-                    ),
-                    color: const Color(0xFF22d3ee),
-                  ),
-                ),
-                Container(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: Responsive.responsivePadding(
-                      context,
-                      mobile: 6,
-                      tablet: 7,
-                      desktop: 8,
-                    ),
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: widget.isPositive
-                        ? const Color(0xFF10b981).withOpacity(0.1)
-                        : const Color(0xFFef4444).withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        widget.isPositive
-                            ? Icons.trending_down
-                            : Icons.trending_up,
-                        size: Responsive.responsiveIconSize(
-                          context,
-                          mobile: 11,
-                          tablet: 12,
-                          desktop: 14,
-                        ),
-                        color: widget.isPositive
-                            ? const Color(0xFF10b981)
-                            : const Color(0xFFef4444),
-                      ),
-                      const SizedBox(width: 2),
-                      Text(
-                        widget.change,
-                        style: TextStyle(
-                          fontSize: Responsive.responsiveFont(
-                            context,
-                            mobile: 9,
-                            tablet: 10,
-                            desktop: 12,
-                          ),
-                          fontWeight: FontWeight.w600,
-                          color: widget.isPositive
-                              ? const Color(0xFF10b981)
-                              : const Color(0xFFef4444),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.value,
-                  style: TextStyle(
-                    fontSize: Responsive.responsiveFont(
-                      context,
-                      mobile: 24,
-                      tablet: 28,
-                      desktop: 32,
-                    ),
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFFe2e8f0),
-                  ),
-                ),
-                SizedBox(
-                  height: Responsive.responsiveSpacing(
-                    context,
-                    mobile: 4,
-                    tablet: 5,
-                    desktop: 6,
-                  ),
-                ),
-                Text(
-                  widget.label,
-                  style: TextStyle(
-                    fontSize: Responsive.responsiveFont(
-                      context,
-                      mobile: 10,
-                      tablet: 11,
-                      desktop: 13,
-                    ),
-                    color: const Color(0xFF64748b),
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ],
-        ),
+    final changeColor = changePositive
+        ? const Color(0xFF00FF88)
+        : const Color(0xFFFF4444);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D1627),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.06)),
       ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.07),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: Colors.white54, size: 18),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: changeColor.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      changePositive
+                          ? Icons.trending_up_rounded
+                          : Icons.trending_down_rounded,
+                      color: changeColor,
+                      size: 12,
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      changePct,
+                      style: TextStyle(
+                        color: changeColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 28,
+              fontWeight: FontWeight.w700,
+              height: 1,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white38,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+
+  const _LegendDot({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: const TextStyle(color: Colors.white54, fontSize: 12),
+        ),
+      ],
     );
   }
 }

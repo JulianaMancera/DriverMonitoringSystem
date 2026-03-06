@@ -7,11 +7,13 @@ class DatabaseHelper {
 
   DatabaseHelper._init();
 
-  //Database Initialization
+  // ─────────────────────────────────────────────────────────────────────────
+  // DATABASE INITIALIZATION
+  // ─────────────────────────────────────────────────────────────────────────
 
   Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDB('driver_monitoring.db');
+    _database = await _initDB('bantay_drive.db');
     return _database!;
   }
 
@@ -19,52 +21,56 @@ class DatabaseHelper {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, fileName);
     return await openDatabase(
-      path, 
-      version: 1, 
-      onCreate: _createTables
+      path,
+      version: 1,
+      onCreate: _createTables,
     );
   }
-  // TABLE 1 - sessions
-  // It is for storing each monitoring session (one seesion = one drive)
+
   Future<void> _createTables(Database db, int version) async {
+    // TABLE 1 — sessions
+    // Stores each monitoring session (one session = one drive)
     await db.execute('''
       CREATE TABLE sessions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        started_at TEXT NOT NULL,
-        ended_at TEXT,
-        duration_sec INTEGER DEFAULT 0,
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        started_at    TEXT NOT NULL,
+        ended_at      TEXT,
+        duration_sec  INTEGER DEFAULT 0,
         alertness_avg REAL DEFAULT 0.0,
-        safety_score REAL DEFAULT 0.0,
-        notes TEXT
+        safety_score  REAL DEFAULT 0.0,
+        notes         TEXT
       )
     ''');
-  // TABLE 2 - state_counts
-  // Stores the total count of each driver state per session
+
+    // TABLE 2 — state_counts
+    // Stores the total count of each driver state per session
     await db.execute('''
       CREATE TABLE state_counts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id INTEGER NOT NULL,
-        neutral_count INTEGER DEFAULT 0,
-        drowsy_count INTEGER DEFAULT 0,
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id       INTEGER NOT NULL,
+        neutral_count    INTEGER DEFAULT 0,
+        drowsy_count     INTEGER DEFAULT 0,
         distracted_count INTEGER DEFAULT 0,
         FOREIGN KEY (session_id) REFERENCES sessions(id)
       )
     ''');
-  // TABLE 3 - alert_events
-  // Stores every alert triggered during a session
-  // alert_type: 'DROWSY' or 'DISTRACTED'
-  // alert_level: 1 (first ping), 2nd (second ping), 3rd (looping alarm) - this can be used to determine severity and also for analytics
+
+    // TABLE 3 — alert_events
+    // Stores every alert triggered during a session
+    // alert_type: 'DROWSY' or 'DISTRACTED'
+    // alert_level: 1 (first ping), 2 (second ping), 3 (looping alarm)
     await db.execute('''
       CREATE TABLE alert_events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id INTEGER NOT NULL,
-        alert_type TEXT NOT NULL,
-        alert_level INTEGER NOT NULL,
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id   INTEGER NOT NULL,
+        alert_type   TEXT NOT NULL,
+        alert_level  INTEGER NOT NULL,
         triggered_at TEXT NOT NULL,
         FOREIGN KEY (session_id) REFERENCES sessions(id)
       )
     ''');
-  // TABLE 4 — system_logs
+
+    // TABLE 4 — system_logs
     // Stores the System Log entries shown in Monitoring Screen
     // log_type: 'INFO' (white), 'SUCCESS' (green), 'WARNING' (orange/red)
     await db.execute('''
@@ -94,6 +100,7 @@ class DatabaseHelper {
   // ─────────────────────────────────────────────────────────────────────────
   // SESSIONS — CRUD
   // Used by: Monitoring Screen (insert/update), Dashboard, Analytics
+  // ─────────────────────────────────────────────────────────────────────────
 
   /// Call when driver presses Record — creates a new session
   Future<int> insertSession() async {
@@ -252,6 +259,7 @@ class DatabaseHelper {
   // ─────────────────────────────────────────────────────────────────────────
   // STATE COUNTS — CRUD
   // Used by: Monitoring Screen (insert/update), Analytics
+  // ─────────────────────────────────────────────────────────────────────────
 
   /// Insert initial state_counts row when session starts
   Future<void> insertStateCount(int sessionId) async {
@@ -294,6 +302,7 @@ class DatabaseHelper {
   // ─────────────────────────────────────────────────────────────────────────
   // ALERT EVENTS — CRUD
   // Used by: Monitoring Screen (insert), Dashboard, Analytics
+  // ─────────────────────────────────────────────────────────────────────────
 
   /// Insert an alert event — call when alert is triggered
   Future<void> insertAlertEvent({
@@ -408,6 +417,7 @@ class DatabaseHelper {
   // ─────────────────────────────────────────────────────────────────────────
   // SYSTEM LOGS — CRUD
   // Used by: Monitoring Screen System Log section
+  // ─────────────────────────────────────────────────────────────────────────
 
   /// Insert a system log entry
   /// [logType]: 'INFO' (white), 'SUCCESS' (green), 'WARNING' (orange/red)
@@ -439,6 +449,7 @@ class DatabaseHelper {
   // ─────────────────────────────────────────────────────────────────────────
   // ALERTNESS SNAPSHOTS — CRUD
   // Used by: Dashboard "Alertness History" chart
+  // ─────────────────────────────────────────────────────────────────────────
 
   /// Insert alertness snapshot — call every ~5 seconds during monitoring
   Future<void> insertAlertnesSnapshot({
@@ -480,6 +491,7 @@ class DatabaseHelper {
   // ─────────────────────────────────────────────────────────────────────────
   // COMBINED QUERIES
   // Complex queries that combine multiple tables for screen data
+  // ─────────────────────────────────────────────────────────────────────────
 
   /// Get all dashboard summary data in one call
   /// Returns a map with all values needed for Dashboard Screen
@@ -492,7 +504,7 @@ class DatabaseHelper {
     final snapshots = await getLatestSessionSnapshots();
 
     return {
-      'total_drive_hrs': totalDriveSec / 3600,   // convert to hours
+      'total_drive_hrs': totalDriveSec / 3600,        
       'alerts_last_24h': alertsLast24h,
       'safety_streak_days': safetyStreak,
       'avg_alertness_pct': avgAlertness,
@@ -523,7 +535,9 @@ class DatabaseHelper {
     };
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // UTILITY
+  // ─────────────────────────────────────────────────────────────────────────
 
   /// Close the database
   Future<void> close() async {
@@ -540,5 +554,4 @@ class DatabaseHelper {
     await db.delete('state_counts');
     await db.delete('sessions');
   }
-  
 }
