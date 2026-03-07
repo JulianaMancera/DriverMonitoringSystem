@@ -360,16 +360,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         MediaQuery.of(context).orientation == Orientation.landscape;
 
     // No Scaffold/SafeArea — nav shell handles that
-    return Container(
-      padding: EdgeInsets.all(
-        Responsive.responsivePadding(context, mobile: 12, tablet: 16, desktop: 16),
-      ),
-      child: isDesktop
-          ? _buildDesktopLayout()
-          : isLandscape
-              ? _buildLandscapeLayout()
-              : _buildPortraitLayout(),
-    );
+    return isDesktop
+        ? _buildDesktopLayout()
+        : isLandscape
+            ? _buildLandscapeLayout()
+            : _buildPortraitLayout();
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -385,12 +380,20 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         children: [
           _buildHeader(),
           if (showAlert) _buildAlertBanner(alertType),
-          _buildCameraContainer(height: 280, isLandscape: false),
-          const SizedBox(height: 12),
-          _buildEnvironmentBar(isLandscape: false),
-          const SizedBox(height: 12),
-          _buildMetricsSidebar(isLandscape: false),
-          const SizedBox(height: 96),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              children: [
+                const SizedBox(height: 8),
+                _buildCameraContainer(height: 280, isLandscape: false),
+                const SizedBox(height: 12),
+                _buildEnvironmentBar(isLandscape: false),
+                const SizedBox(height: 12),
+                _buildMetricsSidebar(isLandscape: false),
+                const SizedBox(height: 96),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -481,8 +484,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildHeader() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

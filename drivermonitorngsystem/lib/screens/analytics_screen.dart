@@ -37,35 +37,32 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     final isTablet       = Responsive.isTablet(context);
 
     // No Scaffold/SafeArea — nav shell handles that
-    return Container(
-      padding: EdgeInsets.all(
-        Responsive.responsivePadding(context, mobile: 16, tablet: 24, desktop: 32),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildHeader(selectedDays),
-          Expanded(
-            child: analyticsAsync.when(
-              loading: () => const Center(
-                child: CircularProgressIndicator(color: Color(0xFF22d3ee)),
-              ),
-              error: (e, _) => const Center(
-                child: Text('Error loading analytics',
-                    style: TextStyle(color: Colors.white54)),
-              ),
-              data: (data) => _buildContent(context, data, isMobile, isTablet),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildHeader(selectedDays),
+        Expanded(
+          child: analyticsAsync.when(
+            loading: () => const Center(
+              child: CircularProgressIndicator(color: Color(0xFF22d3ee)),
             ),
+            error: (e, _) => const Center(
+              child: Text('Error loading analytics',
+                  style: TextStyle(color: Colors.white54)),
+            ),
+            data: (data) => _buildContent(context, data, isMobile, isTablet),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
   // ── HEADER + FILTER TABS ──────────────────────────────────────────────────
 
   Widget _buildHeader(int? selectedDays) {
-    return Column(
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // Title row
@@ -144,6 +141,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
         ),
         const SizedBox(height: 16),
       ],
+      ),
     );
   }
 
