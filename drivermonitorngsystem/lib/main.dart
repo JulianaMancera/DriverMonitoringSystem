@@ -1,163 +1,116 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'widgets/sidebar.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'core/database/database_helper.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/monitor_screen.dart';
 import 'screens/analytics_screen.dart';
-import 'utils/responsive.dart';
+import 'screens/settings_screen.dart';
 
-Future<void> main() async {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Allow both portrait and landscape
+  // Allows portrait and landscape orientations
   await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-    DeviceOrientation.landscapeLeft,
-    DeviceOrientation.landscapeRight,
-  ]);
+  DeviceOrientation.portraitUp,
+  DeviceOrientation.portraitDown,
+  DeviceOrientation.landscapeLeft,
+  DeviceOrientation.landscapeRight,
+]);
 
-  runApp(const MyApp());
+  // Set system UI overlay style
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.light,
+  ));
+
+  // Initialize database
+  await DatabaseHelper.instance.database;
+  await SharedPreferences.getInstance(); 
+
+  runApp(
+    const ProviderScope(
+      child: BantayDriveApp(),
+    ),
+  );
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class BantayDriveApp extends StatelessWidget {
+  const BantayDriveApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Driver Monitoring System',
+      title: 'Bantay Drive',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,
-        fontFamily: 'sans-serif',
-        scaffoldBackgroundColor: const Color(0xFF020617),
+        scaffoldBackgroundColor: const Color(0xFF080E1A),
+        fontFamily: 'SF Pro Display',
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF00D4FF),
+          secondary: Color(0xFF00D4FF),
+          surface: Color(0xFF0D1627),
+        ),
+        useMaterial3: true,
       ),
-      home: const MainScreen(),
+      home: const MainShell(),
     );
   }
 }
 
-class MainScreen extends StatefulWidget {
-  const MainScreen({super.key});
+// MAIN SHELL — Bottom Navigation
+final navIndexProvider = StateProvider<int>((ref) => 0);
+
+class MainShell extends ConsumerWidget {
+  const MainShell({super.key});
+
+  static final List<Widget> _screens = [
+    const DashboardScreen(),
+    const MonitorScreen(),
+    const AnalyticsScreen(),
+    const SettingsScreen(),
+    const ProfilePlaceholder(),
+  ];
 
   @override
-  State<MainScreen> createState() => _MainScreenState();
-}
-
-class _MainScreenState extends State<MainScreen> {
-  String activeTab = 'home';
-
-  void setActiveTab(String tab) {
-    setState(() {
-      activeTab = tab;
-    });
-  }
-
-  String _getHeaderTitle() {
-    switch (activeTab) {
-      case 'home':        return 'Dashboard Overview';
-      case 'monitor':     return 'Live Driver Monitoring';
-      case 'analytics':   return 'Analytics';
-      case 'settings':    return 'Settings';
-      default:            return 'Dashboard';
-    }
-  }
-
-  String _getHeaderTitleMobile() {
-    switch (activeTab) {
-      case 'home':        return 'Dashboard';
-      case 'monitor':     return 'Monitor';
-      case 'analytics':   return 'Analytics';
-      case 'settings':    return 'Settings';
-      default:            return 'Dashboard';
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isMobile = Responsive.isMobile(context);
+  Widget build(BuildContext context, WidgetRef ref) {
+    final currentIndex = ref.watch(navIndexProvider);
 
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF1e293b), Color(0xFF0f172a), Color(0xFF020617)],
-          ),
-        ),
-        child: Row(
-          children: [
-            // Sidebar — hidden on mobile, scrollable on tablet/desktop
-            if (!isMobile)
-              Sidebar(activeTab: activeTab, onTabChanged: setActiveTab),
-            Expanded(
-              child: Column(
-                children: [
-                  _buildHeader(context),
-                  Expanded(child: _buildContent()),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-      // Bottom nav for mobile — also scrollable to prevent overlap
-      bottomNavigationBar: isMobile
-          ? Sidebar(
-              activeTab: activeTab,
-              onTabChanged: setActiveTab,
-              isMobile: true,
-            )
-          : null,
-    );
-  }
-
-  Widget _buildHeader(BuildContext context) {
-    final isMobile = Responsive.isMobile(context);
-
-    return Container(
-      height: Responsive.responsiveHeight(
-          context, mobile: 64, tablet: 72, desktop: 80),
-      padding: EdgeInsets.symmetric(
-        horizontal: Responsive.responsivePadding(
-            context, mobile: 16, tablet: 24, desktop: 32),
-      ),
-      decoration: const BoxDecoration(color: Color(0xFF0f172a)),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+      backgroundColor: const Color(0xFF080E1A),
+      // Top App Bar with Logo
+          appBar: PreferredSize(
+          preferredSize: const Size.fromHeight(60),
+          child: AppBar(
+            backgroundColor: const Color(0xFF0D1627),
+            elevation: 0,
+            centerTitle: false,
+            title: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(
-                  isMobile ? _getHeaderTitleMobile() : _getHeaderTitle(),
-                  style: TextStyle(
-                    fontSize: Responsive.responsiveFont(
-                        context, mobile: 18, tablet: 20, desktop: 24),
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFFf1f5f9),
+                  ['Dashboard', 'Monitor', 'Analytics', 'Settings', 'Profile'][currentIndex],
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.5,
                   ),
-                  overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 4),
                 RichText(
-                  text: TextSpan(
-                    style: TextStyle(
-                      fontSize: Responsive.responsiveFont(
-                          context, mobile: 11, tablet: 11.5, desktop: 12),
-                      color: const Color(0xFF64748b),
-                    ),
-                    children: const [
-                      TextSpan(text: 'Connected: '),
+                  text: const TextSpan(
+                    text: 'Connected: ',
+                    style: TextStyle(color: Colors.white54, fontSize: 13),
+                    children: [
                       TextSpan(
                         text: 'USER',
                         style: TextStyle(
-                          fontFamily: 'monospace',
-                          color: Color(0xFF22d3ee),
+                          color: Color(0xFF00D4FF),
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ],
@@ -165,120 +118,137 @@ class _MainScreenState extends State<MainScreen> {
                 ),
               ],
             ),
-          ),
-          Row(
-            children: [
-              if (!isMobile)
-                Container(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: Responsive.responsivePadding(
-                        context, mobile: 12, tablet: 14, desktop: 16),
-                    vertical: Responsive.responsivePadding(
-                        context, mobile: 6, tablet: 7, desktop: 8),
-                  ),
+            actions: [
+              Padding(
+                padding: const EdgeInsets.only(right: 20),
+                child: Container(
+                  width: 10,
+                  height: 10,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0f172a),
-                    borderRadius: BorderRadius.circular(12),
+                    color: const Color(0xFF00FF88),
+                    shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                          color: const Color(0xFF0b1120).withOpacity(0.8),
-                          offset: const Offset(3, 3),
-                          blurRadius: 4,
-                          spreadRadius: -1),
-                      BoxShadow(
-                          color: const Color(0xFF1e293b).withOpacity(0.5),
-                          offset: const Offset(-1, -1),
-                          blurRadius: 2),
+                        color: const Color(0xFF00FF88).withOpacity(0.5),
+                        blurRadius: 8,
+                      ),
                     ],
-                  ),
-                  child: Text(
-                    'SYSTEM ACTIVE',
-                    style: TextStyle(
-                      fontSize: Responsive.responsiveFont(
-                          context, mobile: 12, tablet: 13, desktop: 14),
-                      color: const Color(0xFF22d3ee),
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ),
-              if (!isMobile)
-                SizedBox(
-                    width: Responsive.responsiveSpacing(
-                        context, mobile: 12, tablet: 14, desktop: 16)),
-              Container(
-                width: Responsive.responsiveValue(
-                    context, mobile: 32.0, tablet: 36.0, desktop: 40.0),
-                height: Responsive.responsiveValue(
-                    context, mobile: 32.0, tablet: 36.0, desktop: 40.0),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0f172a),
-                  shape: BoxShape.circle,
-                  boxShadow: const [
-                    BoxShadow(
-                        color: Color(0xFF0b1120),
-                        offset: Offset(3, 3),
-                        blurRadius: 6),
-                    BoxShadow(
-                        color: Color(0xFF1e293b),
-                        offset: Offset(-3, -3),
-                        blurRadius: 6),
-                  ],
-                ),
-                child: Center(
-                  child: Container(
-                    width: Responsive.responsiveValue(
-                        context, mobile: 8.0, tablet: 10.0, desktop: 12.0),
-                    height: Responsive.responsiveValue(
-                        context, mobile: 8.0, tablet: 10.0, desktop: 12.0),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF10b981),
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                            color: const Color(0xFF10b981).withOpacity(0.6),
-                            blurRadius: 10,
-                            spreadRadius: 2),
-                      ],
-                    ),
                   ),
                 ),
               ),
             ],
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(1),
+              child: Container(
+                height: 1,
+                color: Colors.white.withOpacity(0.05),
+              ),
+            ),
           ),
-        ],
+        ),
+      // SafeArea keeps all screens below the status bar
+      body: SafeArea(
+        child: IndexedStack(
+          index: currentIndex,
+          children: _screens,
+        ),
+      ),
+      bottomNavigationBar: _BottomNav(
+        currentIndex: currentIndex,
+        onTap: (index) =>
+            ref.read(navIndexProvider.notifier).state = index,
       ),
     );
   }
+}
 
-  Widget _buildContent() {
-    switch (activeTab) {
-      case 'home':      return const DashboardScreen();
-      case 'monitor':   return const MonitorScreen();
-      case 'analytics': return const AnalyticsScreen();
-      case 'settings':
-        return Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+// BOTTOM NAV
+class _BottomNav extends StatelessWidget {
+  final int currentIndex;
+  final ValueChanged<int> onTap;
+
+  const _BottomNav({required this.currentIndex, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D1627),
+        border: Border(
+          top: BorderSide(color: Colors.white.withOpacity(0.05), width: 1),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.4),
+            blurRadius: 20,
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              Text('Module Under Development',
-                  style: TextStyle(
-                    fontSize: Responsive.responsiveFont(
-                        context, mobile: 18, tablet: 19, desktop: 20),
-                    color: const Color(0xFF475569),
-                  )),
-              SizedBox(
-                  height: Responsive.responsiveSpacing(
-                      context, mobile: 8, desktop: 8)),
-              Text('Please return to Dashboard or Monitor',
-                  style: TextStyle(
-                    fontSize: Responsive.responsiveFont(
-                        context, mobile: 13, tablet: 13.5, desktop: 14),
-                    color: const Color(0xFF475569),
-                  )),
+              _NavItem(icon: Icons.home_rounded,      index: 0, currentIndex: currentIndex, onTap: onTap),
+              _NavItem(icon: Icons.videocam_rounded,  index: 1, currentIndex: currentIndex, onTap: onTap),
+              _NavItem(icon: Icons.bar_chart_rounded, index: 2, currentIndex: currentIndex, onTap: onTap),
+              _NavItem(icon: Icons.settings_rounded,  index: 3, currentIndex: currentIndex, onTap: onTap),
+              _NavItem(icon: Icons.person_rounded,    index: 4, currentIndex: currentIndex, onTap: onTap),
             ],
           ),
-        );
-      default: return const DashboardScreen();
-    }
+        ),
+      ),
+    );
   }
+}
+
+class _NavItem extends StatelessWidget {
+  final IconData icon;
+  final int index;
+  final int currentIndex;
+  final ValueChanged<int> onTap;
+
+  const _NavItem({
+    required this.icon,
+    required this.index,
+    required this.currentIndex,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isActive = index == currentIndex;
+    return GestureDetector(
+      onTap: () => onTap(index),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        decoration: BoxDecoration(
+          color: isActive
+              ? const Color(0xFF00D4FF).withOpacity(0.15)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(
+          icon,
+          color: isActive ? const Color(0xFF00D4FF) : Colors.white38,
+          size: 24,
+        ),
+      ),
+    );
+  }
+}
+
+// Profile placeholder
+class ProfilePlaceholder extends StatelessWidget {
+  const ProfilePlaceholder({super.key});
+
+  @override
+  Widget build(BuildContext context) => const Scaffold(
+        backgroundColor: Color(0xFF080E1A),
+        body: Center(
+          child: Text('Profile', style: TextStyle(color: Colors.white54)),
+        ),
+      );
 }

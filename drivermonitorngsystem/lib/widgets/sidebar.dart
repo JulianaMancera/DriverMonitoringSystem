@@ -20,14 +20,12 @@ class Sidebar extends StatelessWidget {
   }
 
   Widget _buildMobileNavBar(BuildContext context) {
-    final isLandscape =
-        MediaQuery.of(context).orientation == Orientation.landscape;
+    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
 
-    // Portrait: bigger buttons, centered with spaceAround
-    // Landscape: smaller buttons, scrollable horizontally
-    final double barHeight = isLandscape ? 48 : 64;
-    final double btnSize = isLandscape ? 32 : 40;
-    final double iconSize = isLandscape ? 16 : 20;
+    // Adjusted sizes to match the goal UI proportions
+    final double barHeight = isLandscape ? 56 : 72;
+    final double btnSize = isLandscape ? 40 : 48;
+    final double iconSize = isLandscape ? 18 : 22;
 
     final List<Widget> items = [
       ..._getNavItems().map((item) => _NavButton(
@@ -43,40 +41,18 @@ class Sidebar extends StatelessWidget {
 
     return Container(
       height: barHeight,
-      decoration: BoxDecoration(
-        color: const Color(0xFF0f172a),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.3),
-            offset: const Offset(0, -4),
-            blurRadius: 15,
-          ),
-        ],
+      decoration: const BoxDecoration(
+        color: Color(0xFF0f172a),
       ),
       child: SafeArea(
         top: false,
-        child: isLandscape
-            // Landscape: scrollable so nothing overflows
-            ? SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                child: Row(
-                  children: items
-                      .map((w) =>
-                          Padding(padding: const EdgeInsets.symmetric(horizontal: 6), child: w))
-                      .toList(),
-                ),
-              )
-            // Portrait: full width, evenly spaced and centered
-            : Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: items,
-                ),
-              ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: items,
+          ),
+        ),
       ),
     );
   }
@@ -84,16 +60,7 @@ class Sidebar extends StatelessWidget {
   Widget _buildDesktopSidebar(BuildContext context) {
     return Container(
       width: 96,
-      decoration: BoxDecoration(
-        color: const Color(0xFF0f172a),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.3),
-            offset: const Offset(4, 0),
-            blurRadius: 15,
-          ),
-        ],
-      ),
+      color: const Color(0xFF0f172a),
       child: Column(
         children: [
           const SizedBox(height: 32),
@@ -143,38 +110,7 @@ class NavItem {
   NavItem({required this.id, required this.icon, required this.label});
 }
 
-class _UserButton extends StatelessWidget {
-  final double btnSize;
-  final double iconSize;
-  const _UserButton({required this.btnSize, required this.iconSize});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: btnSize,
-      height: btnSize,
-      decoration: BoxDecoration(
-        color: const Color(0xFF0f172a),
-        shape: BoxShape.circle,
-        boxShadow: const [
-          BoxShadow(
-              color: Color(0xFF0b1120), offset: Offset(3, 3), blurRadius: 6),
-          BoxShadow(
-              color: Color(0xFF1e293b),
-              offset: Offset(-3, -3),
-              blurRadius: 6),
-        ],
-      ),
-      child: IconButton(
-        padding: EdgeInsets.zero,
-        icon: Icon(Icons.person_outline,
-            size: iconSize, color: const Color(0xFF64748b)),
-        onPressed: () {},
-      ),
-    );
-  }
-}
-
+// Neumorphic Buttons
 class _NavButton extends StatefulWidget {
   final NavItem item;
   final bool isMobile;
@@ -201,7 +137,7 @@ class _NavButtonState extends State<_NavButton> {
 
   @override
   Widget build(BuildContext context) {
-    final shouldShowPressed = widget.isActive || isHovered;
+    final bool isPressed = widget.isActive || isHovered;
 
     return MouseRegion(
       cursor: SystemMouseCursors.click,
@@ -210,46 +146,118 @@ class _NavButtonState extends State<_NavButton> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeInOut,
-          width: widget.isMobile ? widget.btnSize : double.infinity,
+          duration: const Duration(milliseconds: 150),
+          width: widget.btnSize,
           height: widget.btnSize,
           decoration: BoxDecoration(
             color: const Color(0xFF0f172a),
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: shouldShowPressed
+            borderRadius: BorderRadius.circular(12),
+            // Outward shadows for unselected state
+            boxShadow: !isPressed
                 ? const [
                     BoxShadow(
                         color: Color(0xFF0b1120),
-                        offset: Offset(-3, -3),
-                        blurRadius: 6),
+                        offset: Offset(4, 4),
+                        blurRadius: 8),
                     BoxShadow(
                         color: Color(0xFF1e293b),
-                        offset: Offset(3, 3),
-                        blurRadius: 6),
+                        offset: Offset(-4, -4),
+                        blurRadius: 8),
                   ]
-                : const [
-                    BoxShadow(
-                        color: Color(0xFF0b1120),
-                        offset: Offset(3, 3),
-                        blurRadius: 6),
-                    BoxShadow(
-                        color: Color(0xFF1e293b),
-                        offset: Offset(-3, -3),
-                        blurRadius: 6),
-                  ],
+                : null,
           ),
-          child: Center(
-            child: Icon(
-              widget.item.icon,
-              size: widget.iconSize,
-              color: widget.isActive
-                  ? const Color(0xFF22d3ee)
-                  : const Color(0xFF64748b),
-            ),
+          child: Stack(
+            children: [
+              if (isPressed)
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: _InnerShadowPainter(
+                      borderRadius: 12,
+                      shadowColor: const Color(0xFF0b1120),
+                      lightColor: const Color(0xFF1e293b),
+                    ),
+                  ),
+                ),
+              Center(
+                child: Icon(
+                  widget.item.icon,
+                  size: widget.iconSize,
+                  color: widget.isActive
+                      ? const Color(0xFF22d3ee)
+                      : const Color(0xFF64748b),
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
+}
+
+class _UserButton extends StatelessWidget {
+  final double btnSize;
+  final double iconSize;
+  const _UserButton({required this.btnSize, required this.iconSize});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: btnSize,
+      height: btnSize,
+      decoration: BoxDecoration(
+        color: const Color(0xFF0f172a),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: const [
+          BoxShadow(
+              color: Color(0xFF0b1120), offset: Offset(4, 4), blurRadius: 8),
+          BoxShadow(
+              color: Color(0xFF1e293b), offset: Offset(-4, -4), blurRadius: 8),
+        ],
+      ),
+      child: Icon(Icons.person_outline,
+          size: iconSize, color: const Color(0xFF64748b)),
+    );
+  }
+}
+
+//Custom Painter for that "Sunken" Look 
+class _InnerShadowPainter extends CustomPainter {
+  final double borderRadius;
+  final Color shadowColor;
+  final Color lightColor;
+
+  _InnerShadowPainter({
+    required this.borderRadius,
+    required this.shadowColor,
+    required this.lightColor,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final rrect = RRect.fromRectAndRadius(rect, Radius.circular(borderRadius));
+
+    canvas.clipRRect(rrect);
+
+    final Paint shadowPaint = Paint()
+      ..color = shadowColor
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 5;
+
+    final Paint lightPaint = Paint()
+      ..color = lightColor
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 5;
+
+    // Draws the dark inset shadow on top/left
+    canvas.drawRRect(rrect.shift(const Offset(2, 2)), shadowPaint);
+    // Draws the light inset highlight on bottom/right
+    canvas.drawRRect(rrect.shift(const Offset(-2, -2)), lightPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
