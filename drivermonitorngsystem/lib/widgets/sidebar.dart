@@ -42,7 +42,7 @@ class Sidebar extends StatelessWidget {
     return Container(
       height: barHeight,
       decoration: const BoxDecoration(
-        color: Color(0xFF0f172a), // Matches the button background
+        color: Color(0xFF0f172a),
       ),
       child: SafeArea(
         top: false,
