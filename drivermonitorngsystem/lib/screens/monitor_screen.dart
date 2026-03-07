@@ -1,35 +1,28 @@
 import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:camera/camera.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
 import '../core/database/database_helper.dart';
+import '../utils/responsive.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RIVERPOD PROVIDERS
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Driver state: 'neutral', 'drowsy', 'distracted'
 final driverStateProvider = StateProvider<String>((ref) => 'neutral');
-
-// Live percentages
 final alertnessPctProvider = StateProvider<double>((ref) => 100.0);
 final drowsinessPctProvider = StateProvider<double>((ref) => 0.0);
 final distractionPctProvider = StateProvider<double>((ref) => 0.0);
-
-// Recording state
 final isRecordingProvider = StateProvider<bool>((ref) => false);
-
-// Alert banner visibility
 final showAlertBannerProvider = StateProvider<bool>((ref) => false);
 final alertBannerTypeProvider = StateProvider<String>((ref) => 'DROWSY');
-
-// Clear glasses toggle
 final clearGlassesProvider = StateProvider<bool>((ref) => false);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MONITORING SCREEN
+// MONITOR SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
 
 class MonitorScreen extends ConsumerStatefulWidget {
@@ -39,91 +32,140 @@ class MonitorScreen extends ConsumerStatefulWidget {
   ConsumerState<MonitorScreen> createState() => _MonitorScreenState();
 }
 
-class _MonitorScreenState extends ConsumerState<MonitorScreen> {
-  // Camera
-  CameraController? _cameraController;
-  bool _cameraInitialized = false;
+class _MonitorScreenState extends ConsumerState<MonitorScreen>
+    with TickerProviderStateMixin {
 
-  // Session tracking
+  // ── Camera ──
+  CameraController? _cameraController;
+  List<CameraDescription> _cameras = [];
+  bool _cameraInitialized = false;
+  String? _cameraError;
+
+  // ── Session tracking ──
   int? _currentSessionId;
   DateTime? _sessionStartTime;
   Timer? _snapshotTimer;
   Timer? _alertBannerTimer;
 
-  // Alert tracking (3 consecutive detections)
+  // ── Alert tracking ──
   int _consecutiveDrowsy = 0;
   int _consecutiveDistracted = 0;
   int _alertLevel = 0;
 
-  // System logs
+  // ── System logs ──
   final List<Map<String, dynamic>> _systemLogs = [];
 
-  // Audio
+  // ── Audio ──
   final AudioPlayer _audioPlayer = AudioPlayer();
   final AudioPlayer _alarmPlayer = AudioPlayer();
 
-  // ── LIFECYCLE ──────────────────────────────────────────────────────────────
+  // ── Animations ──
+  late AnimationController _faceBoxController;
+  late Animation<Offset> _faceBoxAnimation;
+  late AnimationController _warningController;
+  late Animation<double> _warningAnimation;
+
+
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // LIFECYCLE
+  // ─────────────────────────────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
     _initCamera();
+
+    _faceBoxController = AnimationController(
+      duration: const Duration(seconds: 4),
+      vsync: this,
+    )..repeat(reverse: true);
+
+    _faceBoxAnimation = Tween<Offset>(
+      begin: Offset.zero,
+      end: const Offset(10, 5),
+    ).animate(CurvedAnimation(
+        parent: _faceBoxController, curve: Curves.easeInOut));
+
+    _warningController = AnimationController(
+      duration: const Duration(milliseconds: 1000),
+      vsync: this,
+    )..repeat(reverse: true);
+
+    _warningAnimation =
+        Tween<double>(begin: 0.8, end: 1.0).animate(_warningController);
   }
 
   @override
   void dispose() {
-    _cameraController?.dispose();
     _snapshotTimer?.cancel();
     _alertBannerTimer?.cancel();
+    _faceBoxController.dispose();
+    _warningController.dispose();
+    _cameraController?.dispose();
     _audioPlayer.dispose();
     _alarmPlayer.dispose();
     super.dispose();
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // CAMERA
+  // ─────────────────────────────────────────────────────────────────────────
+
   Future<void> _initCamera() async {
     try {
-      final cameras = await availableCameras();
-      if (cameras.isEmpty) return;
+      _cameras = await availableCameras();
+      if (_cameras.isEmpty) {
+        setState(() => _cameraError = 'No cameras found');
+        return;
+      }
 
-      // Use front camera
-      final frontCamera = cameras.firstWhere(
+      final front = _cameras.firstWhere(
         (c) => c.lensDirection == CameraLensDirection.front,
-        orElse: () => cameras.first,
+        orElse: () => _cameras.first,
       );
 
       _cameraController = CameraController(
-        frontCamera,
+        front,
         ResolutionPreset.medium,
         enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.jpeg,
       );
 
       await _cameraController!.initialize();
       if (mounted) setState(() => _cameraInitialized = true);
     } catch (e) {
-      debugPrint('Camera init error: $e');
+      if (mounted) setState(() => _cameraError = 'Camera error: $e');
     }
   }
 
-  // ── SESSION CONTROL ────────────────────────────────────────────────────────
+  Size _getPreviewSize(bool isLandscape) {
+    if (!_cameraInitialized) {
+      return isLandscape ? const Size(1920, 1080) : const Size(1080, 1920);
+    }
+    final ps = _cameraController!.value.previewSize!;
+    if (isLandscape) return Size(ps.width, ps.height);
+    return Size(ps.height, ps.width);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SESSION CONTROL
+  // ─────────────────────────────────────────────────────────────────────────
 
   Future<void> _startRecording() async {
-    // Create session in DB
     _currentSessionId = await DatabaseHelper.instance.insertSession();
     await DatabaseHelper.instance.insertStateCount(_currentSessionId!);
-
     _sessionStartTime = DateTime.now();
 
     ref.read(isRecordingProvider.notifier).state = true;
     ref.read(driverStateProvider.notifier).state = 'neutral';
 
-    // Add initial system logs
     await _addLog('System Initialized', 'INFO');
     await Future.delayed(const Duration(milliseconds: 500));
     await _addLog('Face Tracking Active', 'SUCCESS');
     await Future.delayed(const Duration(milliseconds: 400));
     await _addLog('Baseline Established', 'INFO');
 
-    // Start alertness snapshot timer (every 5 seconds)
     _snapshotTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       _saveAlertnessSnapshot();
     });
@@ -143,7 +185,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen> {
     _consecutiveDrowsy = 0;
     _consecutiveDistracted = 0;
 
-    // Calculate session duration
     final durationSec = _sessionStartTime != null
         ? DateTime.now().difference(_sessionStartTime!).inSeconds
         : 0;
@@ -170,25 +211,23 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen> {
     _sessionStartTime = null;
   }
 
-  // ── MODEL OUTPUT HANDLER ──────────────────────────────────────────────────
-  // Call this method when TFLite returns a result
-  // This is where you plug in your model inference output
+  // ─────────────────────────────────────────────────────────────────────────
+  // MODEL OUTPUT — plug your TFLite inference here (NOT activated yet)
+  // ─────────────────────────────────────────────────────────────────────────
 
   void onModelOutput({
-    required String state,          // 'neutral', 'drowsy', 'distracted'
+    required String state,
     required double alertnessPct,
     required double drowsinessPct,
     required double distractionPct,
   }) {
     if (!ref.read(isRecordingProvider)) return;
 
-    // Update live UI percentages
     ref.read(alertnessPctProvider.notifier).state = alertnessPct;
     ref.read(drowsinessPctProvider.notifier).state = drowsinessPct;
     ref.read(distractionPctProvider.notifier).state = distractionPct;
     ref.read(driverStateProvider.notifier).state = state;
 
-    // Update state counts in DB
     if (_currentSessionId != null) {
       DatabaseHelper.instance.incrementStateCount(
         sessionId: _currentSessionId!,
@@ -196,7 +235,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen> {
       );
     }
 
-    // Check consecutive detections for 3-level alert system
     if (state == 'drowsy') {
       _consecutiveDrowsy++;
       _consecutiveDistracted = 0;
@@ -206,7 +244,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen> {
       _consecutiveDrowsy = 0;
       _checkAndTriggerAlert('DISTRACTED', _consecutiveDistracted);
     } else {
-      // Neutral — reset counters
       _consecutiveDrowsy = 0;
       _consecutiveDistracted = 0;
       _alertLevel = 0;
@@ -215,67 +252,57 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen> {
     }
   }
 
-  // ── 3-LEVEL ALERT SYSTEM ──────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // 3-LEVEL ALERT SYSTEM
+  // ─────────────────────────────────────────────────────────────────────────
 
   Future<void> _checkAndTriggerAlert(String type, int consecutive) async {
-    if (consecutive < 3) return; // Need 3 consecutive before alerting
+    if (consecutive < 3) return;
 
-    // Determine level
     int newLevel = 1;
     if (consecutive >= 9) newLevel = 3;
     else if (consecutive >= 6) newLevel = 2;
-    else newLevel = 1;
 
-    if (newLevel <= _alertLevel && _alertLevel == 3) return; // Already at max
+    if (newLevel <= _alertLevel && _alertLevel == 3) return;
     _alertLevel = newLevel;
 
-    // Show alert banner
     ref.read(showAlertBannerProvider.notifier).state = true;
     ref.read(alertBannerTypeProvider.notifier).state = type;
 
-    // Save to DB
     if (_currentSessionId != null) {
       await DatabaseHelper.instance.insertAlertEvent(
         sessionId: _currentSessionId!,
         alertType: type,
         alertLevel: newLevel,
       );
-
       final msg = type == 'DROWSY' ? 'Microsleep detected' : 'Distraction detected';
       await _addLog(msg, 'WARNING');
     }
 
-    // Play sound + vibrate
     await _playAlertSound(newLevel);
     await _triggerVibration(newLevel);
 
-    // Auto-dismiss banner for levels 1 & 2
     if (newLevel < 3) {
       _alertBannerTimer?.cancel();
       _alertBannerTimer = Timer(const Duration(seconds: 3), () {
-        if (mounted) {
-          ref.read(showAlertBannerProvider.notifier).state = false;
-        }
+        if (mounted) ref.read(showAlertBannerProvider.notifier).state = false;
       });
     }
   }
 
   Future<void> _playAlertSound(int level) async {
     if (level == 1 || level == 2) {
-      // Short notification ping
       await _audioPlayer.stop();
       await _audioPlayer.play(AssetSource('sounds/notification.mp3'));
     } else {
-      // Level 3 — looping alarm
       await _alarmPlayer.setReleaseMode(ReleaseMode.loop);
       await _alarmPlayer.play(AssetSource('sounds/alarm.mp3'));
     }
   }
 
   Future<void> _triggerVibration(int level) async {
-    final hasVibrator = await Vibration.hasVibrator();
+    final hasVibrator = await Vibration.hasVibrator() ?? false;
     if (!hasVibrator) return;
-
     if (level == 1) {
       Vibration.vibrate(duration: 200);
     } else if (level == 2) {
@@ -293,21 +320,17 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen> {
     ref.read(showAlertBannerProvider.notifier).state = false;
   }
 
-  // ── HELPERS ────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // HELPERS
+  // ─────────────────────────────────────────────────────────────────────────
 
   Future<void> _addLog(String message, String type) async {
     final now = DateTime.now();
     final timeStr =
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
-
     setState(() {
-      _systemLogs.add({
-        'time': timeStr,
-        'message': message,
-        'type': type,
-      });
+      _systemLogs.add({'time': timeStr, 'message': message, 'type': type});
     });
-
     if (_currentSessionId != null) {
       await DatabaseHelper.instance.insertSystemLog(
         sessionId: _currentSessionId!,
@@ -326,60 +349,140 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen> {
     );
   }
 
-  // ── BUILD ──────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // BUILD
+  // ─────────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = Responsive.isDesktop(context);
+    final isLandscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
+
+    // No Scaffold/SafeArea — nav shell handles that
+    return Container(
+      padding: EdgeInsets.all(
+        Responsive.responsivePadding(context, mobile: 12, tablet: 16, desktop: 16),
+      ),
+      child: isDesktop
+          ? _buildDesktopLayout()
+          : isLandscape
+              ? _buildLandscapeLayout()
+              : _buildPortraitLayout(),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // PORTRAIT LAYOUT
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Widget _buildPortraitLayout() {
     final showAlert = ref.watch(showAlertBannerProvider);
     final alertType = ref.watch(alertBannerTypeProvider);
-    final isRecording = ref.watch(isRecordingProvider);
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF080E1A),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(),
-            Expanded(
-              child: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    // Alert Banner
-                    if (showAlert) _buildAlertBanner(alertType),
-
-                    // Camera Feed
-                    _buildCameraSection(),
-
-                    const SizedBox(height: 12),
-
-                    // Controls Row
-                    _buildControlsRow(isRecording),
-
-                    const SizedBox(height: 16),
-
-                    // State Progress Bars
-                    _buildStateBars(),
-
-                    const SizedBox(height: 16),
-
-                    // System Log
-                    _buildSystemLog(),
-
-                    const SizedBox(height: 24),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          _buildHeader(),
+          if (showAlert) _buildAlertBanner(alertType),
+          _buildCameraContainer(height: 280, isLandscape: false),
+          const SizedBox(height: 12),
+          _buildEnvironmentBar(isLandscape: false),
+          const SizedBox(height: 12),
+          _buildMetricsSidebar(isLandscape: false),
+          const SizedBox(height: 96),
+        ],
       ),
     );
   }
 
-  // ── HEADER ────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // LANDSCAPE LAYOUT
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Widget _buildLandscapeLayout() {
+    final showAlert = ref.watch(showAlertBannerProvider);
+    final alertType = ref.watch(alertBannerTypeProvider);
+
+    return Column(
+      children: [
+        _buildHeader(),
+        if (showAlert) _buildAlertBanner(alertType),
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 55,
+                child: Column(
+                  children: [
+                    Expanded(child: _buildCameraContainer(isLandscape: true)),
+                    const SizedBox(height: 8),
+                    _buildEnvironmentBar(isLandscape: true),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 45,
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      _buildMetricsSidebar(isLandscape: true),
+                      const SizedBox(height: 8),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // DESKTOP LAYOUT
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Widget _buildDesktopLayout() {
+    final showAlert = ref.watch(showAlertBannerProvider);
+    final alertType = ref.watch(alertBannerTypeProvider);
+
+    return Column(
+      children: [
+        _buildHeader(),
+        if (showAlert) _buildAlertBanner(alertType),
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 8,
+                child: Column(
+                  children: [
+                    Expanded(child: _buildCameraContainer(isLandscape: true)),
+                    SizedBox(height: Responsive.responsiveSpacing(context, mobile: 16, tablet: 20, desktop: 24)),
+                    _buildEnvironmentBar(isLandscape: false),
+                  ],
+                ),
+              ),
+              SizedBox(width: Responsive.responsiveSpacing(context, mobile: 16, tablet: 24, desktop: 32)),
+              Expanded(flex: 4, child: _buildMetricsSidebar(isLandscape: false)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // HEADER
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildHeader() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+      padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -432,410 +535,654 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen> {
     );
   }
 
-  // ── ALERT BANNER ──────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // ALERT BANNER
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildAlertBanner(String type) {
     final isDrowsy = type == 'DROWSY';
     return GestureDetector(
       onTap: _dismissAlert,
-      child: Container(
-        width: double.infinity,
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: const Color(0xFF2A0A0A),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFFF4444).withOpacity(0.5)),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFFFF4444).withOpacity(0.2),
-              blurRadius: 20,
-              spreadRadius: 2,
-            ),
-          ],
-        ),
-        child: Column(
-          children: [
-            const Icon(Icons.warning_amber_rounded,
-                color: Color(0xFFFF4444), size: 36),
-            const SizedBox(height: 8),
-            Text(
-              isDrowsy ? 'DROWSINESS DETECTED' : 'DISTRACTION DETECTED',
-              style: const TextStyle(
-                color: Color(0xFFFF4444),
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1,
+      child: AnimatedBuilder(
+        animation: _warningAnimation,
+        builder: (context, child) {
+          return Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF2A0A0A),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: Colors.red.withOpacity(0.5 * _warningAnimation.value),
               ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.red.withOpacity(0.2),
+                  blurRadius: 20,
+                  spreadRadius: 2,
+                ),
+              ],
             ),
-            const SizedBox(height: 4),
-            const Text(
-              'Audible Alert Active • Tap to dismiss',
-              style: TextStyle(color: Color(0xFFFF8888), fontSize: 12),
+            child: Column(
+              children: [
+                Icon(Icons.warning_amber_rounded,
+                    color: Colors.red.shade500, size: 36),
+                const SizedBox(height: 8),
+                Text(
+                  isDrowsy ? 'DROWSINESS DETECTED' : 'DISTRACTION DETECTED',
+                  style: TextStyle(
+                    color: Colors.red.shade500,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Audible Alert Active • Tap to dismiss',
+                  style: TextStyle(color: Colors.red.shade300, fontSize: 12),
+                ),
+              ],
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
 
-  // ── CAMERA SECTION ────────────────────────────────────────────────────────
-  Widget _buildCameraSection() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      height: 220,
-      decoration: BoxDecoration(
-        color: const Color(0xFF080E1A),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          // Camera preview or placeholder
-          if (_cameraInitialized && _cameraController != null)
-            CameraPreview(_cameraController!)
-          else
-            Container(
-              color: const Color(0xFF080E1A),
-              child: const Center(
-                child: Icon(Icons.videocam_off_rounded,
-                    color: Colors.white24, size: 40),
-              ),
-            ),
+  // ─────────────────────────────────────────────────────────────────────────
+  // CAMERA CONTAINER
+  // ─────────────────────────────────────────────────────────────────────────
 
-          // Face detection rectangle (shown when recording)
-          if (ref.watch(isRecordingProvider))
-            Center(
-              child: Container(
-                width: 120,
-                height: 160,
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: const Color(0xFF00D4FF),
-                    width: 2,
-                  ),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              ),
-            ),
+  Widget _buildCameraContainer({double? height, required bool isLandscape}) {
+    final previewSize = _getPreviewSize(isLandscape);
+    final isRecording = ref.watch(isRecordingProvider);
+
+    Widget cameraWidget = ClipRect(
+      child: FittedBox(
+        fit: BoxFit.cover,
+        child: SizedBox(
+          width: previewSize.width,
+          height: previewSize.height,
+          child: Transform(
+            alignment: Alignment.center,
+            transform: Matrix4.rotationY(3.14159),
+            child: _cameraInitialized
+                ? CameraPreview(_cameraController!)
+                : _buildCameraFallback(),
+          ),
+        ),
+      ),
+    );
+
+    Widget inner = ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          cameraWidget,
+          _buildGradientOverlay(),
+          if (isRecording) _buildRecBadge(),
+          if (isRecording) _buildFaceTrackingBox(isLandscape: isLandscape),
+          if (ref.watch(showAlertBannerProvider))
+            _buildWarningOverlay(ref.watch(alertBannerTypeProvider)),
         ],
       ),
     );
+
+    return Container(
+      height: height,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: const Color(0xFF0f172a),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: const [
+          BoxShadow(color: Color(0xFF0b1120), offset: Offset(8, 8),   blurRadius: 16),
+          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-8, -8), blurRadius: 16),
+        ],
+      ),
+      padding: const EdgeInsets.all(6),
+      child: inner,
+    );
   }
 
-  // ── CONTROLS ROW ─────────────────────────────────────────────────────────
-  Widget _buildControlsRow(bool isRecording) {
-    final clearGlasses = ref.watch(clearGlassesProvider);
+  Widget _buildCameraFallback() {
+    if (_cameraError != null) {
+      return Container(
+        color: Colors.black,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.videocam_off, color: Color(0xFF64748b), size: 48),
+              const SizedBox(height: 12),
+              Text(_cameraError!,
+                  style: const TextStyle(color: Color(0xFF64748b), fontSize: 13),
+                  textAlign: TextAlign.center),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: _initCamera,
+                child: const Text('Retry',
+                    style: TextStyle(color: Color(0xFF22d3ee))),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return Container(
+      color: Colors.black,
+      child: const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(color: Color(0xFF22d3ee)),
+            SizedBox(height: 12),
+            Text('Initializing camera…',
+                style: TextStyle(color: Color(0xFF64748b), fontSize: 13)),
+          ],
+        ),
+      ),
+    );
+  }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+  Widget _buildGradientOverlay() {
+    return Positioned.fill(
       child: Container(
         decoration: BoxDecoration(
-          color: const Color(0xFF0D1627),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white.withOpacity(0.06)),
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.transparent,
+              const Color(0xFF0f172a).withOpacity(0.4),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRecBadge() {
+    return Positioned(
+      top: 12, right: 12,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.red.withOpacity(0.85),
+          borderRadius: BorderRadius.circular(20),
         ),
         child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // Clear Glasses Toggle
-            Expanded(
-              child: GestureDetector(
-                onTap: () {
-                  ref.read(clearGlassesProvider.notifier).state = !clearGlasses;
-                  if (!clearGlasses && _currentSessionId != null) {
-                    _addLog('Clear Glasses Mode Active', 'SUCCESS');
-                  }
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  decoration: BoxDecoration(
-                    color: clearGlasses
-                        ? const Color(0xFF00D4FF).withOpacity(0.1)
-                        : Colors.transparent,
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(14),
-                      bottomLeft: Radius.circular(14),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.remove_red_eye_outlined,
-                        color: clearGlasses
-                            ? const Color(0xFF00D4FF)
-                            : Colors.white38,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Clear Glasses',
-                        style: TextStyle(
-                          color: clearGlasses
-                              ? const Color(0xFF00D4FF)
-                              : Colors.white38,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-            // Divider
             Container(
-              width: 1,
-              height: 40,
-              color: Colors.white.withOpacity(0.08),
+              width: 8, height: 8,
+              decoration: const BoxDecoration(
+                  color: Colors.white, shape: BoxShape.circle),
             ),
-
-            // Record / Stop Button
-            Expanded(
-              child: GestureDetector(
-                onTap: () {
-                  if (isRecording) {
-                    _stopRecording();
-                  } else {
-                    _startRecording();
-                  }
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  decoration: BoxDecoration(
-                    color: isRecording
-                        ? const Color(0xFFFF4444).withOpacity(0.1)
-                        : Colors.transparent,
-                    borderRadius: const BorderRadius.only(
-                      topRight: Radius.circular(14),
-                      bottomRight: Radius.circular(14),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Container(
-                        width: 16,
-                        height: 16,
-                        decoration: BoxDecoration(
-                          color: isRecording
-                              ? const Color(0xFFFF4444)
-                              : Colors.white38,
-                          shape: isRecording
-                              ? BoxShape.rectangle
-                              : BoxShape.circle,
-                          borderRadius: isRecording
-                              ? BorderRadius.circular(3)
-                              : null,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        isRecording ? 'Stop Rec' : 'Record',
-                        style: TextStyle(
-                          color: isRecording
-                              ? const Color(0xFFFF4444)
-                              : Colors.white38,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+            const SizedBox(width: 6),
+            const Text('REC',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2)),
           ],
         ),
       ),
     );
   }
 
-  // ── STATE PROGRESS BARS ──────────────────────────────────────────────────
-  Widget _buildStateBars() {
-    final alertness = ref.watch(alertnessPctProvider);
-    final drowsiness = ref.watch(drowsinessPctProvider);
-    final distraction = ref.watch(distractionPctProvider);
+  Widget _buildFaceTrackingBox({required bool isLandscape}) {
+    final boxW = isLandscape ? 120.0 : 110.0;
+    final boxH = isLandscape ? 150.0 : 150.0;
+    final startTop = isLandscape ? 15.0 : 25.0;
+    final startLeft = isLandscape ? 60.0 : 55.0;
+
+    return AnimatedBuilder(
+      animation: _faceBoxAnimation,
+      builder: (context, child) {
+        return Positioned(
+          top: startTop + _faceBoxAnimation.value.dy,
+          left: startLeft + _faceBoxAnimation.value.dx,
+          child: Container(
+            width: boxW,
+            height: boxH,
+            decoration: BoxDecoration(
+              border: Border.all(
+                  color: const Color(0xFF22d3ee).withOpacity(0.7), width: 1.5),
+              borderRadius: BorderRadius.circular(6),
+              boxShadow: [
+                BoxShadow(
+                    color: const Color(0xFF22d3ee).withOpacity(0.3),
+                    blurRadius: 20,
+                    spreadRadius: 2),
+              ],
+            ),
+            child: Stack(
+              children: [
+                _buildCornerMarker(Alignment.topLeft),
+                _buildCornerMarker(Alignment.topRight),
+                _buildCornerMarker(Alignment.bottomLeft),
+                _buildCornerMarker(Alignment.bottomRight),
+                Positioned(
+                  top: -18, left: 0,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF22d3ee).withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text('FACE DETECTED',
+                        style: TextStyle(
+                            color: Color(0xFF22d3ee),
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCornerMarker(Alignment alignment) {
+    final isTop = alignment.y < 0;
+    final isLeft = alignment.x < 0;
+    return Align(
+      alignment: alignment,
+      child: Transform.translate(
+        offset: Offset(isLeft ? -1 : 1, isTop ? -1 : 1),
+        child: Container(
+          width: 14, height: 14,
+          decoration: BoxDecoration(
+            border: Border(
+              top:    isTop  ? const BorderSide(color: Color(0xFF22d3ee), width: 1.5) : BorderSide.none,
+              bottom: !isTop ? const BorderSide(color: Color(0xFF22d3ee), width: 1.5) : BorderSide.none,
+              left:   isLeft  ? const BorderSide(color: Color(0xFF22d3ee), width: 1.5) : BorderSide.none,
+              right:  !isLeft ? const BorderSide(color: Color(0xFF22d3ee), width: 1.5) : BorderSide.none,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWarningOverlay(String type) {
+    final isDrowsy = type == 'DROWSY';
+    return AnimatedBuilder(
+      animation: _warningAnimation,
+      builder: (context, child) {
+        return Container(
+          color: Colors.red.withOpacity(0.4),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 2, sigmaY: 2),
+            child: Center(
+              child: Transform.scale(
+                scale: _warningAnimation.value,
+                child: Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0f172a).withOpacity(0.9),
+                    border: Border.all(color: Colors.red.withOpacity(0.5)),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                          color: Colors.red.withOpacity(0.4),
+                          blurRadius: 50,
+                          spreadRadius: 10),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.warning_amber_rounded,
+                          size: 48, color: Colors.red.shade500),
+                      const SizedBox(height: 12),
+                      Text(
+                        isDrowsy ? 'DROWSINESS DETECTED' : 'DISTRACTION DETECTED',
+                        style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red.shade500,
+                            letterSpacing: 3),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 6),
+                      Text('Audible Alert Active',
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.red.shade300)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ENVIRONMENT BAR
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Widget _buildEnvironmentBar({required bool isLandscape}) {
+    final clearGlasses = ref.watch(clearGlassesProvider);
+    final isRecording = ref.watch(isRecordingProvider);
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.all(16),
+      height: isLandscape ? 52 : 68,
       decoration: BoxDecoration(
-        color: const Color(0xFF0D1627),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.06)),
+        color: const Color(0xFF0f172a),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: const [
+          BoxShadow(color: Color(0xFF0b1120), offset: Offset(6, 6),   blurRadius: 12),
+          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-6, -6), blurRadius: 12),
+        ],
       ),
-      child: Column(
+      child: Row(
         children: [
-          _StateBar(
-            icon: Icons.flash_on_rounded,
-            iconColor: const Color(0xFF00D4FF),
-            label: 'Alertness',
-            value: alertness,
-            barColor: const Color(0xFF00D4FF),
-            textColor: const Color(0xFF00D4FF),
+          // ── Clear Glasses ──
+          Expanded(
+            child: InkWell(
+              onTap: () {
+                ref.read(clearGlassesProvider.notifier).state = !clearGlasses;
+                if (!clearGlasses && _currentSessionId != null) {
+                  _addLog('Clear Glasses Mode Active', 'SUCCESS');
+                }
+              },
+              borderRadius: const BorderRadius.horizontal(left: Radius.circular(20)),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: isLandscape ? 32 : 36,
+                    height: isLandscape ? 32 : 36,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0f172a),
+                      borderRadius: BorderRadius.circular(10),
+                      boxShadow: clearGlasses
+                          ? [
+                              BoxShadow(color: const Color(0xFF0b1120).withOpacity(0.8), offset: const Offset(3, 3),   blurRadius: 6),
+                              BoxShadow(color: const Color(0xFF1e293b).withOpacity(0.8), offset: const Offset(-3, -3), blurRadius: 6),
+                            ]
+                          : const [
+                              BoxShadow(color: Color(0xFF0b1120), offset: Offset(4, 4),   blurRadius: 8),
+                              BoxShadow(color: Color(0xFF1e293b), offset: Offset(-4, -4), blurRadius: 8),
+                            ],
+                    ),
+                    child: Icon(Icons.visibility,
+                        size: isLandscape ? 16 : 18,
+                        color: clearGlasses
+                            ? const Color(0xFF22d3ee)
+                            : const Color(0xFF64748b)),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Clear Glasses',
+                    style: TextStyle(
+                      fontSize: isLandscape ? 12 : 13,
+                      fontWeight: FontWeight.w500,
+                      color: clearGlasses
+                          ? const Color(0xFF22d3ee)
+                          : const Color(0xFF64748b),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-          const SizedBox(height: 16),
-          _StateBar(
-            icon: Icons.visibility_off_rounded,
-            iconColor: const Color(0xFFFF4444),
-            label: 'Drowsiness',
-            value: drowsiness,
-            barColor: const Color(0xFFFF4444),
-            textColor: const Color(0xFFFF4444),
-          ),
-          const SizedBox(height: 16),
-          _StateBar(
-            icon: Icons.remove_red_eye_rounded,
-            iconColor: const Color(0xFFFFB800),
-            label: 'Distraction',
-            value: distraction,
-            barColor: const Color(0xFFFFB800),
-            textColor: const Color(0xFFFFB800),
+
+          // Divider
+          Container(
+              width: 1,
+              height: isLandscape ? 28 : 36,
+              color: const Color(0xFF1e293b)),
+
+          // ── Record / Stop ──
+          Expanded(
+            child: InkWell(
+              onTap: () {
+                if (isRecording) {
+                  _stopRecording();
+                } else {
+                  _startRecording();
+                }
+              },
+              borderRadius: const BorderRadius.horizontal(right: Radius.circular(20)),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    width: isLandscape ? 32 : 36,
+                    height: isLandscape ? 32 : 36,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0f172a),
+                      borderRadius: BorderRadius.circular(10),
+                      boxShadow: isRecording
+                          ? [
+                              BoxShadow(
+                                  color: Colors.red.withOpacity(0.5),
+                                  blurRadius: 12,
+                                  spreadRadius: 2),
+                            ]
+                          : const [
+                              BoxShadow(color: Color(0xFF0b1120), offset: Offset(4, 4),   blurRadius: 8),
+                              BoxShadow(color: Color(0xFF1e293b), offset: Offset(-4, -4), blurRadius: 8),
+                            ],
+                    ),
+                    child: Icon(
+                      isRecording ? Icons.stop_circle : Icons.fiber_manual_record,
+                      size: isLandscape ? 16 : 18,
+                      color: isRecording ? Colors.red : const Color(0xFF64748b),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    isRecording ? 'Stop Rec' : 'Record',
+                    style: TextStyle(
+                      fontSize: isLandscape ? 12 : 13,
+                      fontWeight: FontWeight.w500,
+                      color: isRecording ? Colors.red : const Color(0xFF64748b),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  // ── SYSTEM LOG ────────────────────────────────────────────────────────────
-  Widget _buildSystemLog() {
+  // ─────────────────────────────────────────────────────────────────────────
+  // METRICS SIDEBAR
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Widget _buildMetricsSidebar({required bool isLandscape}) {
+    final alertness   = ref.watch(alertnessPctProvider);
+    final drowsiness  = ref.watch(drowsinessPctProvider);
+    final distraction = ref.watch(distractionPctProvider);
+    const spacing = SizedBox(height: 16);
+
+    return Column(
+      children: [
+        _buildMetricCard(
+            label: 'Alertness',
+            value: alertness,
+            color: const Color(0xFF22d3ee),
+            icon: Icons.bolt),
+        spacing,
+        _buildMetricCard(
+            label: 'Drowsiness',
+            value: drowsiness,
+            color: Colors.red.shade500,
+            icon: Icons.visibility_off),
+        spacing,
+        _buildMetricCard(
+            label: 'Distraction',
+            value: distraction,
+            color: const Color(0xFFfbbf24),
+            icon: Icons.visibility),
+        const SizedBox(height: 20),
+        SizedBox(height: isLandscape ? 260.0 : 320.0, child: _buildSystemLog()),
+      ],
+    );
+  }
+
+  Widget _buildMetricCard({
+    required String label,
+    required double value,
+    required Color color,
+    required IconData icon,
+  }) {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF0D1627),
+        color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.06)),
+        boxShadow: const [
+          BoxShadow(color: Color(0xFF0b1120), offset: Offset(6, 6),   blurRadius: 12),
+          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-6, -6), blurRadius: 12),
+        ],
       ),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'SYSTEM LOG',
-            style: TextStyle(
-              color: Colors.white38,
-              fontSize: 11,
-              letterSpacing: 2,
-              fontWeight: FontWeight.w600,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1e293b),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(icon, size: 16, color: color),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(label,
+                      style: const TextStyle(
+                          color: Color(0xFFcbd5e1),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500)),
+                ],
+              ),
+              Text('${value.toInt()}%',
+                  style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      fontFamily: 'monospace',
+                      color: color)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            height: 10,
+            decoration: BoxDecoration(
+              color: const Color(0xFF0f172a),
+              borderRadius: BorderRadius.circular(5),
+              boxShadow: [
+                BoxShadow(color: const Color(0xFF0b1120).withOpacity(0.5), offset: const Offset(2, 2),   blurRadius: 4),
+                BoxShadow(color: const Color(0xFF1e293b).withOpacity(0.5), offset: const Offset(-2, -2), blurRadius: 4),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(5),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 500),
+                curve: Curves.easeOut,
+                width: double.infinity,
+                alignment: Alignment.centerLeft,
+                child: FractionallySizedBox(
+                  widthFactor: value / 100,
+                  child: Container(
+                      decoration: BoxDecoration(
+                          color: color,
+                          borderRadius: BorderRadius.circular(5))),
+                ),
+              ),
             ),
           ),
-          const SizedBox(height: 12),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SYSTEM LOG
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Widget _buildSystemLog() {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: const Color(0xFF0f172a),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(color: const Color(0xFF0b1120).withOpacity(0.5), offset: const Offset(4, 4),   blurRadius: 8),
+          BoxShadow(color: const Color(0xFF1e293b).withOpacity(0.5), offset: const Offset(-4, -4), blurRadius: 8),
+        ],
+      ),
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.start,
+        children: [
+          const Text('SYSTEM LOG',
+              style: TextStyle(
+                  color: Color(0xFF94a3b8),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.5)),
+          const SizedBox(height: 10),
           if (_systemLogs.isEmpty)
-            const Text(
-              'No logs yet. Start recording to begin.',
-              style: TextStyle(color: Colors.white24, fontSize: 12),
+            Align(
+              alignment: Alignment.topCenter,
+              child: Text(
+                'No logs yet. Start recording to begin.',
+                style: const TextStyle(color: Colors.white24, fontSize: 12),
+                textAlign: TextAlign.center,
+              ),
             )
           else
             ..._systemLogs.reversed.take(8).map((log) {
               Color textColor;
               switch (log['type']) {
-                case 'SUCCESS':
-                  textColor = const Color(0xFF00FF88);
-                  break;
-                case 'WARNING':
-                  textColor = const Color(0xFFFFB800);
-                  break;
-                default:
-                  textColor = Colors.white54;
+                case 'SUCCESS':  textColor = const Color(0xFF10b981); break;
+                case 'WARNING':  textColor = const Color(0xFFfbbf24); break;
+                default:         textColor = const Color(0xFF94a3b8);
               }
-
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: RichText(
-                  text: TextSpan(
-                    style: const TextStyle(
-                      fontFamily: 'Courier',
-                      fontSize: 12,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('[${log['time']}]',
+                        style: const TextStyle(
+                            color: Color(0xFF475569),
+                            fontSize: 10,
+                            fontFamily: 'monospace')),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(log['message'],
+                          style: TextStyle(
+                              color: textColor,
+                              fontSize: 10,
+                              fontFamily: 'monospace')),
                     ),
-                    children: [
-                      TextSpan(
-                        text: '[${log['time']}] ',
-                        style: const TextStyle(color: Colors.white38),
-                      ),
-                      TextSpan(
-                        text: log['message'],
-                        style: TextStyle(color: textColor),
-                      ),
-                    ],
-                  ),
+                  ],
                 ),
               );
             }),
         ],
       ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// REUSABLE STATE BAR WIDGET
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _StateBar extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor;
-  final String label;
-  final double value;
-  final Color barColor;
-  final Color textColor;
-
-  const _StateBar({
-    required this.icon,
-    required this.iconColor,
-    required this.label,
-    required this.value,
-    required this.barColor,
-    required this.textColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: iconColor.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(icon, color: iconColor, size: 16),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const Spacer(),
-            Text(
-              '${value.toStringAsFixed(0)}%',
-              style: TextStyle(
-                color: textColor,
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(
-            value: value / 100,
-            minHeight: 6,
-            backgroundColor: Colors.white.withOpacity(0.06),
-            valueColor: AlwaysStoppedAnimation<Color>(barColor),
-          ),
-        ),
-      ],
     );
   }
 }
