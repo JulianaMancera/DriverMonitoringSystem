@@ -281,7 +281,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   Future<void> _triggerVibration(int level) async {
-    final hasVibrator = await Vibration.hasVibrator() ?? false;
+    final hasVibrator = await Vibration.hasVibrator();
     if (!hasVibrator) return;
     if (level == 1) {
       Vibration.vibrate(duration: 200);
