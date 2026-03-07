@@ -6,11 +6,11 @@ import 'package:camera/camera.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:vibration/vibration.dart';
+import 'package:gal/gal.dart';
 import '../core/database/database_helper.dart';
 import '../utils/responsive.dart';
 
 // RIVERPOD PROVIDERS
-
 final driverStateProvider = StateProvider<String>((ref) => 'neutral');
 final alertnessPctProvider = StateProvider<double>((ref) => 100.0);
 final drowsinessPctProvider = StateProvider<double>((ref) => 0.0);
@@ -31,7 +31,7 @@ class MonitorScreen extends ConsumerStatefulWidget {
 class _MonitorScreenState extends ConsumerState<MonitorScreen>
     with TickerProviderStateMixin {
 
-  // Camera 
+  // Camera
   CameraController? _cameraController;
   List<CameraDescription> _cameras = [];
   bool _cameraInitialized = false;
@@ -43,12 +43,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   Timer? _snapshotTimer;
   Timer? _alertBannerTimer;
 
-  // Alert tracking 
+  // Alert tracking
   int _consecutiveDrowsy = 0;
   int _consecutiveDistracted = 0;
   int _alertLevel = 0;
 
-  // System logs 
+  // System logs
   final List<Map<String, dynamic>> _systemLogs = [];
 
   // Audio
@@ -56,28 +56,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   final AudioPlayer _alarmPlayer = AudioPlayer();
 
   // Animations
-  late AnimationController _faceBoxController;
-  late Animation<Offset> _faceBoxAnimation;
   late AnimationController _warningController;
   late Animation<double> _warningAnimation;
-
 
   // LIFECYCLE
   @override
   void initState() {
     super.initState();
     _initCamera();
-
-    _faceBoxController = AnimationController(
-      duration: const Duration(seconds: 4),
-      vsync: this,
-    )..repeat(reverse: true);
-
-    _faceBoxAnimation = Tween<Offset>(
-      begin: Offset.zero,
-      end: const Offset(10, 5),
-    ).animate(CurvedAnimation(
-        parent: _faceBoxController, curve: Curves.easeInOut));
 
     _warningController = AnimationController(
       duration: const Duration(milliseconds: 1000),
@@ -92,7 +78,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   void dispose() {
     _snapshotTimer?.cancel();
     _alertBannerTimer?.cancel();
-    _faceBoxController.dispose();
     _warningController.dispose();
     _cameraController?.dispose();
     _audioPlayer.dispose();
@@ -143,6 +128,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     await DatabaseHelper.instance.insertStateCount(_currentSessionId!);
     _sessionStartTime = DateTime.now();
 
+    // Start video recording
+    if (_cameraInitialized) {
+      await _cameraController!.startVideoRecording();
+    }
+
     ref.read(isRecordingProvider.notifier).state = true;
     ref.read(driverStateProvider.notifier).state = 'neutral';
 
@@ -170,6 +160,17 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _alertLevel = 0;
     _consecutiveDrowsy = 0;
     _consecutiveDistracted = 0;
+
+    // Stop video recording and save to gallery
+    if (_cameraInitialized && _cameraController!.value.isRecordingVideo) {
+      try {
+        final XFile videoFile = await _cameraController!.stopVideoRecording();
+        await Gal.putVideo(videoFile.path, album: 'Bantay Drive');
+        await _addLog('Video saved to gallery', 'SUCCESS');
+      } catch (e) {
+        await _addLog('Failed to save video: $e', 'WARNING');
+      }
+    }
 
     final durationSec = _sessionStartTime != null
         ? DateTime.now().difference(_sessionStartTime!).inSeconds
@@ -333,7 +334,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
 
-    // No Scaffold/SafeArea — nav shell handles that
     return ColoredBox(
       color: const Color(0xFF080E1A),
       child: isDesktop
@@ -444,7 +444,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-
   // ALERT BANNER
   Widget _buildAlertBanner(String type) {
     final isDrowsy = type == 'DROWSY';
@@ -503,14 +502,15 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final previewSize = _getPreviewSize(isLandscape);
     final isRecording = ref.watch(isRecordingProvider);
 
+    // Mirrored camera preview using Transform.scale scaleX: -1
     Widget cameraWidget = ClipRect(
       child: FittedBox(
         fit: BoxFit.cover,
         child: SizedBox(
           width: previewSize.width,
           height: previewSize.height,
-            child: Transform.scale(
-            scaleX: 1,  
+          child: Transform.scale(
+            scaleX: 1,
             child: _cameraInitialized
                 ? CameraPreview(_cameraController!)
                 : _buildCameraFallback(),
@@ -527,7 +527,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           cameraWidget,
           _buildGradientOverlay(),
           if (isRecording) _buildRecBadge(),
-          if (isRecording) _buildFaceTrackingBox(isLandscape: isLandscape),
+          // Face tracking box removed
           if (ref.watch(showAlertBannerProvider))
             _buildWarningOverlay(ref.watch(alertBannerTypeProvider)),
         ],
@@ -632,83 +632,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                     fontWeight: FontWeight.bold,
                     letterSpacing: 1.2)),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFaceTrackingBox({required bool isLandscape}) {
-    final boxW = isLandscape ? 120.0 : 110.0;
-    final boxH = isLandscape ? 150.0 : 150.0;
-    final startTop = isLandscape ? 15.0 : 25.0;
-    final startLeft = isLandscape ? 60.0 : 55.0;
-
-    return AnimatedBuilder(
-      animation: _faceBoxAnimation,
-      builder: (context, child) {
-        return Positioned(
-          top: startTop + _faceBoxAnimation.value.dy,
-          left: startLeft + _faceBoxAnimation.value.dx,
-          child: Container(
-            width: boxW,
-            height: boxH,
-            decoration: BoxDecoration(
-              border: Border.all(
-                  color: const Color(0xFF22d3ee).withOpacity(0.7), width: 1.5),
-              borderRadius: BorderRadius.circular(6),
-              boxShadow: [
-                BoxShadow(
-                    color: const Color(0xFF22d3ee).withOpacity(0.3),
-                    blurRadius: 20,
-                    spreadRadius: 2),
-              ],
-            ),
-            child: Stack(
-              children: [
-                _buildCornerMarker(Alignment.topLeft),
-                _buildCornerMarker(Alignment.topRight),
-                _buildCornerMarker(Alignment.bottomLeft),
-                _buildCornerMarker(Alignment.bottomRight),
-                Positioned(
-                  top: -18, left: 0,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF22d3ee).withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: const Text('FACE DETECTED',
-                        style: TextStyle(
-                            color: Color(0xFF22d3ee),
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold)),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildCornerMarker(Alignment alignment) {
-    final isTop = alignment.y < 0;
-    final isLeft = alignment.x < 0;
-    return Align(
-      alignment: alignment,
-      child: Transform.translate(
-        offset: Offset(isLeft ? -1 : 1, isTop ? -1 : 1),
-        child: Container(
-          width: 14, height: 14,
-          decoration: BoxDecoration(
-            border: Border(
-              top:    isTop  ? const BorderSide(color: Color(0xFF22d3ee), width: 1.5) : BorderSide.none,
-              bottom: !isTop ? const BorderSide(color: Color(0xFF22d3ee), width: 1.5) : BorderSide.none,
-              left:   isLeft  ? const BorderSide(color: Color(0xFF22d3ee), width: 1.5) : BorderSide.none,
-              right:  !isLeft ? const BorderSide(color: Color(0xFF22d3ee), width: 1.5) : BorderSide.none,
-            ),
-          ),
         ),
       ),
     );
@@ -1037,11 +960,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   letterSpacing: 1.5)),
           const SizedBox(height: 10),
           if (_systemLogs.isEmpty)
-            Align(
+            const Align(
               alignment: Alignment.topCenter,
               child: Text(
                 'No logs yet. Start recording to begin.',
-                style: const TextStyle(color: Colors.white24, fontSize: 12),
+                style: TextStyle(color: Colors.white24, fontSize: 12),
                 textAlign: TextAlign.center,
               ),
             )
