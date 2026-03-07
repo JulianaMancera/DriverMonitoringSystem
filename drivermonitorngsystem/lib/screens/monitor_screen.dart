@@ -509,9 +509,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         child: SizedBox(
           width: previewSize.width,
           height: previewSize.height,
-          child: Transform(
-            alignment: Alignment.center,
-            transform: Matrix4.rotationY(3.14159),
+            child: Transform.scale(
+            scaleX: 1,  
             child: _cameraInitialized
                 ? CameraPreview(_cameraController!)
                 : _buildCameraFallback(),
