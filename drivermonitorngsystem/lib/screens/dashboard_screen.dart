@@ -5,19 +5,14 @@ import 'package:fl_chart/fl_chart.dart';
 import '../core/database/database_helper.dart';
 import '../utils/responsive.dart';
 
-// ──────────────────
 // RIVERPOD PROVIDER
-// ──────────────────
 
 final dashboardProvider =
     FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
   return await DatabaseHelper.instance.getDashboardSummary();
 });
 
-// ──────────────────
 // DASHBOARD SCREEN
-// ──────────────────
-
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
 
@@ -45,9 +40,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final dashAsync = ref.watch(dashboardProvider);
-
-    // No Scaffold/SafeArea — nav shell handles that
-    return Column(
+    return ColoredBox(
+      color: const Color(0xFF080E1A),
+      child: Column(
       children: [
         _buildHeader(),
         Expanded(
@@ -63,10 +58,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           ),
         ),
       ],
+      ),
     );
   }
 
-  // ── HEADER ──
+  // HEADER 
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
@@ -122,7 +118,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  // ── MAIN SCROLLABLE CONTENT ──
+  // MAIN SCROLLABLE CONTENT
   Widget _buildContent(BuildContext context, Map<String, dynamic> data) {
     // Extract DB values
     final safetyScore   = data['safety_score']        as double? ?? 0.0;
@@ -199,7 +195,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  // ── SAFETY SCORE CARD — exact original UI ──
+  // SAFETY SCORE CARD
   Widget _buildSafetyScoreCard(BuildContext context, double score, String label) {
     final isMobile = Responsive.isMobile(context);
 
@@ -210,8 +206,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           Responsive.responsiveBorderRadius(context, mobile: 20, tablet: 22, desktop: 24),
         ),
         boxShadow: const [
-          BoxShadow(color: Color(0xFF0b1120), offset: Offset(10, 10), blurRadius: 16),
-          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-10, -10), blurRadius: 16),
+          BoxShadow(color: Color(0xFF0b1120), offset: Offset(6, 6), blurRadius: 16),
+          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-6, -6), blurRadius: 16),
         ],
       ),
       child: Stack(
@@ -261,7 +257,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  // ── CIRCULAR SCORE INDICATOR — exact original UI sizes, dynamic data ──
+  // CIRCULAR SCORE INDICATOR
   Widget _buildCircularScoreIndicator(BuildContext context, double score, String label) {
     final outerSize    = Responsive.responsiveValue(context, mobile: 150.0, tablet: 170.0, desktop: 195.0);
     final progressSize = Responsive.responsiveValue(context, mobile: 138.0, tablet: 156.0, desktop: 179.0);
@@ -337,7 +333,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  // ── QUICK STATS GRID — exact original UI, dynamic data ──
+  // QUICK STATS GRID 
   Widget _buildQuickStatsGrid(
     BuildContext context, {
     required double totalDriveHrs,
@@ -361,7 +357,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  // ── ALERTNESS CHART — exact original UI, dynamic data ──
+  // ALERTNESS CHART
   Widget _buildAlertnessChart(BuildContext context, List<Map<String, dynamic>> snapshots) {
     late final List<FlSpot>  spots;
     late final List<String>  timeLabels;
@@ -385,8 +381,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           Responsive.responsiveBorderRadius(context, mobile: 20, tablet: 22, desktop: 24),
         ),
         boxShadow: const [
-          BoxShadow(color: Color(0xFF0b1120), offset: Offset(10, 10),   blurRadius: 16),
-          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-10, -10), blurRadius: 16),
+          BoxShadow(color: Color(0xFF0b1120), offset: Offset(6, 6),   blurRadius: 16),
+          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-6, -6), blurRadius: 16),
         ],
       ),
       padding: EdgeInsets.all(
@@ -503,10 +499,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 }
 
-// ────────────────────────────────────
-// REUSABLE STAT CARD — exact original UI
-// ────────────────────────────────────
-
+// REUSABLE STAT CARD 
 class _StatCard extends StatefulWidget {
   final IconData icon;
   final String label, value, subtext;
@@ -546,8 +539,8 @@ class _StatCardState extends State<_StatCard> {
                     BoxShadow(color: Color(0xFF1e293b), offset: Offset(3, 3),   blurRadius: 6, spreadRadius: 0),
                   ]
                 : const [
-                    BoxShadow(color: Color(0xFF0b1120), offset: Offset(4, 4),   blurRadius: 8, spreadRadius: 0),
-                    BoxShadow(color: Color(0xFF1e293b), offset: Offset(-4, -4), blurRadius: 8, spreadRadius: 0),
+                    BoxShadow(color: Color(0xFF0b1120), offset: Offset(3, 3),   blurRadius: 8, spreadRadius: 0),
+                    BoxShadow(color: Color(0xFF1e293b), offset: Offset(-3, -3), blurRadius: 8, spreadRadius: 0),
                   ],
           ),
           padding: EdgeInsets.all(
@@ -592,7 +585,7 @@ class _StatCardState extends State<_StatCard> {
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xFF22d3ee).withOpacity(0.6),
+                              color: const Color(0xFF22d3ee).withOpacity(0.4),
                               blurRadius: 8, spreadRadius: 2,
                             ),
                           ],

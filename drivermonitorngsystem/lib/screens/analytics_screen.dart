@@ -4,10 +4,7 @@ import 'package:fl_chart/fl_chart.dart';
 import '../core/database/database_helper.dart';
 import '../utils/responsive.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
 // RIVERPOD PROVIDERS
-// ─────────────────────────────────────────────────────────────────────────────
-
 final analyticsFilterProvider = StateProvider<int?>((ref) => 7);
 
 final analyticsDataProvider =
@@ -16,10 +13,7 @@ final analyticsDataProvider =
   return await DatabaseHelper.instance.getAnalyticsSummary(days: days);
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
 // ANALYTICS SCREEN
-// ─────────────────────────────────────────────────────────────────────────────
-
 class AnalyticsScreen extends ConsumerStatefulWidget {
   const AnalyticsScreen({super.key});
 
@@ -37,7 +31,9 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     final isTablet       = Responsive.isTablet(context);
 
     // No Scaffold/SafeArea — nav shell handles that
-    return Column(
+    return ColoredBox(
+      color: const Color(0xFF080E1A),
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildHeader(selectedDays),
@@ -54,10 +50,11 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
           ),
         ),
       ],
+      ),
     );
   }
 
-  // ── HEADER + FILTER TABS ──────────────────────────────────────────────────
+  // HEADER + FILTER TABS
 
   Widget _buildHeader(int? selectedDays) {
     return Container(
@@ -112,7 +109,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
         ),
         const SizedBox(height: 16),
 
-        // ── Time range selector — exact original UI ──
+        // Time range selector
         Container(
           padding: EdgeInsets.all(
             Responsive.responsivePadding(context, mobile: 4, tablet: 5, desktop: 6),
@@ -173,8 +170,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     );
   }
 
-  // ── SCROLLABLE CONTENT ────────────────────────────────────────────────────
-
+  // SCROLLABLE CONTENT
   Widget _buildContent(
     BuildContext context,
     Map<String, dynamic> data,
@@ -201,7 +197,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Summary Cards — exact original GridView UI
+            // Summary Cards
             _buildSummaryCards(
               context,
               isMobile: isMobile,
@@ -227,8 +223,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     );
   }
 
-  // ── SUMMARY CARDS — exact original GridView + _HoverableSummaryCard UI ──
-
+  // SUMMARY CARDS
   Widget _buildSummaryCards(
     BuildContext context, {
     required bool isMobile,
@@ -257,8 +252,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     );
   }
 
-  // ── CHART LAYOUTS ─────────────────────────────────────────────────────────
-
+  // CHART LAYOUTS
   Widget _buildMobileChartsLayout(
     BuildContext context,
     List<Map<String, dynamic>> dailyTrends,
@@ -288,8 +282,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     );
   }
 
-  // ── DROWSINESS VS DISTRACTION LINE CHART — exact original UI ──────────────
-
+  // DROWSINESS VS DISTRACTION LINE CHART
   Widget _buildDrowsinessVsDistractionChart(
     BuildContext context,
     List<Map<String, dynamic>> dailyTrends,
@@ -494,8 +487,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     );
   }
 
-  // ── HOURLY BAR CHART — exact original UI ─────────────────────────────────
-
+  // HOURLY BAR CHART
   Widget _buildAlertTimelineChart(
     BuildContext context,
     List<Map<String, dynamic>> hourlyDist,
@@ -628,10 +620,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HOVERABLE SUMMARY CARD — exact original UI
-// ─────────────────────────────────────────────────────────────────────────────
-
+// HOVERABLE SUMMARY CARD 
 class _HoverableSummaryCard extends StatefulWidget {
   final IconData icon;
   final String label, value, change;
