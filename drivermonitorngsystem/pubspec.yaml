@@ -28,6 +28,7 @@ dependencies:
   audioplayers: ^6.0.0
   vibration: ^3.1.8
   gal: ^2.3.0
+  shared_preferences: ^2.3.0
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.

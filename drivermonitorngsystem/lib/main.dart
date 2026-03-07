@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'core/database/database_helper.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/monitor_screen.dart';
@@ -27,6 +28,7 @@ void main() async {
 
   // Initialize database
   await DatabaseHelper.instance.database;
+  await SharedPreferences.getInstance(); 
 
   runApp(
     const ProviderScope(

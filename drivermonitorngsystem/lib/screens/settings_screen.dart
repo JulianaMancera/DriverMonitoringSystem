@@ -1,3 +1,5 @@
+import 'package:bantaydrive/core/database/database_helper.dart';
+import 'package:bantaydrive/core/preference/preference_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -9,234 +11,283 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  //ALERT SETTINGS
-  bool _alertSoundEnabled = true;
-  bool _hapticEnabled = true;
-  double _alertVolume = 0.8;
-  int _alertSensitivity = 1; // 0 = Low, 1 = Medium, 2 = High
+  // STATE ─
+  bool _isLoading = true; // shows loading indicator while prefs load
 
-  // MONITORING SETTINGS 
-  // Camera position: affects PnP head pose baseline angle
-  // 'Front'     = selfie/front-facing camera, driver faces phone directly
-  // 'Dashboard' = phone mounted on dashboard, angled upward toward driver
-  String _cameraPosition = 'Front';
-  bool _autoStartEnabled = false; // true = recording starts when app opens
-  double _autostopBatteryPct = 10;
+  // Alert Settings
+  bool   _alertSoundEnabled  = true;
+  bool   _hapticEnabled      = true;
+  double _alertVolume        = 0.8;
+  int    _alertSensitivity   = 1; // 0=Low, 1=Medium, 2=High
 
-  // DATA & PRIVACY
-  String _retentionPeriod = '30 days';
+  // Monitoring Settings
+  String _cameraPosition     = 'Front';
+  bool   _autoStartEnabled   = false;
+  double _autostopBatteryPct = 10.0;
 
-  //COLORS 
-  static const Color _bg = Color(0xFF0A0E1A);
-  static const Color _surface = Color(0xFF111827);
-  static const Color _surfaceAlt = Color(0xFF1A2235);
-  static const Color _cyan = Color(0xFF00D4E8);
-  static const Color _textPrimary = Color(0xFFEEF2FF);
+  // Data & Privacy
+  String _retentionPeriod    = '30 days';
+
+  // COLORS
+  static const Color _bg            = Color(0xFF080E1A);
+  static const Color _surface       = Color(0xFF0D1627);
+  static const Color _surfaceAlt    = Color(0xFF1A2235);
+  static const Color _cyan          = Color(0xFF00D4FF);
+  static const Color _textPrimary   = Color(0xFFEEF2FF);
   static const Color _textSecondary = Color(0xFF6B7A99);
-  static const Color _red = Color(0xFFFF4757);
-  static const Color _orange = Color(0xFFFFA500);
-  static const Color _divider = Color(0xFF1E2D45);
+  static const Color _red           = Color(0xFFFF4757);
+  static const Color _orange        = Color(0xFFFFA500);
+  static const Color _divider       = Color(0xFF1E2D45);
 
+  // LIFECYCLE
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  /// Load all saved preferences when screen opens
+  Future<void> _loadSettings() async {
+    final prefs = PreferencesHelper.instance;
+
+    final alertSound      = await prefs.getAlertSound();
+    final haptic          = await prefs.getHaptic();
+    final alertVolume     = await prefs.getAlertVolume();
+    final alertSensitivity= await prefs.getAlertSensitivity();
+    final cameraPosition  = await prefs.getCameraPosition();
+    final autoStart       = await prefs.getAutoStart();
+    final autostopBattery = await prefs.getAutostopBattery();
+    final retention       = await prefs.getRetention();
+
+    if (mounted) {
+      setState(() {
+        _alertSoundEnabled  = alertSound;
+        _hapticEnabled      = haptic;
+        _alertVolume        = alertVolume;
+        _alertSensitivity   = alertSensitivity;
+        _cameraPosition     = cameraPosition;
+        _autoStartEnabled   = autoStart;
+        _autostopBatteryPct = autostopBattery;
+        _retentionPeriod    = retention;
+        _isLoading          = false;
+      });
+    }
+  }
+  
+  // BUILD
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: _bg,
+        body: const Center(
+          child: CircularProgressIndicator(color: Color(0xFF00D4FF)),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: _bg,
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: ListView(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                children: [
+      body: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        children: [
 
-                  // SECTION: ALERT SETTINGS
-                  _sectionLabel('ALERT SETTINGS'),
-                  _buildCard([
-                    _toggleTile(
-                      icon: Icons.volume_up_rounded,
-                      iconColor: _cyan,
-                      title: 'Alert Sound',
-                      subtitle: 'Play audio tone when drowsy or distracted',
-                      value: _alertSoundEnabled,
-                      onChanged: (v) =>
-                          setState(() => _alertSoundEnabled = v),
-                    ),
-                    _dividerLine(),
-                    _toggleTile(
-                      icon: Icons.vibration_rounded,
-                      iconColor: _cyan,
-                      title: 'Haptic Vibration',
-                      subtitle: 'Vibrate on alert trigger',
-                      value: _hapticEnabled,
-                      onChanged: (v) => setState(() => _hapticEnabled = v),
-                    ),
-                    _dividerLine(),
-                    _sliderTile(
-                      icon: Icons.speaker_rounded,
-                      iconColor: _cyan,
-                      title: 'Alert Volume',
-                      value: _alertVolume,
-                      min: 0.0,
-                      max: 1.0,
-                      displayValue: '${(_alertVolume * 100).round()}%',
-                      onChanged: (v) => setState(() => _alertVolume = v),
-                    ),
-                    _dividerLine(),
-                    _segmentedTile(
-                      icon: Icons.tune_rounded,
-                      iconColor: _cyan,
-                      title: 'Alert Sensitivity',
-                      subtitle:
-                          'Consecutive detections before Level 3 alarm',
-                      options: const ['Low', 'Medium', 'High'],
-                      selectedIndex: _alertSensitivity,
-                      onChanged: (i) =>
-                          setState(() => _alertSensitivity = i),
-                    ),
-                  ]),
-
-                  const SizedBox(height: 24),
-
-                  // SECTION: MONITORING SETTINGS
-                  _sectionLabel('MONITORING SETTINGS'),
-                  _buildCard([
-                    _dropdownTile(
-                      icon: Icons.camera_alt_rounded,
-                      iconColor: _cyan,
-                      title: 'Camera Position',
-                      subtitle:
-                          'Front = selfie angle  •  Dashboard = mounted upward',
-                      value: _cameraPosition,
-                      options: const ['Front', 'Dashboard'],
-                      onChanged: (v) =>
-                          setState(() => _cameraPosition = v!),
-                    ),
-                    _dividerLine(),
-                    _toggleTile(
-                      icon: Icons.play_circle_rounded,
-                      iconColor: _cyan,
-                      title: 'Auto-Start Recording',
-                      subtitle:
-                          'Begin monitoring automatically when app opens',
-                      value: _autoStartEnabled,
-                      onChanged: (v) =>
-                          setState(() => _autoStartEnabled = v),
-                    ),
-                    _dividerLine(),
-                    _sliderTile(
-                      icon: Icons.battery_alert_rounded,
-                      iconColor: _orange,
-                      title: 'Auto-Stop Battery Level',
-                      subtitle:
-                          'Stop monitoring when battery reaches this level',
-                      value: _autostopBatteryPct,
-                      min: 5,
-                      max: 30,
-                      divisions: 5,
-                      displayValue: '${_autostopBatteryPct.round()}%',
-                      onChanged: (v) =>
-                          setState(() => _autostopBatteryPct = v),
-                    ),
-                  ]),
-
-                  const SizedBox(height: 24),
-
-                  // SECTION: DATA & PRIVAC
-                  _sectionLabel('DATA & PRIVACY'),
-                  _buildCard([
-                    _dropdownTile(
-                      icon: Icons.history_rounded,
-                      iconColor: _cyan,
-                      title: 'Session Retention',
-                      subtitle: 'Auto-delete sessions older than',
-                      value: _retentionPeriod,
-                      options: const [
-                        '7 days',
-                        '30 days',
-                        '90 days',
-                        'Forever'
-                      ],
-                      onChanged: (v) =>
-                          setState(() => _retentionPeriod = v!),
-                    ),
-                    _dividerLine(),
-                    _actionTile(
-                      icon: Icons.download_rounded,
-                      iconColor: _cyan,
-                      title: 'Export Session Data',
-                      subtitle: 'Download all sessions as CSV',
-                      onTap: () => _onExportData(context),
-                    ),
-                    _dividerLine(),
-                    _actionTile(
-                      icon: Icons.delete_outline_rounded,
-                      iconColor: _red,
-                      title: 'Clear All History',
-                      subtitle: 'Permanently delete all session data',
-                      titleColor: _red,
-                      onTap: () => _onClearHistory(context),
-                    ),
-                  ]),
-
-                  const SizedBox(height: 24),
-
-                  // SECTION: ABOUT
-                  _sectionLabel('ABOUT'),
-                  _buildCard([
-                    _infoTile(
-                      icon: Icons.info_outline_rounded,
-                      title: 'App Version',
-                      value: '1.0.0 (Build 1)',
-                    ),
-                    _dividerLine(),
-                    _infoTile(
-                      icon: Icons.school_rounded,
-                      title: 'Institution',
-                      value: 'New Era University',
-                    ),
-                    _dividerLine(),
-                    _infoTile(
-                      icon: Icons.people_rounded,
-                      title: 'Authors',
-                      value: 'Macalanda & Mancera',
-                    ),
-                    _dividerLine(),
-                    _infoTile(
-                      icon: Icons.person_rounded,
-                      title: 'Adviser',
-                      value: 'Dr. Marc P. Laureta',
-                    ),
-                    _dividerLine(),
-                    _actionTile(
-                      icon: Icons.article_outlined,
-                      iconColor: _cyan,
-                      title: 'Thesis Title',
-                      subtitle:
-                          'DMS-HybridNet: A Hybrid CNN-BiLSTM-Attention Architecture for Real-Time Driver Monitoring',
-                      onTap: () {},
-                    ),
-                  ]),
-
-                  const SizedBox(height: 32),
-                ],
-              ),
+          // ALERT SETTINGS
+          _sectionLabel('ALERT SETTINGS'),
+          _buildCard([
+            _toggleTile(
+              icon: Icons.volume_up_rounded,
+              iconColor: _cyan,
+              title: 'Alert Sound',
+              subtitle: 'Play audio tone when drowsy or distracted',
+              value: _alertSoundEnabled,
+              onChanged: (v) {
+                setState(() => _alertSoundEnabled = v);
+                PreferencesHelper.instance.setAlertSound(v);
+              },
             ),
-          ],
-        ),
+            _dividerLine(),
+            _toggleTile(
+              icon: Icons.vibration_rounded,
+              iconColor: _cyan,
+              title: 'Haptic Vibration',
+              subtitle: 'Vibrate on alert trigger',
+              value: _hapticEnabled,
+              onChanged: (v) {
+                setState(() => _hapticEnabled = v);
+                PreferencesHelper.instance.setHaptic(v);
+              },
+            ),
+            _dividerLine(),
+            _sliderTile(
+              icon: Icons.speaker_rounded,
+              iconColor: _cyan,
+              title: 'Alert Volume',
+              value: _alertVolume,
+              min: 0.0,
+              max: 1.0,
+              displayValue: '${(_alertVolume * 100).round()}%',
+              onChanged: (v) {
+                setState(() => _alertVolume = v);
+                PreferencesHelper.instance.setAlertVolume(v);
+              },
+            ),
+            _dividerLine(),
+            _segmentedTile(
+              icon: Icons.tune_rounded,
+              iconColor: _cyan,
+              title: 'Alert Sensitivity',
+              subtitle: 'Consecutive detections before Level 3 alarm',
+              options: const ['Low', 'Medium', 'High'],
+              selectedIndex: _alertSensitivity,
+              onChanged: (i) {
+                setState(() => _alertSensitivity = i);
+                PreferencesHelper.instance.setAlertSensitivity(i);
+              },
+            ),
+          ]),
+
+          const SizedBox(height: 24),
+
+          // MONITORING SETTINGS
+          _sectionLabel('MONITORING SETTINGS'),
+          _buildCard([
+            _dropdownTile(
+              icon: Icons.camera_alt_rounded,
+              iconColor: _cyan,
+              title: 'Camera Position',
+              subtitle: 'Front = selfie angle  •  Dashboard = mounted upward',
+              value: _cameraPosition,
+              options: const ['Front', 'Dashboard'],
+              onChanged: (v) {
+                setState(() => _cameraPosition = v!);
+                PreferencesHelper.instance.setCameraPosition(v!);
+              },
+            ),
+            _dividerLine(),
+            _toggleTile(
+              icon: Icons.play_circle_rounded,
+              iconColor: _cyan,
+              title: 'Auto-Start Recording',
+              subtitle: 'Begin monitoring automatically when app opens',
+              value: _autoStartEnabled,
+              onChanged: (v) {
+                setState(() => _autoStartEnabled = v);
+                PreferencesHelper.instance.setAutoStart(v);
+              },
+            ),
+            _dividerLine(),
+            _sliderTile(
+              icon: Icons.battery_alert_rounded,
+              iconColor: _orange,
+              title: 'Auto-Stop Battery Level',
+              subtitle: 'Stop monitoring when battery reaches this level',
+              value: _autostopBatteryPct,
+              min: 5,
+              max: 30,
+              divisions: 5,
+              displayValue: '${_autostopBatteryPct.round()}%',
+              onChanged: (v) {
+                setState(() => _autostopBatteryPct = v);
+                PreferencesHelper.instance.setAutostopBattery(v);
+              },
+            ),
+          ]),
+
+          const SizedBox(height: 24),
+
+          //DATA & PRIVACY
+          _sectionLabel('DATA & PRIVACY'),
+          _buildCard([
+            _dropdownTile(
+              icon: Icons.history_rounded,
+              iconColor: _cyan,
+              title: 'Session Retention',
+              subtitle: 'Auto-delete sessions older than',
+              value: _retentionPeriod,
+              options: const ['7 days', '30 days', '90 days', 'Forever'],
+              onChanged: (v) {
+                setState(() => _retentionPeriod = v!);
+                PreferencesHelper.instance.setRetention(v!);
+              },
+            ),
+            _dividerLine(),
+            _actionTile(
+              icon: Icons.download_rounded,
+              iconColor: _cyan,
+              title: 'Export Session Data',
+              subtitle: 'Download all sessions as CSV',
+              onTap: () => _onExportData(context),
+            ),
+            _dividerLine(),
+            _actionTile(
+              icon: Icons.delete_outline_rounded,
+              iconColor: _red,
+              title: 'Clear All History',
+              subtitle: 'Permanently delete all session data',
+              titleColor: _red,
+              onTap: () => _onClearHistory(context),
+            ),
+          ]),
+
+          const SizedBox(height: 24),
+
+          // ABOUT
+          _sectionLabel('ABOUT'),
+          _buildCard([
+            _infoTile(
+              icon: Icons.info_outline_rounded,
+              title: 'App Version',
+              value: '1.0.0 (Build 1)',
+            ),
+            _dividerLine(),
+            _infoTile(
+              icon: Icons.school_rounded,
+              title: 'Institution',
+              value: 'New Era University',
+            ),
+            _dividerLine(),
+            _infoTile(
+              icon: Icons.people_rounded,
+              title: 'Authors',
+              value: 'Macalanda & Mancera',
+            ),
+            _dividerLine(),
+            _infoTile(
+              icon: Icons.person_rounded,
+              title: 'Adviser',
+              value: 'Dr. Marc P. Laureta',
+            ),
+            _dividerLine(),
+            _actionTile(
+              icon: Icons.article_outlined,
+              iconColor: _cyan,
+              title: 'Thesis Title',
+              subtitle:
+                  'DMS-HybridNet: A Hybrid CNN-BiLSTM-Attention Architecture for Real-Time Driver Monitoring',
+              onTap: () {},
+            ),
+          ]),
+
+          const SizedBox(height: 32),
+        ],
       ),
     );
   }
+
   // SECTION LABEL
   Widget _sectionLabel(String label) {
     return Padding(
       padding: const EdgeInsets.only(left: 4, bottom: 8, top: 4),
-      child: Text(label,
-          style: TextStyle(
-              color: _textSecondary,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 1.2)),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: _textSecondary,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 1.2,
+        ),
+      ),
     );
   }
 
@@ -253,11 +304,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _dividerLine() {
-    return Divider(
-        color: _divider, height: 1, thickness: 1, indent: 56);
+    return Divider(color: _divider, height: 1, thickness: 1, indent: 56);
   }
 
   // TILE TYPES
+  /// Toggle tile — ON/OFF switch
   Widget _toggleTile({
     required IconData icon,
     required Color iconColor,
@@ -284,9 +335,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 if (subtitle != null) ...[
                   const SizedBox(height: 2),
                   Text(subtitle,
-                      style:
-                          TextStyle(color: _textSecondary, fontSize: 12)),
-                ]
+                      style: TextStyle(color: _textSecondary, fontSize: 12)),
+                ],
               ],
             ),
           ),
@@ -303,6 +353,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  /// Slider tile — volume, battery %, etc.
   Widget _sliderTile({
     required IconData icon,
     required Color iconColor,
@@ -335,17 +386,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     if (subtitle != null) ...[
                       const SizedBox(height: 2),
                       Text(subtitle,
-                          style: TextStyle(
-                              color: _textSecondary, fontSize: 12)),
-                    ]
+                          style:
+                              TextStyle(color: _textSecondary, fontSize: 12)),
+                    ],
                   ],
                 ),
               ),
-              Text(displayValue,
-                  style: TextStyle(
-                      color: _cyan,
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold)),
+              Text(
+                displayValue,
+                style: TextStyle(
+                    color: _cyan, fontSize: 14, fontWeight: FontWeight.bold),
+              ),
             ],
           ),
           SliderTheme(
@@ -355,8 +406,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               thumbColor: _cyan,
               overlayColor: _cyan.withOpacity(0.15),
               trackHeight: 3,
-              thumbShape:
-                  const RoundSliderThumbShape(enabledThumbRadius: 7),
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
             ),
             child: Slider(
               value: value,
@@ -371,6 +421,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  /// Segmented tile — Low / Medium / High
   Widget _segmentedTile({
     required IconData icon,
     required Color iconColor,
@@ -401,8 +452,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     if (subtitle != null) ...[
                       const SizedBox(height: 2),
                       Text(subtitle,
-                          style: TextStyle(
-                              color: _textSecondary, fontSize: 12)),
+                          style:
+                              TextStyle(color: _textSecondary, fontSize: 12)),
                     ],
                   ],
                 ),
@@ -427,22 +478,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     decoration: BoxDecoration(
-                      color: selected
-                          ? _cyan.withOpacity(0.15)
-                          : _surfaceAlt,
+                      color: selected ? _cyan.withOpacity(0.15) : _surfaceAlt,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                          color: selected ? _cyan : _divider, width: 1),
+                        color: selected ? _cyan : _divider,
+                        width: 1,
+                      ),
                     ),
                     child: Text(
                       options[i],
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                          color: selected ? _cyan : _textSecondary,
-                          fontSize: 13,
-                          fontWeight: selected
-                              ? FontWeight.bold
-                              : FontWeight.normal),
+                        color: selected ? _cyan : _textSecondary,
+                        fontSize: 13,
+                        fontWeight:
+                            selected ? FontWeight.bold : FontWeight.normal,
+                      ),
                     ),
                   ),
                 ),
@@ -454,6 +505,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  /// Dropdown tile — Camera position, retention period
   Widget _dropdownTile({
     required IconData icon,
     required Color iconColor,
@@ -481,9 +533,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 if (subtitle != null) ...[
                   const SizedBox(height: 2),
                   Text(subtitle,
-                      style:
-                          TextStyle(color: _textSecondary, fontSize: 12)),
-                ]
+                      style: TextStyle(color: _textSecondary, fontSize: 12)),
+                ],
               ],
             ),
           ),
@@ -496,10 +547,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               style: TextStyle(color: _cyan, fontSize: 13),
               items: options
                   .map((o) => DropdownMenuItem(
-                      value: o,
-                      child: Text(o,
-                          style: TextStyle(
-                              color: _textPrimary, fontSize: 13))))
+                        value: o,
+                        child: Text(o,
+                            style: TextStyle(
+                                color: _textPrimary, fontSize: 13)),
+                      ))
                   .toList(),
               onChanged: onChanged,
             ),
@@ -509,6 +561,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  /// Action tile — Export, Clear History, Thesis Title
   Widget _actionTile({
     required IconData icon,
     required Color iconColor,
@@ -538,9 +591,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   if (subtitle != null) ...[
                     const SizedBox(height: 2),
                     Text(subtitle,
-                        style: TextStyle(
-                            color: _textSecondary, fontSize: 12)),
-                  ]
+                        style:
+                            TextStyle(color: _textSecondary, fontSize: 12)),
+                  ],
                 ],
               ),
             ),
@@ -552,6 +605,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  /// Info tile — read-only (About section)
   Widget _infoTile({
     required IconData icon,
     required String title,
@@ -599,8 +653,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: _surface,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text('Export Session Data',
             style: TextStyle(
                 color: _textPrimary, fontWeight: FontWeight.bold)),
@@ -624,9 +678,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onPressed: () {
               Navigator.pop(context);
               // TODO: implement CSV export using DatabaseHelper
+              // Example:
+              // final sessions = await DatabaseHelper.instance.getAllSessions();
+              // convert to CSV → save to Downloads via path_provider + permission
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text('Export coming soon!',
-                    style: TextStyle(color: _bg)),
+                content:
+                    Text('Export coming soon!', style: TextStyle(color: _bg)),
                 backgroundColor: _cyan,
                 behavior: SnackBarBehavior.floating,
                 shape: RoundedRectangleBorder(
@@ -645,11 +702,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: _surface,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text('Clear All History',
-            style: TextStyle(
-                color: _red, fontWeight: FontWeight.bold)),
+            style:
+                TextStyle(color: _red, fontWeight: FontWeight.bold)),
         content: Text(
           'This will permanently delete ALL session data including alerts, logs, and analytics. This action cannot be undone.',
           style: TextStyle(color: _textSecondary, fontSize: 14),
@@ -667,17 +724,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8)),
             ),
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
-              // TODO: call DatabaseHelper.instance.clearAllData()
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: const Text('All history cleared.',
-                    style: TextStyle(color: Colors.white)),
-                backgroundColor: _red,
-                behavior: SnackBarBehavior.floating,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-              ));
+              // Calls DatabaseHelper to wipe all tables
+              await DatabaseHelper.instance.clearAllData();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: const Text('All history cleared.',
+                      style: TextStyle(color: Colors.white)),
+                  backgroundColor: _red,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ));
+              }
             },
             child: const Text('Delete All'),
           ),
