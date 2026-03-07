@@ -57,7 +57,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
 
   // HEADER + FILTER TABS
     Widget _buildHeader(int? selectedDays) {
-    return Container(
+    return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
       child: Container(
         padding: const EdgeInsets.all(4),
@@ -70,15 +70,17 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
             BoxShadow(color: const Color(0xFF1e293b).withOpacity(0.8), offset: const Offset(-4, -4), blurRadius: 8),
           ],
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildTimeRangeButton('7 Days',   selectedDays == 7,    () => ref.read(analyticsFilterProvider.notifier).state = 7),
-            const SizedBox(width: 4),
-            _buildTimeRangeButton('30 Days',  selectedDays == 30,   () => ref.read(analyticsFilterProvider.notifier).state = 30),
-            const SizedBox(width: 4),
-            _buildTimeRangeButton('All Time', selectedDays == null, () => ref.read(analyticsFilterProvider.notifier).state = null),
-          ],
+        child: IntrinsicWidth(  
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildTimeRangeButton('7 Days',   selectedDays == 7,    () => ref.read(analyticsFilterProvider.notifier).state = 7),
+              const SizedBox(width: 4),
+              _buildTimeRangeButton('30 Days',  selectedDays == 30,   () => ref.read(analyticsFilterProvider.notifier).state = 30),
+              const SizedBox(width: 4),
+              _buildTimeRangeButton('All Time', selectedDays == null, () => ref.read(analyticsFilterProvider.notifier).state = null),
+            ],
+          ),
         ),
       ),
     );
@@ -153,10 +155,12 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
             SizedBox(height: Responsive.responsiveSpacing(context, mobile: 24, tablet: 28, desktop: 32)),
 
             // Charts
-            if (isMobile || isTablet)
-              _buildMobileChartsLayout(context, dailyTrends, hourlyDist)
-            else
-              _buildDesktopChartsLayout(context, dailyTrends, hourlyDist),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: isMobile || isTablet
+                  ? _buildMobileChartsLayout(context, dailyTrends, hourlyDist)
+                  : _buildDesktopChartsLayout(context, dailyTrends, hourlyDist),
+            ),
 
             SizedBox(height: isMobile ? 96 : 32),
           ],
@@ -176,7 +180,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     required int distractionEvents,
   }) {
     return Padding(
-      padding: const EdgeInsets.all(4),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
       child: GridView.count(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
