@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:camera/camera.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:vibration/vibration.dart';
 import '../core/database/database_helper.dart';
 import '../utils/responsive.dart';
@@ -351,7 +352,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     return SingleChildScrollView(
       child: Column(
         children: [
-          _buildHeader(),
           if (showAlert) _buildAlertBanner(alertType),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -379,7 +379,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     return Column(
       children: [
-        _buildHeader(),
         if (showAlert) _buildAlertBanner(alertType),
         Expanded(
           child: Row(
@@ -421,7 +420,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     return Column(
       children: [
-        _buildHeader(),
         if (showAlert) _buildAlertBanner(alertType),
         Expanded(
           child: Row(
@@ -446,61 +444,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // HEADER
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Monitor',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 26,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.5,
-                ),
-              ),
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF00FF88),
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF00FF88).withOpacity(0.5),
-                      blurRadius: 8,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          RichText(
-            text: const TextSpan(
-              text: 'Connected: ',
-              style: TextStyle(color: Colors.white54, fontSize: 13),
-              children: [
-                TextSpan(
-                  text: 'USER',
-                  style: TextStyle(
-                    color: Color(0xFF00D4FF),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   // ALERT BANNER
   Widget _buildAlertBanner(String type) {

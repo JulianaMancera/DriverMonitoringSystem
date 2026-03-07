@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import '../core/database/database_helper.dart';
 import '../utils/responsive.dart';
 
@@ -55,89 +56,30 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
   }
 
   // HEADER + FILTER TABS
-
-  Widget _buildHeader(int? selectedDays) {
+    Widget _buildHeader(int? selectedDays) {
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-      child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Title row
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text(
-              'Analytics',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 26,
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.5,
-              ),
-            ),
-            Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(
-                color: const Color(0xFF00FF88),
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF00FF88).withOpacity(0.5),
-                    blurRadius: 8,
-                  ),
-                ],
-              ),
-            ),
+      child: Container(
+        padding: const EdgeInsets.all(4),
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: const Color(0xFF0f172a),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(color: const Color(0xFF0b1120).withOpacity(0.8), offset: const Offset(4, 4),   blurRadius: 8),
+            BoxShadow(color: const Color(0xFF1e293b).withOpacity(0.8), offset: const Offset(-4, -4), blurRadius: 8),
           ],
         ),
-        const SizedBox(height: 4),
-        RichText(
-          text: const TextSpan(
-            text: 'Connected: ',
-            style: TextStyle(color: Colors.white54, fontSize: 13),
-            children: [
-              TextSpan(
-                text: 'USER',
-                style: TextStyle(
-                  color: Color(0xFF00D4FF),
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildTimeRangeButton('7 Days',   selectedDays == 7,    () => ref.read(analyticsFilterProvider.notifier).state = 7),
+            const SizedBox(width: 4),
+            _buildTimeRangeButton('30 Days',  selectedDays == 30,   () => ref.read(analyticsFilterProvider.notifier).state = 30),
+            const SizedBox(width: 4),
+            _buildTimeRangeButton('All Time', selectedDays == null, () => ref.read(analyticsFilterProvider.notifier).state = null),
+          ],
         ),
-        const SizedBox(height: 16),
-
-        // Time range selector
-        Container(
-          padding: EdgeInsets.all(
-            Responsive.responsivePadding(context, mobile: 4, tablet: 5, desktop: 6),
-          ),
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            color: const Color(0xFF0f172a),
-            borderRadius: BorderRadius.circular(
-              Responsive.responsiveBorderRadius(context, mobile: 16, tablet: 18, desktop: 20),
-            ),
-            boxShadow: [
-              BoxShadow(color: const Color(0xFF0b1120).withOpacity(0.8), offset: const Offset(4, 4),   blurRadius: 8),
-              BoxShadow(color: const Color(0xFF1e293b).withOpacity(0.8), offset: const Offset(-4, -4), blurRadius: 8),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildTimeRangeButton('7 Days',  selectedDays == 7,    () => ref.read(analyticsFilterProvider.notifier).state = 7),
-              SizedBox(width: Responsive.responsiveSpacing(context, mobile: 4)),
-              _buildTimeRangeButton('30 Days', selectedDays == 30,   () => ref.read(analyticsFilterProvider.notifier).state = 30),
-              SizedBox(width: Responsive.responsiveSpacing(context, mobile: 4)),
-              _buildTimeRangeButton('All Time', selectedDays == null, () => ref.read(analyticsFilterProvider.notifier).state = null),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-      ],
       ),
     );
   }

@@ -6,7 +6,6 @@ import '../core/database/database_helper.dart';
 import '../utils/responsive.dart';
 
 // RIVERPOD PROVIDER
-
 final dashboardProvider =
     FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
   return await DatabaseHelper.instance.getDashboardSummary();
@@ -44,7 +43,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       color: const Color(0xFF080E1A),
       child: Column(
       children: [
-        _buildHeader(),
         Expanded(
           child: dashAsync.when(
             loading: () => const Center(
@@ -58,62 +56,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           ),
         ),
       ],
-      ),
-    );
-  }
-
-  // HEADER 
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Dashboard',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 26,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.5,
-                ),
-              ),
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF00FF88),
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF00FF88).withOpacity(0.5),
-                      blurRadius: 8,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          RichText(
-            text: const TextSpan(
-              text: 'Connected: ',
-              style: TextStyle(color: Colors.white54, fontSize: 13),
-              children: [
-                TextSpan(
-                  text: 'USER',
-                  style: TextStyle(
-                    color: Color(0xFF00D4FF),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
