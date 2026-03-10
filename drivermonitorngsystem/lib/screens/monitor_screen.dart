@@ -11,7 +11,10 @@ import '../core/database/database_helper.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import '../utils/responsive.dart';
 
+// ─────────────────────────────────────────────────────────────────────────────
 // RIVERPOD PROVIDERS
+// ─────────────────────────────────────────────────────────────────────────────
+
 final driverStateProvider       = StateProvider<String>((ref) => 'neutral');
 final alertnessPctProvider      = StateProvider<double>((ref) => 100.0);
 final drowsinessPctProvider     = StateProvider<double>((ref) => 0.0);
@@ -21,7 +24,10 @@ final showAlertBannerProvider   = StateProvider<bool>((ref) => false);
 final alertBannerTypeProvider   = StateProvider<String>((ref) => 'DROWSY');
 final clearGlassesProvider      = StateProvider<bool>((ref) => false);
 
+// ─────────────────────────────────────────────────────────────────────────────
 // MONITOR SCREEN
+// ─────────────────────────────────────────────────────────────────────────────
+
 class MonitorScreen extends ConsumerStatefulWidget {
   const MonitorScreen({super.key});
 
@@ -32,35 +38,35 @@ class MonitorScreen extends ConsumerStatefulWidget {
 class _MonitorScreenState extends ConsumerState<MonitorScreen>
     with TickerProviderStateMixin {
 
-  //  CAMERA
+  // ── CAMERA ─────────────────────────────────────────────────────────────────
   CameraController? _cameraController;
   List<CameraDescription> _cameras = [];
   bool _cameraInitialized = false;
   String? _cameraError;
 
-  // SESSION 
+  // ── SESSION ─────────────────────────────────────────────────────────────────
   int? _currentSessionId;
   DateTime? _sessionStartTime;
   Timer? _snapshotTimer;
   Timer? _alertBannerTimer;
 
-  // ALERT TRACKING 
+  // ── ALERT TRACKING ──────────────────────────────────────────────────────────
   int _consecutiveDrowsy     = 0;
   int _consecutiveDistracted = 0;
   int _alertLevel            = 0;
 
-  // SYSTEM LOGS 
+  // ── SYSTEM LOGS ─────────────────────────────────────────────────────────────
   final List<Map<String, dynamic>> _systemLogs = [];
 
-  // AUDIO 
+  // ── AUDIO ───────────────────────────────────────────────────────────────────
   final AudioPlayer _audioPlayer  = AudioPlayer();
   final AudioPlayer _alarmPlayer  = AudioPlayer();
 
-  //  ANIMATIONS 
+  // ── ANIMATIONS ──────────────────────────────────────────────────────────────
   late AnimationController _warningController;
   late Animation<double>   _warningAnimation;
 
-  // PREFERENCES (loaded on init)
+  // ── PREFERENCES (loaded on init) ────────────────────────────────────────────
   // These mirror the values saved in SharedPreferences via PreferencesHelper.
   // They are loaded once in initState and re-read when the screen resumes.
   bool   _prefAlertSound      = true;
@@ -69,7 +75,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   int    _prefAlertSensitivity= 1;    // 0=Low, 1=Medium, 2=High
   bool   _prefAutoStart       = false;
 
-  // SENSITIVITY THRESHOLDS 
+  // ── SENSITIVITY THRESHOLDS ──────────────────────────────────────────────────
   // Maps sensitivity setting → [level1, level2, level3] consecutive counts
   // Low    → harder to trigger (needs more consecutive detections)
   // Medium → default
@@ -80,7 +86,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     2: [2,  4,  6], // High
   };
 
+  // ─────────────────────────────────────────────────────────────────────────
   // LIFECYCLE
+  // ─────────────────────────────────────────────────────────────────────────
+
   @override
   void initState() {
     super.initState();
@@ -109,7 +118,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     super.dispose();
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // PREFERENCES
+  // ─────────────────────────────────────────────────────────────────────────
+
   /// Load all relevant preferences then initialize camera.
   /// Called once on initState.
   Future<void> _loadPreferencesAndInit() async {
@@ -136,7 +148,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _prefAutoStart        = await prefs.getAutoStart();
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // CAMERA
+  // ─────────────────────────────────────────────────────────────────────────
+
   Future<void> _initCamera() async {
     try {
       _cameras = await availableCameras();
@@ -183,7 +198,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     return Size(ps.height, ps.width);
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // SESSION CONTROL
+  // ─────────────────────────────────────────────────────────────────────────
+
   Future<void> _startRecording() async {
     _currentSessionId = await DatabaseHelper.instance.insertSession();
     await DatabaseHelper.instance.insertStateCount(_currentSessionId!);
@@ -259,8 +277,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _sessionStartTime = null;
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // MODEL OUTPUT
   // Plug TFLite inference results here. Not activated yet.
+  // ─────────────────────────────────────────────────────────────────────────
+
   void onModelOutput({
     required String state,
     required double alertnessPct,
@@ -299,11 +320,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // 3-LEVEL ALERT SYSTEM
   // Thresholds are driven by Alert Sensitivity preference:
   //   Low    → [5, 10, 15]
   //   Medium → [3,  6,  9]  (default)
   //   High   → [2,  4,  6]
+  // ─────────────────────────────────────────────────────────────────────────
 
   Future<void> _checkAndTriggerAlert(
       String type, int consecutive) async {
@@ -363,8 +386,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // AUDIO
   // Respects _prefAlertSound (on/off) and _prefAlertVolume (0.0 – 1.0)
+  // ─────────────────────────────────────────────────────────────────────────
+
   Future<void> _playAlertSound(int level) async {
     // Apply volume from preferences before playing
     await _audioPlayer.setVolume(_prefAlertVolume);
@@ -373,16 +399,19 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (level == 1 || level == 2) {
       // Short notification ping — plays once
       await _audioPlayer.stop();
-      await _audioPlayer.play(AssetSource('sounds/notification.mp3'));
+      await _audioPlayer.play(AssetSource('L1_L2_sound.mp3'));
     } else {
       // Level 3 — long looping alarm until driver dismisses
       await _alarmPlayer.setReleaseMode(ReleaseMode.loop);
-      await _alarmPlayer.play(AssetSource('sounds/alarm.mp3'));
+      await _alarmPlayer.play(AssetSource('L3_critical_alert.wav'));
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // HAPTIC
   // Respects _prefHaptic (on/off)
+  // ─────────────────────────────────────────────────────────────────────────
+
   Future<void> _triggerVibration(int level) async {
     final hasVibrator = await Vibration.hasVibrator();
     if (!hasVibrator) return;
@@ -407,7 +436,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(showAlertBannerProvider.notifier).state = false;
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // HELPERS
+  // ─────────────────────────────────────────────────────────────────────────
+
   Future<void> _addLog(String message, String type) async {
     final now = DateTime.now();
     final timeStr =
@@ -433,7 +465,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // BUILD
+  // ─────────────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final isDesktop   = Responsive.isDesktop(context);
@@ -450,7 +485,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // PORTRAIT LAYOUT
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildPortraitLayout() {
     final showAlert = ref.watch(showAlertBannerProvider);
     final alertType = ref.watch(alertBannerTypeProvider);
@@ -478,7 +516,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // LANDSCAPE LAYOUT
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildLandscapeLayout() {
     final showAlert = ref.watch(showAlertBannerProvider);
     final alertType = ref.watch(alertBannerTypeProvider);
@@ -520,7 +561,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // DESKTOP LAYOUT
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildDesktopLayout() {
     final showAlert = ref.watch(showAlertBannerProvider);
     final alertType = ref.watch(alertBannerTypeProvider);
@@ -558,7 +602,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // ALERT BANNER
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildAlertBanner(String type) {
     final isDrowsy = type == 'DROWSY';
     return GestureDetector(
@@ -615,7 +662,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // CAMERA CONTAINER
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildCameraContainer(
       {double? height, required bool isLandscape}) {
     final previewSize  = _getPreviewSize(isLandscape);
@@ -826,7 +876,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // ENVIRONMENT BAR (Clear Glasses + Record button)
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildEnvironmentBar({required bool isLandscape}) {
     final clearGlasses = ref.watch(clearGlassesProvider);
     final isRecording  = ref.watch(isRecordingProvider);
@@ -849,7 +902,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       ),
       child: Row(
         children: [
-          // Clear Glasses
+          // ── Clear Glasses ────────────────────────────────────────────────
           Expanded(
             child: InkWell(
               onTap: () {
@@ -922,7 +975,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               height: isLandscape ? 28 : 36,
               color: const Color(0xFF1e293b)),
 
-          // Record / Stop 
+          // ── Record / Stop ─────────────────────────────────────────────────
           Expanded(
             child: InkWell(
               onTap: () {
@@ -992,7 +1045,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // METRICS SIDEBAR
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildMetricsSidebar({required bool isLandscape}) {
     final alertness   = ref.watch(alertnessPctProvider);
     final drowsiness  = ref.watch(drowsinessPctProvider);
@@ -1022,6 +1078,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         SizedBox(
             height: isLandscape ? 260.0 : 320.0,
             child: _buildSystemLog()),
+        const SizedBox(height: 16),
+        _buildTestButtons(),
       ],
     );
   }
@@ -1118,7 +1176,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // SYSTEM LOG
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildSystemLog() {
     return Container(
       width: double.infinity,
@@ -1194,6 +1255,231 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               );
             }),
         ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ⚠️ DEV ONLY — REMOVE BEFORE FINAL BUILD
+  // Test buttons to trigger alert levels without the model
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Widget _buildTestButtons() {
+    final isRecording = ref.watch(isRecordingProvider);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0f172a),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: const Color(0xFFfbbf24).withOpacity(0.4),
+          width: 1,
+        ),
+        boxShadow: const [
+          BoxShadow(
+              color: Color(0xFF0b1120),
+              offset: Offset(4, 4),
+              blurRadius: 8),
+          BoxShadow(
+              color: Color(0xFF1e293b),
+              offset: Offset(-4, -4),
+              blurRadius: 8),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Row(
+            children: [
+              const Icon(Icons.bug_report_rounded,
+                  color: Color(0xFFfbbf24), size: 14),
+              const SizedBox(width: 6),
+              const Text(
+                'DEV — ALERT TEST',
+                style: TextStyle(
+                  color: Color(0xFFfbbf24),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              const Spacer(),
+              if (!isRecording)
+                const Text(
+                  'Start recording first',
+                  style: TextStyle(
+                      color: Color(0xFF475569), fontSize: 10),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // DROWSY row
+          const Text('DROWSY',
+              style: TextStyle(
+                  color: Color(0xFF64748b),
+                  fontSize: 10,
+                  letterSpacing: 1)),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              _testButton(
+                label: 'Level 1',
+                color: const Color(0xFF22d3ee),
+                onTap: isRecording
+                    ? () {
+                        _consecutiveDrowsy = 3;
+                        _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy);
+                      }
+                    : null,
+              ),
+              const SizedBox(width: 8),
+              _testButton(
+                label: 'Level 2',
+                color: const Color(0xFFfbbf24),
+                onTap: isRecording
+                    ? () {
+                        _consecutiveDrowsy = 6;
+                        _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy);
+                      }
+                    : null,
+              ),
+              const SizedBox(width: 8),
+              _testButton(
+                label: 'Level 3',
+                color: Colors.red,
+                onTap: isRecording
+                    ? () {
+                        _consecutiveDrowsy = 9;
+                        _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy);
+                      }
+                    : null,
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 10),
+
+          // DISTRACTED row
+          const Text('DISTRACTED',
+              style: TextStyle(
+                  color: Color(0xFF64748b),
+                  fontSize: 10,
+                  letterSpacing: 1)),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              _testButton(
+                label: 'Level 1',
+                color: const Color(0xFF22d3ee),
+                onTap: isRecording
+                    ? () {
+                        _consecutiveDistracted = 3;
+                        _checkAndTriggerAlert(
+                            'DISTRACTED', _consecutiveDistracted);
+                      }
+                    : null,
+              ),
+              const SizedBox(width: 8),
+              _testButton(
+                label: 'Level 2',
+                color: const Color(0xFFfbbf24),
+                onTap: isRecording
+                    ? () {
+                        _consecutiveDistracted = 6;
+                        _checkAndTriggerAlert(
+                            'DISTRACTED', _consecutiveDistracted);
+                      }
+                    : null,
+              ),
+              const SizedBox(width: 8),
+              _testButton(
+                label: 'Level 3',
+                color: Colors.red,
+                onTap: isRecording
+                    ? () {
+                        _consecutiveDistracted = 9;
+                        _checkAndTriggerAlert(
+                            'DISTRACTED', _consecutiveDistracted);
+                      }
+                    : null,
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 12),
+
+          // Reset button
+          SizedBox(
+            width: double.infinity,
+            child: GestureDetector(
+              onTap: () {
+                _consecutiveDrowsy     = 0;
+                _consecutiveDistracted = 0;
+                _alertLevel            = 0;
+                _alarmPlayer.stop();
+                ref.read(showAlertBannerProvider.notifier).state = false;
+                _addLog('Alert reset by dev', 'INFO');
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1e293b),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                      color: const Color(0xFF475569), width: 1),
+                ),
+                child: const Text(
+                  'Reset All Alerts',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      color: Color(0xFF94a3b8),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _testButton({
+    required String label,
+    required Color color,
+    required VoidCallback? onTap,
+  }) {
+    final isEnabled = onTap != null;
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: isEnabled
+                ? color.withOpacity(0.12)
+                : const Color(0xFF1e293b),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: isEnabled
+                  ? color.withOpacity(0.5)
+                  : const Color(0xFF1e293b),
+              width: 1,
+            ),
+          ),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: isEnabled ? color : const Color(0xFF475569),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
       ),
     );
   }
