@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:ui';
-import 'package:bantaydrive/core/preference/preference_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:camera/camera.dart';
@@ -9,6 +8,7 @@ import 'package:flutter_riverpod/legacy.dart';
 import 'package:vibration/vibration.dart';
 import 'package:gal/gal.dart';
 import '../core/database/database_helper.dart';
+import 'package:bantaydrive/core/preference/preference_helper.dart';
 import '../utils/responsive.dart';
 
 // RIVERPOD PROVIDERS
@@ -32,19 +32,19 @@ class MonitorScreen extends ConsumerStatefulWidget {
 class _MonitorScreenState extends ConsumerState<MonitorScreen>
     with TickerProviderStateMixin {
 
-  // CAMERA
+  //  CAMERA
   CameraController? _cameraController;
   List<CameraDescription> _cameras = [];
   bool _cameraInitialized = false;
   String? _cameraError;
 
-  // SESSION
+  // SESSION 
   int? _currentSessionId;
   DateTime? _sessionStartTime;
   Timer? _snapshotTimer;
   Timer? _alertBannerTimer;
 
-  // ALERT TRACKING
+  // ALERT TRACKING 
   int _consecutiveDrowsy     = 0;
   int _consecutiveDistracted = 0;
   int _alertLevel            = 0;
@@ -52,11 +52,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // SYSTEM LOGS 
   final List<Map<String, dynamic>> _systemLogs = [];
 
-  // AUDIO
+  // AUDIO 
   final AudioPlayer _audioPlayer  = AudioPlayer();
   final AudioPlayer _alarmPlayer  = AudioPlayer();
 
-  // ANIMATIONS 
+  //  ANIMATIONS 
   late AnimationController _warningController;
   late Animation<double>   _warningAnimation;
 
@@ -68,9 +68,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   double _prefAlertVolume     = 0.8;
   int    _prefAlertSensitivity= 1;    // 0=Low, 1=Medium, 2=High
   bool   _prefAutoStart       = false;
-  String _prefCameraPosition  = 'Front';
 
-  // SENSITIVITY THRESHOLDS
+  // SENSITIVITY THRESHOLDS 
   // Maps sensitivity setting → [level1, level2, level3] consecutive counts
   // Low    → harder to trigger (needs more consecutive detections)
   // Medium → default
@@ -121,7 +120,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _prefAlertVolume      = await prefs.getAlertVolume();
     _prefAlertSensitivity = await prefs.getAlertSensitivity();
     _prefAutoStart        = await prefs.getAutoStart();
-    _prefCameraPosition   = await prefs.getCameraPosition();
 
     // Now initialize camera with the correct position from prefs
     await _initCamera();
@@ -136,7 +134,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _prefAlertVolume      = await prefs.getAlertVolume();
     _prefAlertSensitivity = await prefs.getAlertSensitivity();
     _prefAutoStart        = await prefs.getAutoStart();
-    _prefCameraPosition   = await prefs.getCameraPosition();
   }
 
   // CAMERA
@@ -148,15 +145,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         return;
       }
 
-      // Select camera based on saved camera position preference:
-      // 'Front'     → front-facing (selfie) camera
-      // 'Dashboard' → back camera (mounted on dashboard pointing at driver)
-      final targetDirection = _prefCameraPosition == 'Front'
-          ? CameraLensDirection.front
-          : CameraLensDirection.back;
-
+      // Always use front-facing (selfie) camera
       final selectedCamera = _cameras.firstWhere(
-        (c) => c.lensDirection == targetDirection,
+        (c) => c.lensDirection == CameraLensDirection.front,
         orElse: () => _cameras.first,
       );
 
@@ -210,9 +201,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     await _addLog('Face Tracking Active', 'SUCCESS');
     await Future.delayed(const Duration(milliseconds: 400));
     await _addLog('Baseline Established', 'INFO');
-
-    // Log camera position being used
-    await _addLog('Camera: $_prefCameraPosition', 'INFO');
 
     _snapshotTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       _saveAlertnessSnapshot();
@@ -273,7 +261,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   // MODEL OUTPUT
   // Plug TFLite inference results here. Not activated yet.
-
   void onModelOutput({
     required String state,
     required double alertnessPct,
@@ -317,6 +304,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   //   Low    → [5, 10, 15]
   //   Medium → [3,  6,  9]  (default)
   //   High   → [2,  4,  6]
+
   Future<void> _checkAndTriggerAlert(
       String type, int consecutive) async {
     // Get thresholds based on current sensitivity preference
@@ -374,7 +362,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       });
     }
   }
-
 
   // AUDIO
   // Respects _prefAlertSound (on/off) and _prefAlertVolume (0.0 – 1.0)
@@ -862,7 +849,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       ),
       child: Row(
         children: [
-          // Clear Glasses 
+          // Clear Glasses
           Expanded(
             child: InkWell(
               onTap: () {

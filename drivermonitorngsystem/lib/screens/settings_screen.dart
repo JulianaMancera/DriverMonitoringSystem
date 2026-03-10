@@ -3,6 +3,7 @@ import 'package:bantaydrive/core/preference/preference_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -11,7 +12,7 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  // STATE ─
+  // STATE 
   bool _isLoading = true; // shows loading indicator while prefs load
 
   // Alert Settings
@@ -21,9 +22,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int    _alertSensitivity   = 1; // 0=Low, 1=Medium, 2=High
 
   // Monitoring Settings
-  String _cameraPosition     = 'Front';
   bool   _autoStartEnabled   = false;
-  double _autostopBatteryPct = 10.0;
 
   // Data & Privacy
   String _retentionPeriod    = '30 days';
@@ -36,7 +35,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   static const Color _textPrimary   = Color(0xFFEEF2FF);
   static const Color _textSecondary = Color(0xFF6B7A99);
   static const Color _red           = Color(0xFFFF4757);
-  static const Color _orange        = Color(0xFFFFA500);
   static const Color _divider       = Color(0xFF1E2D45);
 
   // LIFECYCLE
@@ -54,9 +52,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final haptic          = await prefs.getHaptic();
     final alertVolume     = await prefs.getAlertVolume();
     final alertSensitivity= await prefs.getAlertSensitivity();
-    final cameraPosition  = await prefs.getCameraPosition();
     final autoStart       = await prefs.getAutoStart();
-    final autostopBattery = await prefs.getAutostopBattery();
     final retention       = await prefs.getRetention();
 
     if (mounted) {
@@ -65,15 +61,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _hapticEnabled      = haptic;
         _alertVolume        = alertVolume;
         _alertSensitivity   = alertSensitivity;
-        _cameraPosition     = cameraPosition;
         _autoStartEnabled   = autoStart;
-        _autostopBatteryPct = autostopBattery;
         _retentionPeriod    = retention;
         _isLoading          = false;
       });
     }
   }
-  
+
   // BUILD
   @override
   Widget build(BuildContext context) {
@@ -92,7 +86,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         children: [
 
-          // ALERT SETTINGS
+          // ALERT SETTINGS 
           _sectionLabel('ALERT SETTINGS'),
           _buildCard([
             _toggleTile(
@@ -152,19 +146,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // MONITORING SETTINGS
           _sectionLabel('MONITORING SETTINGS'),
           _buildCard([
-            _dropdownTile(
-              icon: Icons.camera_alt_rounded,
-              iconColor: _cyan,
-              title: 'Camera Position',
-              subtitle: 'Front = selfie angle  •  Dashboard = mounted upward',
-              value: _cameraPosition,
-              options: const ['Front', 'Dashboard'],
-              onChanged: (v) {
-                setState(() => _cameraPosition = v!);
-                PreferencesHelper.instance.setCameraPosition(v!);
-              },
-            ),
-            _dividerLine(),
             _toggleTile(
               icon: Icons.play_circle_rounded,
               iconColor: _cyan,
@@ -176,27 +157,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 PreferencesHelper.instance.setAutoStart(v);
               },
             ),
-            _dividerLine(),
-            _sliderTile(
-              icon: Icons.battery_alert_rounded,
-              iconColor: _orange,
-              title: 'Auto-Stop Battery Level',
-              subtitle: 'Stop monitoring when battery reaches this level',
-              value: _autostopBatteryPct,
-              min: 5,
-              max: 30,
-              divisions: 5,
-              displayValue: '${_autostopBatteryPct.round()}%',
-              onChanged: (v) {
-                setState(() => _autostopBatteryPct = v);
-                PreferencesHelper.instance.setAutostopBattery(v);
-              },
-            ),
           ]),
 
           const SizedBox(height: 24),
 
-          //DATA & PRIVACY
+          // DATA & PRIVACY
           _sectionLabel('DATA & PRIVACY'),
           _buildCard([
             _dropdownTile(
@@ -232,7 +197,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 24),
 
-          // ABOUT
+          //  ABOUT 
           _sectionLabel('ABOUT'),
           _buildCard([
             _infoTile(
@@ -251,12 +216,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: Icons.people_rounded,
               title: 'Authors',
               value: 'Macalanda & Mancera',
-            ),
-            _dividerLine(),
-            _infoTile(
-              icon: Icons.person_rounded,
-              title: 'Adviser',
-              value: 'Dr. Marc P. Laureta',
             ),
             _dividerLine(),
             _actionTile(
