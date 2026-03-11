@@ -11,7 +11,6 @@ class PreferencesHelper {
   static const String _keyAlertSensitivity= 'alert_sensitivity';
   static const String _keyCameraPosition  = 'camera_position';
   static const String _keyAutoStart       = 'auto_start';
-  static const String _keyAutostopBattery = 'autostop_battery';
   static const String _keyRetention       = 'session_retention';
 
   // ALERT SETTINGS
@@ -33,9 +32,6 @@ class PreferencesHelper {
 
   Future<bool>   getAutoStart()        async => (await _prefs()).getBool(_keyAutoStart)          ?? false;
   Future<void>   setAutoStart(bool v)  async => (await _prefs()).setBool(_keyAutoStart, v);
-
-  Future<double> getAutostopBattery()  async => (await _prefs()).getDouble(_keyAutostopBattery) ?? 10.0;
-  Future<void>   setAutostopBattery(double v) async => (await _prefs()).setDouble(_keyAutostopBattery, v);
 
   // DATA & PRIVACY
   Future<String> getRetention()        async => (await _prefs()).getString(_keyRetention)        ?? '30 days';
