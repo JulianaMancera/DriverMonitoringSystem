@@ -5,16 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:camera/camera.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_riverpod/legacy.dart';
-import 'package:vibration/vibration.dart';
 import 'package:gal/gal.dart';
 import '../core/database/database_helper.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import '../utils/responsive.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
 // RIVERPOD PROVIDERS
-// ─────────────────────────────────────────────────────────────────────────────
-
 final driverStateProvider       = StateProvider<String>((ref) => 'neutral');
 final alertnessPctProvider      = StateProvider<double>((ref) => 100.0);
 final drowsinessPctProvider     = StateProvider<double>((ref) => 0.0);
@@ -24,10 +20,7 @@ final showAlertBannerProvider   = StateProvider<bool>((ref) => false);
 final alertBannerTypeProvider   = StateProvider<String>((ref) => 'DROWSY');
 final clearGlassesProvider      = StateProvider<bool>((ref) => false);
 
-// ─────────────────────────────────────────────────────────────────────────────
 // MONITOR SCREEN
-// ─────────────────────────────────────────────────────────────────────────────
-
 class MonitorScreen extends ConsumerStatefulWidget {
   const MonitorScreen({super.key});
 
@@ -38,44 +31,43 @@ class MonitorScreen extends ConsumerStatefulWidget {
 class _MonitorScreenState extends ConsumerState<MonitorScreen>
     with TickerProviderStateMixin {
 
-  // ── CAMERA ─────────────────────────────────────────────────────────────────
+  // CAMERA 
   CameraController? _cameraController;
   List<CameraDescription> _cameras = [];
   bool _cameraInitialized = false;
   String? _cameraError;
 
-  // ── SESSION ─────────────────────────────────────────────────────────────────
+  // SESSION
   int? _currentSessionId;
   DateTime? _sessionStartTime;
   Timer? _snapshotTimer;
   Timer? _alertBannerTimer;
 
-  // ── ALERT TRACKING ──────────────────────────────────────────────────────────
+  // ALERT TRACKING
   int _consecutiveDrowsy     = 0;
   int _consecutiveDistracted = 0;
   int _alertLevel            = 0;
 
-  // ── SYSTEM LOGS ─────────────────────────────────────────────────────────────
+  // SYSTEM LOGS
   final List<Map<String, dynamic>> _systemLogs = [];
 
-  // ── AUDIO ───────────────────────────────────────────────────────────────────
+  // AUDIO 
   final AudioPlayer _audioPlayer  = AudioPlayer();
   final AudioPlayer _alarmPlayer  = AudioPlayer();
 
-  // ── ANIMATIONS ──────────────────────────────────────────────────────────────
+  // ANIMATIONS 
   late AnimationController _warningController;
   late Animation<double>   _warningAnimation;
 
-  // ── PREFERENCES (loaded on init) ────────────────────────────────────────────
+  // PREFERENCES (loaded on init) 
   // These mirror the values saved in SharedPreferences via PreferencesHelper.
   // They are loaded once in initState and re-read when the screen resumes.
   bool   _prefAlertSound      = true;
-  bool   _prefHaptic          = true;
   double _prefAlertVolume     = 0.8;
   int    _prefAlertSensitivity= 1;    // 0=Low, 1=Medium, 2=High
   bool   _prefAutoStart       = false;
 
-  // ── SENSITIVITY THRESHOLDS ──────────────────────────────────────────────────
+  // SENSITIVITY THRESHOLDS 
   // Maps sensitivity setting → [level1, level2, level3] consecutive counts
   // Low    → harder to trigger (needs more consecutive detections)
   // Medium → default
@@ -86,10 +78,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     2: [2,  4,  6], // High
   };
 
-  // ─────────────────────────────────────────────────────────────────────────
   // LIFECYCLE
-  // ─────────────────────────────────────────────────────────────────────────
-
   @override
   void initState() {
     super.initState();
@@ -118,17 +107,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     super.dispose();
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // PREFERENCES
-  // ─────────────────────────────────────────────────────────────────────────
-
   /// Load all relevant preferences then initialize camera.
   /// Called once on initState.
   Future<void> _loadPreferencesAndInit() async {
     final prefs = PreferencesHelper.instance;
 
     _prefAlertSound       = await prefs.getAlertSound();
-    _prefHaptic           = await prefs.getHaptic();
     _prefAlertVolume      = await prefs.getAlertVolume();
     _prefAlertSensitivity = await prefs.getAlertSensitivity();
     _prefAutoStart        = await prefs.getAutoStart();
@@ -142,16 +127,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   Future<void> _refreshPreferences() async {
     final prefs = PreferencesHelper.instance;
     _prefAlertSound       = await prefs.getAlertSound();
-    _prefHaptic           = await prefs.getHaptic();
     _prefAlertVolume      = await prefs.getAlertVolume();
     _prefAlertSensitivity = await prefs.getAlertSensitivity();
     _prefAutoStart        = await prefs.getAutoStart();
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // CAMERA
-  // ─────────────────────────────────────────────────────────────────────────
-
   Future<void> _initCamera() async {
     try {
       _cameras = await availableCameras();
@@ -198,10 +179,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     return Size(ps.height, ps.width);
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // SESSION CONTROL
-  // ─────────────────────────────────────────────────────────────────────────
-
   Future<void> _startRecording() async {
     _currentSessionId = await DatabaseHelper.instance.insertSession();
     await DatabaseHelper.instance.insertStateCount(_currentSessionId!);
@@ -277,11 +255,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _sessionStartTime = null;
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // MODEL OUTPUT
   // Plug TFLite inference results here. Not activated yet.
-  // ─────────────────────────────────────────────────────────────────────────
-
   void onModelOutput({
     required String state,
     required double alertnessPct,
@@ -320,14 +295,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // 3-LEVEL ALERT SYSTEM
   // Thresholds are driven by Alert Sensitivity preference:
   //   Low    → [5, 10, 15]
   //   Medium → [3,  6,  9]  (default)
   //   High   → [2,  4,  6]
-  // ─────────────────────────────────────────────────────────────────────────
-
   Future<void> _checkAndTriggerAlert(
       String type, int consecutive) async {
     // Get thresholds based on current sensitivity preference
@@ -369,11 +341,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       await _playAlertSound(newLevel);
     }
 
-    // Vibrate only if haptic is enabled in Settings
-    if (_prefHaptic) {
-      await _triggerVibration(newLevel);
-    }
-
     // Level 1 & 2 banners auto-dismiss after 3 seconds
     // Level 3 stays until driver manually dismisses
     if (newLevel < 3) {
@@ -386,11 +353,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // AUDIO
   // Respects _prefAlertSound (on/off) and _prefAlertVolume (0.0 – 1.0)
-  // ─────────────────────────────────────────────────────────────────────────
-
   Future<void> _playAlertSound(int level) async {
     // Apply volume from preferences before playing
     await _audioPlayer.setVolume(_prefAlertVolume);
@@ -407,27 +371,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // HAPTIC
-  // Respects _prefHaptic (on/off)
-  // ─────────────────────────────────────────────────────────────────────────
-
-  Future<void> _triggerVibration(int level) async {
-    final hasVibrator = await Vibration.hasVibrator();
-    if (!hasVibrator) return;
-
-    if (level == 1) {
-      // Single short buzz
-      Vibration.vibrate(duration: 200);
-    } else if (level == 2) {
-      // Double buzz
-      Vibration.vibrate(pattern: [0, 200, 100, 200]);
-    } else {
-      // Level 3 — strong repeating pattern
-      Vibration.vibrate(pattern: [0, 500, 200, 500, 200, 500]);
-    }
-  }
-
   Future<void> _dismissAlert() async {
     await _alarmPlayer.stop();
     _alertLevel            = 0;
@@ -436,10 +379,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(showAlertBannerProvider.notifier).state = false;
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // HELPERS
-  // ─────────────────────────────────────────────────────────────────────────
-
   Future<void> _addLog(String message, String type) async {
     final now = DateTime.now();
     final timeStr =
@@ -465,10 +405,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // BUILD
-  // ─────────────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     final isDesktop   = Responsive.isDesktop(context);
@@ -485,10 +422,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // PORTRAIT LAYOUT
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildPortraitLayout() {
     final showAlert = ref.watch(showAlertBannerProvider);
     final alertType = ref.watch(alertBannerTypeProvider);
@@ -516,10 +450,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // LANDSCAPE LAYOUT
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildLandscapeLayout() {
     final showAlert = ref.watch(showAlertBannerProvider);
     final alertType = ref.watch(alertBannerTypeProvider);
@@ -561,10 +492,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // DESKTOP LAYOUT
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildDesktopLayout() {
     final showAlert = ref.watch(showAlertBannerProvider);
     final alertType = ref.watch(alertBannerTypeProvider);
@@ -602,10 +530,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // ALERT BANNER
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildAlertBanner(String type) {
     final isDrowsy = type == 'DROWSY';
     return GestureDetector(
@@ -662,10 +587,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // CAMERA CONTAINER
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildCameraContainer(
       {double? height, required bool isLandscape}) {
     final previewSize  = _getPreviewSize(isLandscape);
@@ -876,10 +798,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // ENVIRONMENT BAR (Clear Glasses + Record button)
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildEnvironmentBar({required bool isLandscape}) {
     final clearGlasses = ref.watch(clearGlassesProvider);
     final isRecording  = ref.watch(isRecordingProvider);
@@ -902,7 +821,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       ),
       child: Row(
         children: [
-          // ── Clear Glasses ────────────────────────────────────────────────
+          // Clear Glasses
           Expanded(
             child: InkWell(
               onTap: () {
@@ -975,7 +894,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               height: isLandscape ? 28 : 36,
               color: const Color(0xFF1e293b)),
 
-          // ── Record / Stop ─────────────────────────────────────────────────
+          // Record / Stop
           Expanded(
             child: InkWell(
               onTap: () {
@@ -1045,10 +964,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // METRICS SIDEBAR
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildMetricsSidebar({required bool isLandscape}) {
     final alertness   = ref.watch(alertnessPctProvider);
     final drowsiness  = ref.watch(drowsinessPctProvider);
@@ -1175,11 +1091,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       ),
     );
   }
-
-  // ─────────────────────────────────────────────────────────────────────────
   // SYSTEM LOG
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildSystemLog() {
     return Container(
       width: double.infinity,
@@ -1259,10 +1171,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // ⚠️ DEV ONLY — REMOVE BEFORE FINAL BUILD
   // Test buttons to trigger alert levels without the model
-  // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildTestButtons() {
     final isRecording = ref.watch(isRecordingProvider);

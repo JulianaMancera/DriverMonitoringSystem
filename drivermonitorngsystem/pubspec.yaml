@@ -26,7 +26,6 @@ dependencies:
   cached_network_image: ^3.3.1
   flutter_riverpod: ^3.2.1
   audioplayers: ^6.0.0
-  vibration: ^3.1.8
   gal: ^2.3.0
   shared_preferences: ^2.3.0
 

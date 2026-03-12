@@ -1,8 +1,7 @@
-import 'package:bantaydrive/core/database/database_helper.dart';
-import 'package:bantaydrive/core/preference/preference_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
+import 'package:bantaydrive/core/preference/preference_helper.dart';
+import '../core/database/database_helper.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -12,12 +11,11 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  // STATE 
+  // STATE
   bool _isLoading = true; // shows loading indicator while prefs load
 
   // Alert Settings
   bool   _alertSoundEnabled  = true;
-  bool   _hapticEnabled      = true;
   double _alertVolume        = 0.8;
   int    _alertSensitivity   = 1; // 0=Low, 1=Medium, 2=High
 
@@ -49,7 +47,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = PreferencesHelper.instance;
 
     final alertSound      = await prefs.getAlertSound();
-    final haptic          = await prefs.getHaptic();
     final alertVolume     = await prefs.getAlertVolume();
     final alertSensitivity= await prefs.getAlertSensitivity();
     final autoStart       = await prefs.getAutoStart();
@@ -58,7 +55,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) {
       setState(() {
         _alertSoundEnabled  = alertSound;
-        _hapticEnabled      = haptic;
         _alertVolume        = alertVolume;
         _alertSensitivity   = alertSensitivity;
         _autoStartEnabled   = autoStart;
@@ -86,7 +82,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         children: [
 
-          // ALERT SETTINGS 
+          // ALERT SETTINGS
           _sectionLabel('ALERT SETTINGS'),
           _buildCard([
             _toggleTile(
@@ -98,18 +94,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onChanged: (v) {
                 setState(() => _alertSoundEnabled = v);
                 PreferencesHelper.instance.setAlertSound(v);
-              },
-            ),
-            _dividerLine(),
-            _toggleTile(
-              icon: Icons.vibration_rounded,
-              iconColor: _cyan,
-              title: 'Haptic Vibration',
-              subtitle: 'Vibrate on alert trigger',
-              value: _hapticEnabled,
-              onChanged: (v) {
-                setState(() => _hapticEnabled = v);
-                PreferencesHelper.instance.setHaptic(v);
               },
             ),
             _dividerLine(),
@@ -197,7 +181,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 24),
 
-          //  ABOUT 
+          // ABOUT
           _sectionLabel('ABOUT'),
           _buildCard([
             _infoTile(
@@ -216,6 +200,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: Icons.people_rounded,
               title: 'Authors',
               value: 'Macalanda & Mancera',
+            ),
+            _dividerLine(),
+            _infoTile(
+              icon: Icons.person_rounded,
+              title: 'Adviser',
+              value: 'Dr. Marc P. Laureta',
             ),
             _dividerLine(),
             _actionTile(
@@ -592,7 +582,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
-
   // ICON BOX
   Widget _iconBox(IconData icon, Color color) {
     return Container(
