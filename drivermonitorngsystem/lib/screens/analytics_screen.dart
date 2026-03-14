@@ -66,8 +66,8 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
           color: const Color(0xFF0f172a),
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
-            BoxShadow(color: const Color(0xFF0b1120).withOpacity(0.8), offset: const Offset(4, 4),   blurRadius: 8),
-            BoxShadow(color: const Color(0xFF1e293b).withOpacity(0.8), offset: const Offset(-4, -4), blurRadius: 8),
+            BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.8), offset: const Offset(4, 4),   blurRadius: 8),
+            BoxShadow(color: const Color(0xFF1e293b).withValues(alpha: 0.8), offset: const Offset(-4, -4), blurRadius: 8),
           ],
         ),
         child: IntrinsicWidth(  
@@ -99,7 +99,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
           color: isSelected ? const Color(0xFF1e293b) : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
           boxShadow: isSelected
-              ? [BoxShadow(color: const Color(0xFF0b1120).withOpacity(0.6), offset: const Offset(2, 2), blurRadius: 4)]
+              ? [BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.6), offset: const Offset(2, 2), blurRadius: 4)]
               : [],
         ),
         child: Text(
@@ -600,8 +600,8 @@ class _HoverableSummaryCardState extends State<_HoverableSummaryCard> {
           ),
           boxShadow: isHovered
               ? [
-                  BoxShadow(color: const Color(0xFF0b1120).withOpacity(0.8), offset: const Offset(-3, -3), blurRadius: 6),
-                  BoxShadow(color: const Color(0xFF1e293b).withOpacity(0.8), offset: const Offset(3, 3),   blurRadius: 6),
+                  BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.8), offset: const Offset(-3, -3), blurRadius: 6),
+                  BoxShadow(color: const Color(0xFF1e293b).withValues(alpha: 0.8), offset: const Offset(3, 3),   blurRadius: 6),
                 ]
               : const [
                   BoxShadow(color: Color(0xFF0b1120), offset: Offset(6, 6),   blurRadius: 12),
@@ -640,8 +640,8 @@ class _HoverableSummaryCardState extends State<_HoverableSummaryCard> {
                   ),
                   decoration: BoxDecoration(
                     color: widget.isPositive
-                        ? const Color(0xFF10b981).withOpacity(0.1)
-                        : const Color(0xFFef4444).withOpacity(0.1),
+                        ? const Color(0xFF10b981).withValues(alpha: 0.1)
+                        : const Color(0xFFef4444).withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Row(

@@ -72,8 +72,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
     // Score label
     String scoreLabel = 'EXCELLENT';
-    if (safetyScore < 60)      scoreLabel = 'POOR';
-    else if (safetyScore < 75) scoreLabel = 'FAIR';
+    if (safetyScore < 60) {
+      scoreLabel = 'POOR';
+    } else if (safetyScore < 75) scoreLabel = 'FAIR';
     else if (safetyScore < 90) scoreLabel = 'GOOD';
 
     final isMobile = Responsive.isMobile(context);
@@ -218,8 +219,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               color: const Color(0xFF0f172a),
               shape: BoxShape.circle,
               boxShadow: [
-                BoxShadow(color: const Color(0xFF0b1120).withOpacity(0.8), offset: const Offset(6, 6),   blurRadius: 12),
-                BoxShadow(color: const Color(0xFF1e293b).withOpacity(0.8), offset: const Offset(-6, -6), blurRadius: 12),
+                BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.8), offset: const Offset(6, 6),   blurRadius: 12),
+                BoxShadow(color: const Color(0xFF1e293b).withValues(alpha: 0.8), offset: const Offset(-6, -6), blurRadius: 12),
               ],
             ),
           ),
@@ -412,8 +413,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       show: true,
                       gradient: LinearGradient(
                         colors: [
-                          const Color(0xFF22d3ee).withOpacity(0.3),
-                          const Color(0xFF22d3ee).withOpacity(0.0),
+                          const Color(0xFF22d3ee).withValues(alpha: 0.3),
+                          const Color(0xFF22d3ee).withValues(alpha: 0.0),
                         ],
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
@@ -502,7 +503,7 @@ class _StatCardState extends State<_StatCard> {
                     ),
                     decoration: BoxDecoration(
                       color: widget.accent
-                          ? const Color(0xFF22d3ee).withOpacity(0.1)
+                          ? const Color(0xFF22d3ee).withValues(alpha: 0.1)
                           : const Color(0xFF1e293b),
                       borderRadius: BorderRadius.circular(
                         Responsive.responsiveBorderRadius(context, mobile: 10, tablet: 11, desktop: 12),
@@ -527,7 +528,7 @@ class _StatCardState extends State<_StatCard> {
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xFF22d3ee).withOpacity(0.4),
+                              color: const Color(0xFF22d3ee).withValues(alpha: 0.4),
                               blurRadius: 8, spreadRadius: 2,
                             ),
                           ],

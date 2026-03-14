@@ -129,7 +129,7 @@ class MainShell extends ConsumerWidget {
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFF00FF88).withOpacity(0.5),
+                        color: const Color(0xFF00FF88).withValues(alpha: 0.5),
                         blurRadius: 8,
                       ),
                     ],
@@ -141,7 +141,7 @@ class MainShell extends ConsumerWidget {
               preferredSize: const Size.fromHeight(1),
               child: Container(
                 height: 1,
-                color: Colors.white.withOpacity(0.05),
+                color: Colors.white.withValues(alpha: 0.05),
               ),
             ),
           ),
@@ -175,11 +175,11 @@ class _BottomNav extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF0D1627),
         border: Border(
-          top: BorderSide(color: Colors.white.withOpacity(0.05), width: 1),
+          top: BorderSide(color: Colors.white.withValues(alpha: 0.05), width: 1),
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.4),
+            color: Colors.black.withValues(alpha: 0.4),
             blurRadius: 20,
             offset: const Offset(0, -4),
           ),
@@ -226,7 +226,7 @@ class _NavItem extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
         decoration: BoxDecoration(
           color: isActive
-              ? const Color(0xFF00D4FF).withOpacity(0.15)
+              ? const Color(0xFF00D4FF).withValues(alpha: 0.15)
               : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
         ),

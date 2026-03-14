@@ -546,11 +546,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
                 color:
-                    Colors.red.withOpacity(0.5 * _warningAnimation.value),
+                    Colors.red.withValues(alpha: 0.5 * _warningAnimation.value),
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.red.withOpacity(0.2),
+                  color: Colors.red.withValues(alpha: 0.2),
                   blurRadius: 20,
                   spreadRadius: 2,
                 ),
@@ -696,7 +696,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             end: Alignment.bottomCenter,
             colors: [
               Colors.transparent,
-              const Color(0xFF0f172a).withOpacity(0.4),
+              const Color(0xFF0f172a).withValues(alpha: 0.4),
             ],
           ),
         ),
@@ -712,7 +712,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         padding:
             const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: Colors.red.withOpacity(0.85),
+          color: Colors.red.withValues(alpha: 0.85),
           borderRadius: BorderRadius.circular(20),
         ),
         child: Row(
@@ -743,7 +743,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       animation: _warningAnimation,
       builder: (context, child) {
         return Container(
-          color: Colors.red.withOpacity(0.4),
+          color: Colors.red.withValues(alpha: 0.4),
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 2, sigmaY: 2),
             child: Center(
@@ -753,13 +753,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
                     color:
-                        const Color(0xFF0f172a).withOpacity(0.9),
+                        const Color(0xFF0f172a).withValues(alpha: 0.9),
                     border: Border.all(
-                        color: Colors.red.withOpacity(0.5)),
+                        color: Colors.red.withValues(alpha: 0.5)),
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
-                          color: Colors.red.withOpacity(0.4),
+                          color: Colors.red.withValues(alpha: 0.4),
                           blurRadius: 50,
                           spreadRadius: 10),
                     ],
@@ -845,12 +845,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                           ? [
                               BoxShadow(
                                   color: const Color(0xFF0b1120)
-                                      .withOpacity(0.8),
+                                      .withValues(alpha: 0.8),
                                   offset: const Offset(3, 3),
                                   blurRadius: 6),
                               BoxShadow(
                                   color: const Color(0xFF1e293b)
-                                      .withOpacity(0.8),
+                                      .withValues(alpha: 0.8),
                                   offset: const Offset(-3, -3),
                                   blurRadius: 6),
                             ]
@@ -918,7 +918,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       boxShadow: isRecording
                           ? [
                               BoxShadow(
-                                  color: Colors.red.withOpacity(0.5),
+                                  color: Colors.red.withValues(alpha: 0.5),
                                   blurRadius: 12,
                                   spreadRadius: 2),
                             ]
@@ -1060,11 +1060,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               borderRadius: BorderRadius.circular(5),
               boxShadow: [
                 BoxShadow(
-                    color: const Color(0xFF0b1120).withOpacity(0.5),
+                    color: const Color(0xFF0b1120).withValues(alpha: 0.5),
                     offset: const Offset(2, 2),
                     blurRadius: 4),
                 BoxShadow(
-                    color: const Color(0xFF1e293b).withOpacity(0.5),
+                    color: const Color(0xFF1e293b).withValues(alpha: 0.5),
                     offset: const Offset(-2, -2),
                     blurRadius: 4),
               ],
@@ -1100,11 +1100,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-              color: const Color(0xFF0b1120).withOpacity(0.5),
+              color: const Color(0xFF0b1120).withValues(alpha: 0.5),
               offset: const Offset(4, 4),
               blurRadius: 8),
           BoxShadow(
-              color: const Color(0xFF1e293b).withOpacity(0.5),
+              color: const Color(0xFF1e293b).withValues(alpha: 0.5),
               offset: const Offset(-4, -4),
               blurRadius: 8),
         ],
@@ -1182,7 +1182,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: const Color(0xFFfbbf24).withOpacity(0.4),
+          color: const Color(0xFFfbbf24).withValues(alpha: 0.4),
           width: 1,
         ),
         boxShadow: const [
@@ -1369,12 +1369,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
             color: isEnabled
-                ? color.withOpacity(0.12)
+                ? color.withValues(alpha: 0.12)
                 : const Color(0xFF1e293b),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: isEnabled
-                  ? color.withOpacity(0.5)
+                  ? color.withValues(alpha: 0.5)
                   : const Color(0xFF1e293b),
               width: 1,
             ),
