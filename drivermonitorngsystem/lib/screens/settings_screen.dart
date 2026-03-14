@@ -594,7 +594,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   borderRadius: BorderRadius.circular(8)),
             ),
             onPressed: () {
-              Navigator.pop(context);
+              Navigator.pop(context);                                                                                              
               // TODO: implement CSV export using DatabaseHelper
               // Example:
               // final sessions = await DatabaseHelper.instance.getAllSessions();
