@@ -37,21 +37,21 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   bool _cameraInitialized = false;
   String? _cameraError;
 
-  // SESSION
+  // SESSION 
   int? _currentSessionId;
   DateTime? _sessionStartTime;
   Timer? _snapshotTimer;
   Timer? _alertBannerTimer;
 
-  // ALERT TRACKING
+  // ALERT TRACKING 
   int _consecutiveDrowsy     = 0;
   int _consecutiveDistracted = 0;
   int _alertLevel            = 0;
 
-  // SYSTEM LOGS
+  // SYSTEM LOGS 
   final List<Map<String, dynamic>> _systemLogs = [];
 
-  // AUDIO 
+  // AUDIO
   final AudioPlayer _audioPlayer  = AudioPlayer();
   final AudioPlayer _alarmPlayer  = AudioPlayer();
 
@@ -59,11 +59,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   late AnimationController _warningController;
   late Animation<double>   _warningAnimation;
 
-  // PREFERENCES (loaded on init) 
+  // PREFERENCES (loaded on init)
   // These mirror the values saved in SharedPreferences via PreferencesHelper.
   // They are loaded once in initState and re-read when the screen resumes.
-  bool   _prefAlertSound      = true;
-  double _prefAlertVolume     = 0.8;
   int    _prefAlertSensitivity= 1;    // 0=Low, 1=Medium, 2=High
   bool   _prefAutoStart       = false;
 
@@ -113,12 +111,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   Future<void> _loadPreferencesAndInit() async {
     final prefs = PreferencesHelper.instance;
 
-    _prefAlertSound       = await prefs.getAlertSound();
-    _prefAlertVolume      = await prefs.getAlertVolume();
+    // Sound and volume are read fresh on every alert trigger
+    // so they don't need to be cached here
     _prefAlertSensitivity = await prefs.getAlertSensitivity();
     _prefAutoStart        = await prefs.getAutoStart();
 
-    // Now initialize camera with the correct position from prefs
+    // Now initialize camera
     await _initCamera();
   }
 
@@ -126,8 +124,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   /// Useful if user changes settings and navigates back to monitor.
   Future<void> _refreshPreferences() async {
     final prefs = PreferencesHelper.instance;
-    _prefAlertSound       = await prefs.getAlertSound();
-    _prefAlertVolume      = await prefs.getAlertVolume();
+    // Sound and volume read fresh on each alert — only sensitivity and
+    // auto-start need to be cached
     _prefAlertSensitivity = await prefs.getAlertSensitivity();
     _prefAutoStart        = await prefs.getAutoStart();
   }
@@ -336,10 +334,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       await _addLog(msg, 'WARNING');
     }
 
-    // Play sound only if alert sound is enabled in Settings
-    if (_prefAlertSound) {
-      await _playAlertSound(newLevel);
-    }
+    // Always play sound — volume controlled via slider in Settings
+    await _playAlertSound(newLevel);
 
     // Level 1 & 2 banners auto-dismiss after 3 seconds
     // Level 3 stays until driver manually dismisses
@@ -354,11 +350,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   // AUDIO
-  // Respects _prefAlertSound (on/off) and _prefAlertVolume (0.0 – 1.0)
+  // Volume and on/off are read fresh from prefs on every alert trigger
+  // so changes in Settings apply immediately without app restart
   Future<void> _playAlertSound(int level) async {
-    // Apply volume from preferences before playing
-    await _audioPlayer.setVolume(_prefAlertVolume);
-    await _alarmPlayer.setVolume(_prefAlertVolume);
+    // Always read volume fresh from prefs so changes in Settings
+    // take effect immediately without needing an app restart
+    final volume = await PreferencesHelper.instance.getAlertVolume();
+    await _audioPlayer.setVolume(volume);
+    await _alarmPlayer.setVolume(volume);
 
     if (level == 1 || level == 2) {
       // Short notification ping — plays once
@@ -894,7 +893,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               height: isLandscape ? 28 : 36,
               color: const Color(0xFF1e293b)),
 
-          // Record / Stop
+          // Record / Stop 
           Expanded(
             child: InkWell(
               onTap: () {
@@ -1091,6 +1090,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       ),
     );
   }
+
   // SYSTEM LOG
   Widget _buildSystemLog() {
     return Container(
@@ -1173,7 +1173,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   // ⚠️ DEV ONLY — REMOVE BEFORE FINAL BUILD
   // Test buttons to trigger alert levels without the model
-
   Widget _buildTestButtons() {
     final isRecording = ref.watch(isRecordingProvider);
 

@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:bantaydrive/core/preference/preference_helper.dart';
 import '../core/database/database_helper.dart';
-
+import 'package:bantaydrive/core/preference/preference_helper.dart';
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -11,11 +10,10 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  // STATE
+  // STATE 
   bool _isLoading = true; // shows loading indicator while prefs load
 
   // Alert Settings
-  bool   _alertSoundEnabled  = true;
   double _alertVolume        = 0.8;
   int    _alertSensitivity   = 1; // 0=Low, 1=Medium, 2=High
 
@@ -46,7 +44,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _loadSettings() async {
     final prefs = PreferencesHelper.instance;
 
-    final alertSound      = await prefs.getAlertSound();
     final alertVolume     = await prefs.getAlertVolume();
     final alertSensitivity= await prefs.getAlertSensitivity();
     final autoStart       = await prefs.getAutoStart();
@@ -54,7 +51,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (mounted) {
       setState(() {
-        _alertSoundEnabled  = alertSound;
         _alertVolume        = alertVolume;
         _alertSensitivity   = alertSensitivity;
         _autoStartEnabled   = autoStart;
@@ -85,18 +81,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // ALERT SETTINGS
           _sectionLabel('ALERT SETTINGS'),
           _buildCard([
-            _toggleTile(
-              icon: Icons.volume_up_rounded,
-              iconColor: _cyan,
-              title: 'Alert Sound',
-              subtitle: 'Play audio tone when drowsy or distracted',
-              value: _alertSoundEnabled,
-              onChanged: (v) {
-                setState(() => _alertSoundEnabled = v);
-                PreferencesHelper.instance.setAlertSound(v);
-              },
-            ),
-            _dividerLine(),
             _sliderTile(
               icon: Icons.speaker_rounded,
               iconColor: _cyan,
@@ -127,7 +111,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 24),
 
-          // MONITORING SETTINGS
+          // MONITORING SETTINGS 
           _sectionLabel('MONITORING SETTINGS'),
           _buildCard([
             _toggleTile(
@@ -145,7 +129,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 24),
 
-          // DATA & PRIVACY
+          // DATA & PRIVACY 
           _sectionLabel('DATA & PRIVACY'),
           _buildCard([
             _dropdownTile(
@@ -185,12 +169,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _sectionLabel('ABOUT'),
           _buildCard([
             _infoTile(
-              icon: Icons.info_outline_rounded,
-              title: 'App Version',
-              value: '1.0.0 (Build 1)',
-            ),
-            _dividerLine(),
-            _infoTile(
               icon: Icons.school_rounded,
               title: 'Institution',
               value: 'New Era University',
@@ -200,21 +178,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: Icons.people_rounded,
               title: 'Authors',
               value: 'Macalanda & Mancera',
-            ),
-            _dividerLine(),
-            _infoTile(
-              icon: Icons.person_rounded,
-              title: 'Adviser',
-              value: 'Dr. Marc P. Laureta',
-            ),
-            _dividerLine(),
-            _actionTile(
-              icon: Icons.article_outlined,
-              iconColor: _cyan,
-              title: 'Thesis Title',
-              subtitle:
-                  'DMS-HybridNet: A Hybrid CNN-BiLSTM-Attention Architecture for Real-Time Driver Monitoring',
-              onTap: () {},
             ),
           ]),
 
@@ -582,7 +545,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // ICON BOX
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _iconBox(IconData icon, Color color) {
     return Container(
       width: 36,
@@ -595,7 +562,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // ACTION HANDLERS
+  // ─────────────────────────────────────────────────────────────────────────
+
   void _onExportData(BuildContext context) {
     showDialog(
       context: context,
