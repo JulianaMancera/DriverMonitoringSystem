@@ -7,10 +7,7 @@ class DatabaseHelper {
 
   DatabaseHelper._init();
 
-  // ─────────────────────────────────────────────────────────────────────────
   // DATABASE INITIALIZATION
-  // ─────────────────────────────────────────────────────────────────────────
-
   Future<Database> get database async {
     if (_database != null) return _database!;
     _database = await _initDB('bantay_drive.db');
