@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import 'db_change_notifier.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
@@ -26,7 +27,6 @@ class DatabaseHelper {
 
   Future<void> _createTables(Database db, int version) async {
     // TABLE 1 — sessions
-    // Stores each monitoring session (one session = one drive)
     await db.execute('''
       CREATE TABLE sessions (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,7 +40,6 @@ class DatabaseHelper {
     ''');
 
     // TABLE 2 — state_counts
-    // Stores the total count of each driver state per session
     await db.execute('''
       CREATE TABLE state_counts (
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,7 +52,6 @@ class DatabaseHelper {
     ''');
 
     // TABLE 3 — alert_events
-    // Stores every alert triggered during a session
     // alert_type: 'DROWSY' or 'DISTRACTED'
     // alert_level: 1 (first ping), 2 (second ping), 3 (looping alarm)
     await db.execute('''
@@ -68,7 +66,6 @@ class DatabaseHelper {
     ''');
 
     // TABLE 4 — system_logs
-    // Stores the System Log entries shown in Monitoring Screen
     // log_type: 'INFO' (white), 'SUCCESS' (green), 'WARNING' (orange/red)
     await db.execute('''
       CREATE TABLE system_logs (
@@ -82,7 +79,6 @@ class DatabaseHelper {
     ''');
 
     // TABLE 5 — alertness_snapshots
-    // Stores alertness % every few seconds for the Alertness History chart
     await db.execute('''
       CREATE TABLE alertness_snapshots (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,15 +92,16 @@ class DatabaseHelper {
 
   // ─────────────────────────────────────────────────────────────────────────
   // SESSIONS — CRUD
-  // Used by: Monitoring Screen (insert/update), Dashboard, Analytics
   // ─────────────────────────────────────────────────────────────────────────
 
   /// Call when driver presses Record — creates a new session
   Future<int> insertSession() async {
     final db = await database;
-    return await db.insert('sessions', {
+    final id = await db.insert('sessions', {
       'started_at': DateTime.now().toIso8601String(),
     });
+    DbChangeNotifier.instance.notifyDataChanged(); // ← notify
+    return id;
   }
 
   /// Call when driver stops recording — updates session end time and scores
@@ -126,6 +123,7 @@ class DatabaseHelper {
       where: 'id = ?',
       whereArgs: [sessionId],
     );
+    DbChangeNotifier.instance.notifyDataChanged(); // ← notify
   }
 
   /// Fetch all sessions (for History Screen)
@@ -147,7 +145,6 @@ class DatabaseHelper {
   }
 
   /// Total drive time in seconds — Dashboard card "Total Drive Time"
-  /// [days] = 30 for last 30 days, null for all time
   Future<int> getTotalDriveTimeSec({int? days}) async {
     final db = await database;
     String where = 'ended_at IS NOT NULL';
@@ -166,7 +163,7 @@ class DatabaseHelper {
     return (result.first['total'] as int?) ?? 0;
   }
 
-  /// Average safety score — used to compute Dashboard Safety Score
+  /// Average safety score — Dashboard Safety Score
   Future<double> getAvgSafetyScore({int? days}) async {
     final db = await database;
     String where = 'ended_at IS NOT NULL';
@@ -205,7 +202,6 @@ class DatabaseHelper {
   }
 
   /// Safety streak — Dashboard card "Safety Streak"
-  /// Counts consecutive days ending today with zero alert_events
   Future<int> getSafetyStreakDays() async {
     final db = await database;
     int streak = 0;
@@ -255,7 +251,6 @@ class DatabaseHelper {
 
   // ─────────────────────────────────────────────────────────────────────────
   // STATE COUNTS — CRUD
-  // Used by: Monitoring Screen (insert/update), Analytics
   // ─────────────────────────────────────────────────────────────────────────
 
   /// Insert initial state_counts row when session starts
@@ -267,6 +262,7 @@ class DatabaseHelper {
       'drowsy_count': 0,
       'distracted_count': 0,
     });
+    DbChangeNotifier.instance.notifyDataChanged(); // ← notify
   }
 
   /// Increment a specific state count — call every time model outputs a state
@@ -282,6 +278,7 @@ class DatabaseHelper {
       SET $column = $column + 1
       WHERE session_id = ?
     ''', [sessionId]);
+    DbChangeNotifier.instance.notifyDataChanged(); // ← notify
   }
 
   /// Get state counts for a session (for Report Screen)
@@ -298,7 +295,6 @@ class DatabaseHelper {
 
   // ─────────────────────────────────────────────────────────────────────────
   // ALERT EVENTS — CRUD
-  // Used by: Monitoring Screen (insert), Dashboard, Analytics
   // ─────────────────────────────────────────────────────────────────────────
 
   /// Insert an alert event — call when alert is triggered
@@ -314,6 +310,7 @@ class DatabaseHelper {
       'alert_level': alertLevel,
       'triggered_at': DateTime.now().toIso8601String(),
     });
+    DbChangeNotifier.instance.notifyDataChanged(); // ← notify
   }
 
   /// Total alert count — Dashboard card "Alert Triggered" & Analytics
@@ -341,7 +338,7 @@ class DatabaseHelper {
     return (result.first['cnt'] as int?) ?? 0;
   }
 
-  /// Count alerts by type — Analytics cards "Drowsiness Events" / "Distraction Events"
+  /// Count alerts by type — Analytics cards
   Future<int> getAlertCountByType({
     required String alertType,  // 'DROWSY' or 'DISTRACTED'
     int? days,
@@ -363,8 +360,7 @@ class DatabaseHelper {
     return (result.first['cnt'] as int?) ?? 0;
   }
 
-  /// Per-day alert counts grouped by type — Analytics "Drowsiness vs Distraction Trends"
-  /// Returns list of {date, drowsy_count, distracted_count}
+  /// Per-day alert counts — Analytics "Drowsiness vs Distraction Trends"
   Future<List<Map<String, dynamic>>> getDailyAlertTrends({int days = 7}) async {
     final db = await database;
     final since = DateTime.now()
@@ -383,7 +379,6 @@ class DatabaseHelper {
   }
 
   /// Per-hour alert counts — Analytics "Hourly Alert Distribution"
-  /// Returns list of {hour, count}
   Future<List<Map<String, dynamic>>> getHourlyAlertDistribution({int days = 7}) async {
     final db = await database;
     final since = DateTime.now()
@@ -413,7 +408,6 @@ class DatabaseHelper {
 
   // ─────────────────────────────────────────────────────────────────────────
   // SYSTEM LOGS — CRUD
-  // Used by: Monitoring Screen System Log section
   // ─────────────────────────────────────────────────────────────────────────
 
   /// Insert a system log entry
@@ -430,9 +424,10 @@ class DatabaseHelper {
       'message': message,
       'log_type': logType,
     });
+    DbChangeNotifier.instance.notifyDataChanged(); // ← notify
   }
 
-  /// Get all system logs for a session — Monitoring Screen System Log
+  /// Get all system logs for a session — Monitoring Screen
   Future<List<Map<String, dynamic>>> getSystemLogs(int sessionId) async {
     final db = await database;
     return await db.query(
@@ -445,7 +440,6 @@ class DatabaseHelper {
 
   // ─────────────────────────────────────────────────────────────────────────
   // ALERTNESS SNAPSHOTS — CRUD
-  // Used by: Dashboard "Alertness History" chart
   // ─────────────────────────────────────────────────────────────────────────
 
   /// Insert alertness snapshot — call every ~5 seconds during monitoring
@@ -459,9 +453,10 @@ class DatabaseHelper {
       'recorded_at': DateTime.now().toIso8601String(),
       'alertness_pct': alertnessPct,
     });
+    DbChangeNotifier.instance.notifyDataChanged(); // ← notify
   }
 
-  /// Get alertness snapshots for a session — Dashboard Alertness History chart
+  /// Get alertness snapshots for a session
   Future<List<Map<String, dynamic>>> getAlertnessSnapshots(int sessionId) async {
     final db = await database;
     return await db.query(
@@ -487,47 +482,42 @@ class DatabaseHelper {
 
   // ─────────────────────────────────────────────────────────────────────────
   // COMBINED QUERIES
-  // Complex queries that combine multiple tables for screen data
   // ─────────────────────────────────────────────────────────────────────────
 
   /// Get all dashboard summary data in one call
-  /// Returns a map with all values needed for Dashboard Screen
   Future<Map<String, dynamic>> getDashboardSummary() async {
     final totalDriveSec = await getTotalDriveTimeSec(days: 30);
     final alertsLast24h = await getTotalAlertCount(hours: 24);
-    final safetyStreak = await getSafetyStreakDays();
-    final avgAlertness = await getAvgAlertness(days: 7);
-    final safetyScore = await getAvgSafetyScore(days: 30);
-    final snapshots = await getLatestSessionSnapshots();
+    final safetyStreak  = await getSafetyStreakDays();
+    final avgAlertness  = await getAvgAlertness(days: 7);
+    final safetyScore   = await getAvgSafetyScore(days: 30);
+    final snapshots     = await getLatestSessionSnapshots();
 
     return {
-      'total_drive_hrs': totalDriveSec / 3600,        
-      'alerts_last_24h': alertsLast24h,
-      'safety_streak_days': safetyStreak,
-      'avg_alertness_pct': avgAlertness,
-      'safety_score': safetyScore,
+      'total_drive_hrs':     totalDriveSec / 3600,
+      'alerts_last_24h':     alertsLast24h,
+      'safety_streak_days':  safetyStreak,
+      'avg_alertness_pct':   avgAlertness,
+      'safety_score':        safetyScore,
       'alertness_snapshots': snapshots,
     };
   }
 
   /// Get all analytics summary data in one call
-  /// [days]: 7, 30, or null (all time)
   Future<Map<String, dynamic>> getAnalyticsSummary({int? days}) async {
-    final totalSessions = await getTotalSessionCount(days: days);
-    final totalAlerts = await getTotalAlertCount(days: days);
-    final drowsinessEvents = await getAlertCountByType(
-        alertType: 'DROWSY', days: days);
-    final distractionEvents = await getAlertCountByType(
-        alertType: 'DISTRACTED', days: days);
-    final dailyTrends = await getDailyAlertTrends(days: days ?? 7);
+    final totalSessions     = await getTotalSessionCount(days: days);
+    final totalAlerts       = await getTotalAlertCount(days: days);
+    final drowsinessEvents  = await getAlertCountByType(alertType: 'DROWSY',      days: days);
+    final distractionEvents = await getAlertCountByType(alertType: 'DISTRACTED',  days: days);
+    final dailyTrends       = await getDailyAlertTrends(days: days ?? 7);
     final hourlyDistribution = await getHourlyAlertDistribution(days: days ?? 7);
 
     return {
-      'total_sessions': totalSessions,
-      'total_alerts': totalAlerts,
-      'drowsiness_events': drowsinessEvents,
-      'distraction_events': distractionEvents,
-      'daily_trends': dailyTrends,
+      'total_sessions':      totalSessions,
+      'total_alerts':        totalAlerts,
+      'drowsiness_events':   drowsinessEvents,
+      'distraction_events':  distractionEvents,
+      'daily_trends':        dailyTrends,
       'hourly_distribution': hourlyDistribution,
     };
   }
@@ -536,13 +526,12 @@ class DatabaseHelper {
   // UTILITY
   // ─────────────────────────────────────────────────────────────────────────
 
-  /// Close the database
   Future<void> close() async {
     final db = await database;
     db.close();
   }
 
-  /// Delete all data — for testing/reset purposes only
+  /// Delete all data — for testing/reset only
   Future<void> clearAllData() async {
     final db = await database;
     await db.delete('alertness_snapshots');
@@ -550,5 +539,6 @@ class DatabaseHelper {
     await db.delete('alert_events');
     await db.delete('state_counts');
     await db.delete('sessions');
+    DbChangeNotifier.instance.notifyDataChanged(); // ← notify (clears UI too)
   }
 }
