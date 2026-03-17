@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import '../core/database/database_helper.dart';
+import '../core/database/db_change_notifier.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // history_screen.dart
-// Bantay Drive — History Screen (Clean Version)
-// Place at: lib/screens/history_screen.dart
+// Bantay Drive — History Screen
+// Auto-refreshes via DbChangeNotifier. Pull-to-refresh as backup.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class HistoryScreen extends StatefulWidget {
@@ -47,13 +48,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
     super.initState();
     _loadSessions();
     _searchCtrl.addListener(_applyFilter);
+
+    // Auto-refresh whenever DatabaseHelper writes new data
+    DbChangeNotifier.instance.addListener(_onDataChanged);
   }
 
   @override
   void dispose() {
+    DbChangeNotifier.instance.removeListener(_onDataChanged);
     _searchCtrl.dispose();
     super.dispose();
   }
+
+  void _onDataChanged() => _loadSessions();
 
   // ─────────────────────────────────────────────────────────────────────────
   // DATA
@@ -64,7 +71,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     final sessions = await DatabaseHelper.instance.getAllSessions();
 
-    // Enrich with alert count
     final enriched = <Map<String, dynamic>>[];
     for (final s in sessions) {
       final alerts = await DatabaseHelper.instance
@@ -205,50 +211,30 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // SEARCH BAR
+  // SEARCH BAR — refresh button removed
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildSearchBar() {
     return Container(
       color: _surface,
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-      child: Row(
-        children: [
-          Expanded(
-            child: Container(
-              height: 40,
-              decoration: BoxDecoration(
-                color: _surfaceAlt,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: TextField(
-                controller: _searchCtrl,
-                style: TextStyle(color: _textPrimary, fontSize: 13),
-                decoration: InputDecoration(
-                  hintText: 'Search sessions...',
-                  hintStyle: TextStyle(color: _textDim, fontSize: 13),
-                  prefixIcon: Icon(Icons.search_rounded,
-                      color: _textDim, size: 18),
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                ),
-              ),
-            ),
+      child: Container(
+        height: 40,
+        decoration: BoxDecoration(
+          color: _surfaceAlt,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: TextField(
+          controller: _searchCtrl,
+          style: TextStyle(color: _textPrimary, fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'Search sessions...',
+            hintStyle: TextStyle(color: _textDim, fontSize: 13),
+            prefixIcon: Icon(Icons.search_rounded, color: _textDim, size: 18),
+            border: InputBorder.none,
+            contentPadding: const EdgeInsets.symmetric(vertical: 10),
           ),
-          const SizedBox(width: 10),
-          GestureDetector(
-            onTap: _loadSessions,
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: _surfaceAlt,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(Icons.refresh_rounded, color: _cyan, size: 18),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -274,8 +260,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 margin: const EdgeInsets.only(right: 8),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                 decoration: BoxDecoration(
                   color: on ? _cyan.withOpacity(0.15) : _surfaceAlt,
                   borderRadius: BorderRadius.circular(20),
@@ -301,41 +286,45 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // SESSION LIST
+  // SESSION LIST — wrapped in RefreshIndicator for pull-to-refresh
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildList() {
     final groups = _groupByDate(_filtered);
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-      children: groups.entries.map((entry) {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Date group label
-            Padding(
-              padding: const EdgeInsets.only(top: 12, bottom: 6),
-              child: Text(
-                entry.key,
-                style: TextStyle(
-                  color: _textDim,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.2,
+    return RefreshIndicator(
+      color: _cyan,
+      backgroundColor: _surface,
+      onRefresh: _loadSessions,  // pull-to-refresh as manual backup
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+        children: groups.entries.map((entry) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 6),
+                child: Text(
+                  entry.key,
+                  style: TextStyle(
+                    color: _textDim,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1.2,
+                  ),
                 ),
               ),
-            ),
-            // Cards
-            ...entry.value.map((s) => _buildCard(s)),
-          ],
-        );
-      }).toList(),
+              ...entry.value.map((s) => _buildCard(s)),
+            ],
+          );
+        }).toList(),
+      ),
     );
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // SESSION CARD — clean, minimal
+  // SESSION CARD
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildCard(Map<String, dynamic> s) {
@@ -356,23 +345,20 @@ class _HistoryScreenState extends State<HistoryScreen> {
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
           onTap: () {
-            // TODO: navigate to session detail / analytics for this session
+            // TODO: navigate to session detail
           },
           child: Padding(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 16, vertical: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             child: Row(
               children: [
-
-                // ── Score circle ────────────────────────────────────────
+                // Score circle
                 Container(
                   width: 48,
                   height: 48,
                   decoration: BoxDecoration(
                     color: color.withOpacity(0.12),
                     shape: BoxShape.circle,
-                    border: Border.all(
-                        color: color.withOpacity(0.3), width: 2),
+                    border: Border.all(color: color.withOpacity(0.3), width: 2),
                   ),
                   child: Center(
                     child: Text(
@@ -388,7 +374,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
                 const SizedBox(width: 14),
 
-                // ── Date + time + duration ───────────────────────────────
+                // Date + time + duration
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -404,45 +390,33 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       const SizedBox(height: 4),
                       Row(
                         children: [
-                          Text(
-                            _formatTime(s['started_at']),
-                            style: TextStyle(
-                                color: _textDim, fontSize: 11),
-                          ),
+                          Text(_formatTime(s['started_at']),
+                              style: TextStyle(color: _textDim, fontSize: 11)),
                           Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
                             child: Container(
-                              width: 3,
-                              height: 3,
+                              width: 3, height: 3,
                               decoration: BoxDecoration(
-                                color: _textDim,
-                                shape: BoxShape.circle,
-                              ),
+                                  color: _textDim, shape: BoxShape.circle),
                             ),
                           ),
-                          Text(
-                            _formatDuration(duration),
-                            style: TextStyle(
-                                color: _textDim, fontSize: 11),
-                          ),
+                          Text(_formatDuration(duration),
+                              style: TextStyle(color: _textDim, fontSize: 11)),
                         ],
                       ),
                     ],
                   ),
                 ),
 
-                // ── Alert badge + chevron ────────────────────────────────
+                // Alert badge + chevron
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     _buildAlertBadge(alertCount),
                     const SizedBox(height: 6),
-                    Icon(Icons.chevron_right_rounded,
-                        color: _divider, size: 18),
+                    Icon(Icons.chevron_right_rounded, color: _divider, size: 18),
                   ],
                 ),
-
               ],
             ),
           ),
@@ -485,14 +459,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
         children: [
           Icon(icon, color: color, size: 11),
           const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+          Text(label,
+              style: TextStyle(
+                  color: color, fontSize: 10, fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -503,27 +472,35 @@ class _HistoryScreenState extends State<HistoryScreen> {
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildEmpty() {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+    return RefreshIndicator(
+      color: _cyan,
+      backgroundColor: _surface,
+      onRefresh: _loadSessions,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
         children: [
-          Icon(Icons.history_rounded, color: _textDim, size: 56),
-          const SizedBox(height: 16),
-          Text(
-            'No sessions found',
-            style: TextStyle(
-              color: _textPrimary,
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            _selectedFilter == 0
-                ? 'Start recording to see your drive history.'
-                : 'Try a different filter.',
-            style: TextStyle(color: _textDim, fontSize: 13),
-            textAlign: TextAlign.center,
+          SizedBox(height: MediaQuery.of(context).size.height * 0.3),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.history_rounded, color: _textDim, size: 56),
+              const SizedBox(height: 16),
+              Text(
+                'No sessions found',
+                style: TextStyle(
+                    color: _textPrimary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _selectedFilter == 0
+                    ? 'Start recording to see your drive history.'
+                    : 'Try a different filter.',
+                style: TextStyle(color: _textDim, fontSize: 13),
+                textAlign: TextAlign.center,
+              ),
+            ],
           ),
         ],
       ),

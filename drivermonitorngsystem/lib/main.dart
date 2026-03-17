@@ -6,13 +6,12 @@ import 'core/database/database_helper.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/monitor_screen.dart';
 import 'screens/analytics_screen.dart';
+import 'screens/history_screen.dart';
 import 'screens/settings_screen.dart';
-import 'screens/history_screen.dart';     
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Allows portrait and landscape orientations
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -20,13 +19,11 @@ void main() async {
     DeviceOrientation.landscapeRight,
   ]);
 
-  // Set system UI overlay style
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.light,
   ));
 
-  // Initialize database
   await DatabaseHelper.instance.database;
 
   runApp(
@@ -66,12 +63,22 @@ final navIndexProvider = StateProvider<int>((ref) => 0);
 class MainShell extends ConsumerWidget {
   const MainShell({super.key});
 
+  // ── index: 0=Dashboard, 1=Monitor, 2=Analytics, 3=History, 4=Settings
   static final List<Widget> _screens = [
     const DashboardScreen(),
     const MonitorScreen(),
     const AnalyticsScreen(),
-    const HistoryScreen(),            
-    const SettingsScreen(),        
+    const HistoryScreen(),   
+    const SettingsScreen(), 
+  ];
+
+  // ── Titles match the screen order above
+  static const List<String> _titles = [
+    'Dashboard',
+    'Monitor',
+    'Analytics',
+    'History',   
+    'Settings',  
   ];
 
   @override
@@ -91,8 +98,7 @@ class MainShell extends ConsumerWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(
-                ['Dashboard', 'Monitor', 'Analytics', 'Settings', 'History']
-                    [currentIndex],                // ← 'Profile' → 'History'
+                _titles[currentIndex],
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 26,
@@ -153,8 +159,7 @@ class MainShell extends ConsumerWidget {
       ),
       bottomNavigationBar: _BottomNav(
         currentIndex: currentIndex,
-        onTap: (index) =>
-            ref.read(navIndexProvider.notifier).state = index,
+        onTap: (index) => ref.read(navIndexProvider.notifier).state = index,
       ),
     );
   }
@@ -173,8 +178,7 @@ class _BottomNav extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF0D1627),
         border: Border(
-          top: BorderSide(
-              color: Colors.white.withOpacity(0.05), width: 1),
+          top: BorderSide(color: Colors.white.withOpacity(0.05), width: 1),
         ),
         boxShadow: [
           BoxShadow(
@@ -193,8 +197,8 @@ class _BottomNav extends StatelessWidget {
               _NavItem(icon: Icons.home_rounded,      label: 'Home',      index: 0, currentIndex: currentIndex, onTap: onTap),
               _NavItem(icon: Icons.videocam_rounded,  label: 'Monitor',   index: 1, currentIndex: currentIndex, onTap: onTap),
               _NavItem(icon: Icons.bar_chart_rounded, label: 'Analytics', index: 2, currentIndex: currentIndex, onTap: onTap),
-              _NavItem(icon: Icons.history_rounded,   label: 'History',   index: 3, currentIndex: currentIndex, onTap: onTap),  
-              _NavItem(icon: Icons.settings_rounded,  label: 'Settings',  index: 3, currentIndex: currentIndex, onTap: onTap),
+              _NavItem(icon: Icons.history_rounded,   label: 'History',   index: 3, currentIndex: currentIndex, onTap: onTap),
+              _NavItem(icon: Icons.settings_rounded,  label: 'Settings',  index: 4, currentIndex: currentIndex, onTap: onTap), // ← was index: 3
             ],
           ),
         ),
