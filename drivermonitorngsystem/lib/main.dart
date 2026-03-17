@@ -7,7 +7,7 @@ import 'screens/dashboard_screen.dart';
 import 'screens/monitor_screen.dart';
 import 'screens/analytics_screen.dart';
 import 'screens/settings_screen.dart';
-import 'screens/history_screen.dart';          // ← replaced ProfilePlaceholder
+import 'screens/history_screen.dart';     
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -60,10 +60,7 @@ class BantayDriveApp extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // MAIN SHELL — Bottom Navigation
-// ─────────────────────────────────────────────────────────────────────────────
-
 final navIndexProvider = StateProvider<int>((ref) => 0);
 
 class MainShell extends ConsumerWidget {
@@ -73,8 +70,8 @@ class MainShell extends ConsumerWidget {
     const DashboardScreen(),
     const MonitorScreen(),
     const AnalyticsScreen(),
-    const SettingsScreen(),
-    const HistoryScreen(),             // ← replaced ProfilePlaceholder
+    const HistoryScreen(),            
+    const SettingsScreen(),        
   ];
 
   @override
@@ -163,10 +160,7 @@ class MainShell extends ConsumerWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // BOTTOM NAV
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _BottomNav extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
@@ -199,8 +193,8 @@ class _BottomNav extends StatelessWidget {
               _NavItem(icon: Icons.home_rounded,      label: 'Home',      index: 0, currentIndex: currentIndex, onTap: onTap),
               _NavItem(icon: Icons.videocam_rounded,  label: 'Monitor',   index: 1, currentIndex: currentIndex, onTap: onTap),
               _NavItem(icon: Icons.bar_chart_rounded, label: 'Analytics', index: 2, currentIndex: currentIndex, onTap: onTap),
+              _NavItem(icon: Icons.history_rounded,   label: 'History',   index: 3, currentIndex: currentIndex, onTap: onTap),  
               _NavItem(icon: Icons.settings_rounded,  label: 'Settings',  index: 3, currentIndex: currentIndex, onTap: onTap),
-              _NavItem(icon: Icons.history_rounded,   label: 'History',   index: 4, currentIndex: currentIndex, onTap: onTap),  // ← updated
             ],
           ),
         ),
