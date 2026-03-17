@@ -7,7 +7,7 @@ import 'screens/dashboard_screen.dart';
 import 'screens/monitor_screen.dart';
 import 'screens/analytics_screen.dart';
 import 'screens/settings_screen.dart';
-import 'screens/history_screen.dart';        
+import 'screens/history_screen.dart';          // ← replaced ProfilePlaceholder
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -74,7 +74,7 @@ class MainShell extends ConsumerWidget {
     const MonitorScreen(),
     const AnalyticsScreen(),
     const SettingsScreen(),
-    const HistoryScreen(),            
+    const HistoryScreen(),             // ← replaced ProfilePlaceholder
   ];
 
   @override
