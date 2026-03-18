@@ -60,6 +60,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   late AnimationController _warningController;
   late Animation<double>   _warningAnimation;
 
+  // NOTIFICATION SLIDE-IN ANIMATION
+  AnimationController? _notifController;
+  Animation<Offset>?   _notifSlide;
+  Animation<double>?   _notifFade;
+
   // PREFERENCES (loaded on init)
   int    _prefAlertSensitivity = 1;   // 0=Low, 1=Medium, 2=High
   bool   _prefAutoStart        = false;
@@ -87,6 +92,26 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _warningAnimation =
         Tween<double>(begin: 0.8, end: 1.0).animate(_warningController);
 
+    // Notification slide-in: springs down from top like iOS
+    final nc = AnimationController(
+      duration: const Duration(milliseconds: 550),
+      vsync: this,
+    );
+    _notifController = nc;
+    _notifSlide = Tween<Offset>(
+      begin: const Offset(0, -1.5),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: nc,
+      curve: Curves.elasticOut,
+    ));
+    _notifFade = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: nc,
+        curve: const Interval(0.0, 0.35, curve: Curves.easeIn),
+      ),
+    );
+
     _loadPreferencesAndInit();
   }
 
@@ -95,6 +120,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _snapshotTimer?.cancel();
     _alertBannerTimer?.cancel();
     _warningController.dispose();
+    _notifController?.dispose();
     _cameraController?.dispose();
     _audioPlayer.dispose();
     _alarmPlayer.dispose();
@@ -198,7 +224,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
 
     // ── NOTIFY 1 ──────────────────────────────────────────────────────────
-    // Increment counter → dashboard and history rebuild instantly
     ref.read(dbChangeCounterProvider.notifier).state++;
   }
 
@@ -248,7 +273,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _sessionStartTime = null;
 
     // ── NOTIFY 2 ──────────────────────────────────────────────────────────
-    // Increment counter → dashboard, analytics, history all rebuild instantly
     ref.read(dbChangeCounterProvider.notifier).state++;
   }
 
@@ -317,6 +341,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(showAlertBannerProvider.notifier).state = true;
     ref.read(alertBannerTypeProvider.notifier).state = type;
 
+    // Trigger slide-in animation for Level 1 & 2 notification banner
+    if (newLevel < 3) {
+      _notifController?.forward(from: 0.0);
+    }
+
     if (_currentSessionId != null) {
       await DatabaseHelper.instance.insertAlertEvent(
         sessionId: _currentSessionId!,
@@ -328,18 +357,20 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       await _addLog(msg, 'WARNING');
 
       // ── NOTIFY 3 ────────────────────────────────────────────────────────
-      // Increment counter → dashboard alert count updates instantly
       ref.read(dbChangeCounterProvider.notifier).state++;
     }
 
-    // Always play sound — volume controlled via slider in Settings
     await _playAlertSound(newLevel);
 
+    // Level 1 & 2: slide out then hide after 4s. Level 3: stays until tapped.
     if (newLevel < 3) {
       _alertBannerTimer?.cancel();
-      _alertBannerTimer = Timer(const Duration(seconds: 3), () {
+      _alertBannerTimer = Timer(const Duration(seconds: 4), () async {
         if (mounted) {
-          ref.read(showAlertBannerProvider.notifier).state = false;
+          await _notifController?.reverse();
+          if (mounted) {
+            ref.read(showAlertBannerProvider.notifier).state = false;
+          }
         }
       });
     }
@@ -364,11 +395,17 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   Future<void> _dismissAlert() async {
+    // Slide the notification back up before hiding
+    if (_alertLevel < 3 && (_notifController?.isCompleted ?? false)) {
+      await _notifController?.reverse();
+    }
     await _alarmPlayer.stop();
     _alertLevel            = 0;
     _consecutiveDrowsy     = 0;
     _consecutiveDistracted = 0;
-    ref.read(showAlertBannerProvider.notifier).state = false;
+    if (mounted) {
+      ref.read(showAlertBannerProvider.notifier).state = false;
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -410,25 +447,45 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
 
+    final showAlert = ref.watch(showAlertBannerProvider);
+    final alertType = ref.watch(alertBannerTypeProvider);
+    final isLevel3  = _alertLevel == 3;
+
     return ColoredBox(
       color: const Color(0xFF080E1A),
-      child: isDesktop
-          ? _buildDesktopLayout()
-          : isLandscape
-              ? _buildLandscapeLayout()
-              : _buildPortraitLayout(),
+      child: Stack(
+        children: [
+          // Main content — never shifts, banner floats above
+          isDesktop
+              ? _buildDesktopLayout()
+              : isLandscape
+                  ? _buildLandscapeLayout()
+                  : _buildPortraitLayout(),
+
+          // Floating iOS-style banner overlay — Level 1 & 2 only
+          if (showAlert && !isLevel3)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                bottom: false,
+                child: _buildAlertBanner(alertType),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // PORTRAIT LAYOUT
-  Widget _buildPortraitLayout() {
-    final showAlert = ref.watch(showAlertBannerProvider);
-    final alertType = ref.watch(alertBannerTypeProvider);
+  // ─────────────────────────────────────────────────────────────────────────
 
+  Widget _buildPortraitLayout() {
     return SingleChildScrollView(
       child: Column(
         children: [
-          if (showAlert) _buildAlertBanner(alertType),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Column(
@@ -448,14 +505,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // LANDSCAPE LAYOUT
-  Widget _buildLandscapeLayout() {
-    final showAlert = ref.watch(showAlertBannerProvider);
-    final alertType = ref.watch(alertBannerTypeProvider);
+  // ─────────────────────────────────────────────────────────────────────────
 
+  Widget _buildLandscapeLayout() {
     return Column(
       children: [
-        if (showAlert) _buildAlertBanner(alertType),
         Expanded(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -489,14 +545,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // DESKTOP LAYOUT
-  Widget _buildDesktopLayout() {
-    final showAlert = ref.watch(showAlertBannerProvider);
-    final alertType = ref.watch(alertBannerTypeProvider);
+  // ─────────────────────────────────────────────────────────────────────────
 
+  Widget _buildDesktopLayout() {
     return Column(
       children: [
-        if (showAlert) _buildAlertBanner(alertType),
         Expanded(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -526,60 +581,177 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ALERT BANNER
+  // ─────────────────────────────────────────────────────────────────────────
+  // ALERT BANNER — iOS-style push notification (Level 1 & 2 only)
+  // Slides down from top with elastic spring, fades in, slides back up on dismiss
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildAlertBanner(String type) {
     final isDrowsy = type == 'DROWSY';
-    return GestureDetector(
-      onTap: _dismissAlert,
-      child: AnimatedBuilder(
-        animation: _warningAnimation,
-        builder: (context, child) {
-          return Container(
-            width: double.infinity,
-            margin: const EdgeInsets.only(bottom: 12),
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: const Color(0xFF2A0A0A),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: Colors.red.withValues(alpha: 0.5 * _warningAnimation.value),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.red.withValues(alpha: 0.2),
-                  blurRadius: 20,
-                  spreadRadius: 2,
+    final slideAnim = _notifSlide ?? AlwaysStoppedAnimation(Offset.zero);
+    final fadeAnim  = _notifFade  ?? const AlwaysStoppedAnimation(1.0);
+    return SlideTransition(
+      position: slideAnim,
+      child: FadeTransition(
+        opacity: fadeAnim,
+        child: GestureDetector(
+          onTap: _dismissAlert,
+          // Swipe up to dismiss
+          onVerticalDragEnd: (details) {
+            if (details.primaryVelocity != null && details.primaryVelocity! < -200) {
+              _dismissAlert();
+            }
+          },
+          child: AnimatedBuilder(
+            animation: _warningAnimation,
+            builder: (context, child) {
+              return Container(
+                width: double.infinity,
+                margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                decoration: BoxDecoration(
+                  // Frosted glass dark background
+                  color: const Color(0xFF1C1C1E).withValues(alpha: 0.96),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: Colors.red.withValues(
+                        alpha: 0.25 + (0.35 * (_warningAnimation.value - 0.8) / 0.2)),
+                    width: 1.2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      blurRadius: 28,
+                      offset: const Offset(0, 8),
+                    ),
+                    BoxShadow(
+                      color: Colors.red.withValues(
+                          alpha: 0.12 + (0.18 * (_warningAnimation.value - 0.8) / 0.2)),
+                      blurRadius: 20,
+                      spreadRadius: 1,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            child: Column(
-              children: [
-                Icon(Icons.warning_amber_rounded,
-                    color: Colors.red.shade500, size: 36),
-                const SizedBox(height: 8),
-                Text(
-                  isDrowsy ? 'DROWSINESS DETECTED' : 'DISTRACTION DETECTED',
-                  style: TextStyle(
-                    color: Colors.red.shade500,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      child: Row(
+                        children: [
+                          // App icon with pulsing glow
+                          AnimatedBuilder(
+                            animation: _warningAnimation,
+                            builder: (context, _) {
+                              return Container(
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  color: Colors.red.shade800,
+                                  borderRadius: BorderRadius.circular(12),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.red.withValues(
+                                          alpha: 0.3 + (0.4 * (_warningAnimation.value - 0.8) / 0.2)),
+                                      blurRadius: 14,
+                                      spreadRadius: 1,
+                                    ),
+                                  ],
+                                ),
+                                child: const Icon(
+                                  Icons.warning_amber_rounded,
+                                  color: Colors.white,
+                                  size: 24,
+                                ),
+                              );
+                            },
+                          ),
+                          const SizedBox(width: 12),
+                          // Text content
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      'BANTAY DRIVE',
+                                      style: TextStyle(
+                                        color: Colors.white.withValues(alpha: 0.45),
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600,
+                                        letterSpacing: 0.8,
+                                      ),
+                                    ),
+                                    Text(
+                                      'now',
+                                      style: TextStyle(
+                                        color: Colors.white.withValues(alpha: 0.35),
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  isDrowsy
+                                      ? 'Drowsiness Detected'
+                                      : 'Distraction Detected',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.2,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  isDrowsy
+                                      ? 'Stay alert — tap to dismiss'
+                                      : 'Focus on the road — tap to dismiss',
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.5),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          // Close hint
+                          Container(
+                            width: 22,
+                            height: 22,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.1),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.close_rounded,
+                              color: Colors.white.withValues(alpha: 0.4),
+                              size: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  'Audible Alert Active • Tap to dismiss',
-                  style: TextStyle(color: Colors.red.shade300, fontSize: 12),
-                ),
-              ],
-            ),
-          );
-        },
+              );
+            },
+          ),
+        ),
       ),
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // CAMERA CONTAINER
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildCameraContainer({double? height, required bool isLandscape}) {
     final previewSize = _getPreviewSize(isLandscape);
     final isRecording = ref.watch(isRecordingProvider);
@@ -608,6 +780,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           cameraWidget,
           _buildGradientOverlay(),
           if (isRecording) _buildRecBadge(),
+          // Show warning overlay for any alert level
           if (ref.watch(showAlertBannerProvider))
             _buildWarningOverlay(ref.watch(alertBannerTypeProvider)),
         ],
@@ -717,13 +890,111 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // WARNING OVERLAY
+  // Level 1 & 2 → small centered card inside camera
+  // Level 3      → fullscreen heavy blur, tap anywhere to dismiss
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildWarningOverlay(String type) {
     final isDrowsy = type == 'DROWSY';
+    final isLevel3 = _alertLevel == 3;
+
     return AnimatedBuilder(
       animation: _warningAnimation,
       builder: (context, child) {
+        if (isLevel3) {
+          // ── LEVEL 3: full-screen blur, tap anywhere to dismiss ────────────
+          return GestureDetector(
+            onTap: _dismissAlert,
+            child: SizedBox.expand(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // Heavy blur layer
+                  BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                    child: Container(
+                      color: Colors.red.withValues(alpha: 0.18),
+                    ),
+                  ),
+                  // Pulsing red vignette border
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: Colors.red.withValues(
+                            alpha: 0.4 * _warningAnimation.value),
+                        width: 4,
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  // Centered content
+                  Center(
+                    child: Transform.scale(
+                      scale: _warningAnimation.value,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.warning_amber_rounded,
+                            size: 72,
+                            color: Colors.red.shade400,
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            isDrowsy
+                                ? 'DROWSINESS\nDETECTED'
+                                : 'DISTRACTION\nDETECTED',
+                            style: TextStyle(
+                              fontSize: 26,
+                              fontWeight: FontWeight.w900,
+                              color: Colors.red.shade400,
+                              letterSpacing: 3,
+                              height: 1.25,
+                              shadows: [
+                                Shadow(
+                                  color: Colors.red.withValues(alpha: 0.6),
+                                  blurRadius: 20,
+                                ),
+                              ],
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 20),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 20, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.2),
+                              ),
+                            ),
+                            child: Text(
+                              'Tap anywhere to dismiss',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.white.withValues(alpha: 0.75),
+                                fontWeight: FontWeight.w500,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        // ── LEVEL 1 & 2: small centered card inside camera ────────────────
         return Container(
-          color: Colors.red.withValues(alpha: 0.4),
+          color: Colors.red.withValues(alpha: 0.25),
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 2, sigmaY: 2),
             child: Center(
@@ -733,7 +1004,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
                     color: const Color(0xFF0f172a).withValues(alpha: 0.9),
-                    border: Border.all(color: Colors.red.withValues(alpha: 0.5)),
+                    border: Border.all(
+                        color: Colors.red.withValues(alpha: 0.5)),
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
@@ -749,7 +1021,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                           size: 48, color: Colors.red.shade500),
                       const SizedBox(height: 12),
                       Text(
-                        isDrowsy ? 'DROWSINESS DETECTED' : 'DISTRACTION DETECTED',
+                        isDrowsy
+                            ? 'DROWSINESS DETECTED'
+                            : 'DISTRACTION DETECTED',
                         style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
@@ -772,7 +1046,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // ENVIRONMENT BAR (Clear Glasses + Record button)
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildEnvironmentBar({required bool isLandscape}) {
     final clearGlasses = ref.watch(clearGlassesProvider);
     final isRecording  = ref.watch(isRecordingProvider);
@@ -903,7 +1180,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // METRICS SIDEBAR
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildMetricsSidebar({required bool isLandscape}) {
     final alertness   = ref.watch(alertnessPctProvider);
     final drowsiness  = ref.watch(drowsinessPctProvider);
@@ -1025,7 +1305,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // SYSTEM LOG
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildSystemLog() {
     return Container(
       width: double.infinity,
@@ -1099,7 +1382,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // ⚠️ DEV ONLY — REMOVE BEFORE FINAL BUILD
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildTestButtons() {
     final isRecording = ref.watch(isRecordingProvider);
 
