@@ -7,6 +7,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:gal/gal.dart';
 import '../core/database/database_helper.dart';
+import '../core/database/db_change_notifier.dart';              // ← ADDED
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import '../utils/responsive.dart';
 
@@ -31,52 +32,49 @@ class MonitorScreen extends ConsumerStatefulWidget {
 class _MonitorScreenState extends ConsumerState<MonitorScreen>
     with TickerProviderStateMixin {
 
-  // CAMERA 
+  // CAMERA
   CameraController? _cameraController;
   List<CameraDescription> _cameras = [];
   bool _cameraInitialized = false;
   String? _cameraError;
 
-  // SESSION 
+  // SESSION
   int? _currentSessionId;
   DateTime? _sessionStartTime;
   Timer? _snapshotTimer;
   Timer? _alertBannerTimer;
 
-  // ALERT TRACKING 
+  // ALERT TRACKING
   int _consecutiveDrowsy     = 0;
   int _consecutiveDistracted = 0;
   int _alertLevel            = 0;
 
-  // SYSTEM LOGS 
+  // SYSTEM LOGS
   final List<Map<String, dynamic>> _systemLogs = [];
 
   // AUDIO
   final AudioPlayer _audioPlayer  = AudioPlayer();
   final AudioPlayer _alarmPlayer  = AudioPlayer();
 
-  // ANIMATIONS 
+  // ANIMATIONS
   late AnimationController _warningController;
   late Animation<double>   _warningAnimation;
 
   // PREFERENCES (loaded on init)
-  // These mirror the values saved in SharedPreferences via PreferencesHelper.
-  // They are loaded once in initState and re-read when the screen resumes.
-  int    _prefAlertSensitivity= 1;    // 0=Low, 1=Medium, 2=High
-  bool   _prefAutoStart       = false;
+  int    _prefAlertSensitivity = 1;   // 0=Low, 1=Medium, 2=High
+  bool   _prefAutoStart        = false;
 
-  // SENSITIVITY THRESHOLDS 
-  // Maps sensitivity setting → [level1, level2, level3] consecutive counts
-  // Low    → harder to trigger (needs more consecutive detections)
-  // Medium → default
-  // High   → easier to trigger (fewer consecutive detections needed)
+  // SENSITIVITY THRESHOLDS
   static const Map<int, List<int>> _sensitivityThresholds = {
     0: [5, 10, 15], // Low
     1: [3,  6,  9], // Medium (default)
     2: [2,  4,  6], // High
   };
 
+  // ─────────────────────────────────────────────────────────────────────────
   // LIFECYCLE
+  // ─────────────────────────────────────────────────────────────────────────
+
   @override
   void initState() {
     super.initState();
@@ -89,8 +87,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _warningAnimation =
         Tween<double>(begin: 0.8, end: 1.0).animate(_warningController);
 
-    // Load preferences FIRST, then init camera
-    // so auto-start and camera position are ready before camera fires up
     _loadPreferencesAndInit();
   }
 
@@ -105,32 +101,27 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     super.dispose();
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // PREFERENCES
-  /// Load all relevant preferences then initialize camera.
-  /// Called once on initState.
+  // ─────────────────────────────────────────────────────────────────────────
+
   Future<void> _loadPreferencesAndInit() async {
     final prefs = PreferencesHelper.instance;
-
-    // Sound and volume are read fresh on every alert trigger
-    // so they don't need to be cached here
     _prefAlertSensitivity = await prefs.getAlertSensitivity();
     _prefAutoStart        = await prefs.getAutoStart();
-
-    // Now initialize camera
     await _initCamera();
   }
 
-  /// Re-read preferences — call this if you need to refresh mid-session.
-  /// Useful if user changes settings and navigates back to monitor.
   Future<void> _refreshPreferences() async {
     final prefs = PreferencesHelper.instance;
-    // Sound and volume read fresh on each alert — only sensitivity and
-    // auto-start need to be cached
     _prefAlertSensitivity = await prefs.getAlertSensitivity();
     _prefAutoStart        = await prefs.getAutoStart();
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // CAMERA
+  // ─────────────────────────────────────────────────────────────────────────
+
   Future<void> _initCamera() async {
     try {
       _cameras = await availableCameras();
@@ -139,7 +130,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         return;
       }
 
-      // Always use front-facing (selfie) camera
       final selectedCamera = _cameras.firstWhere(
         (c) => c.lensDirection == CameraLensDirection.front,
         orElse: () => _cameras.first,
@@ -157,7 +147,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       if (mounted) {
         setState(() => _cameraInitialized = true);
 
-        // AUTO-START — triggers recording automatically if enabled in Settings
         if (_prefAutoStart) {
           await Future.delayed(const Duration(milliseconds: 500));
           await _startRecording();
@@ -177,7 +166,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     return Size(ps.height, ps.width);
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // SESSION CONTROL
+  // ─────────────────────────────────────────────────────────────────────────
+
   Future<void> _startRecording() async {
     _currentSessionId = await DatabaseHelper.instance.insertSession();
     await DatabaseHelper.instance.insertStateCount(_currentSessionId!);
@@ -187,8 +179,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       await _cameraController!.startVideoRecording();
     }
 
-    ref.read(isRecordingProvider.notifier).state      = true;
-    ref.read(driverStateProvider.notifier).state      = 'neutral';
+    ref.read(isRecordingProvider.notifier).state = true;
+    ref.read(driverStateProvider.notifier).state = 'neutral';
 
     await _addLog('System Initialized', 'INFO');
     await Future.delayed(const Duration(milliseconds: 500));
@@ -204,6 +196,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       await Future.delayed(const Duration(milliseconds: 300));
       await _addLog('Clear Glasses Detected', 'INFO');
     }
+
+    // ── NOTIFY 1 ──────────────────────────────────────────────────────────
+    // Increment counter → dashboard and history rebuild instantly
+    ref.read(dbChangeCounterProvider.notifier).state++;
   }
 
   Future<void> _stopRecording() async {
@@ -215,7 +211,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _consecutiveDrowsy     = 0;
     _consecutiveDistracted = 0;
 
-    // Stop video recording and save to gallery
     if (_cameraInitialized && _cameraController!.value.isRecordingVideo) {
       try {
         final XFile videoFile =
@@ -242,19 +237,25 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     await _addLog('Session Ended', 'INFO');
 
-    ref.read(isRecordingProvider.notifier).state      = false;
-    ref.read(driverStateProvider.notifier).state      = 'neutral';
-    ref.read(showAlertBannerProvider.notifier).state  = false;
-    ref.read(alertnessPctProvider.notifier).state     = 100.0;
-    ref.read(drowsinessPctProvider.notifier).state    = 0.0;
-    ref.read(distractionPctProvider.notifier).state   = 0.0;
+    ref.read(isRecordingProvider.notifier).state     = false;
+    ref.read(driverStateProvider.notifier).state     = 'neutral';
+    ref.read(showAlertBannerProvider.notifier).state = false;
+    ref.read(alertnessPctProvider.notifier).state    = 100.0;
+    ref.read(drowsinessPctProvider.notifier).state   = 0.0;
+    ref.read(distractionPctProvider.notifier).state  = 0.0;
 
     _currentSessionId = null;
     _sessionStartTime = null;
+
+    // ── NOTIFY 2 ──────────────────────────────────────────────────────────
+    // Increment counter → dashboard, analytics, history all rebuild instantly
+    ref.read(dbChangeCounterProvider.notifier).state++;
   }
 
-  // MODEL OUTPUT
-  // Plug TFLite inference results here. Not activated yet.
+  // ─────────────────────────────────────────────────────────────────────────
+  // MODEL OUTPUT — plug TFLite inference results here (not activated yet)
+  // ─────────────────────────────────────────────────────────────────────────
+
   void onModelOutput({
     required String state,
     required double alertnessPct,
@@ -263,10 +264,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }) {
     if (!ref.read(isRecordingProvider)) return;
 
-    ref.read(alertnessPctProvider.notifier).state    = alertnessPct;
-    ref.read(drowsinessPctProvider.notifier).state   = drowsinessPct;
-    ref.read(distractionPctProvider.notifier).state  = distractionPct;
-    ref.read(driverStateProvider.notifier).state     = state;
+    ref.read(alertnessPctProvider.notifier).state   = alertnessPct;
+    ref.read(drowsinessPctProvider.notifier).state  = drowsinessPct;
+    ref.read(distractionPctProvider.notifier).state = distractionPct;
+    ref.read(driverStateProvider.notifier).state    = state;
 
     if (_currentSessionId != null) {
       DatabaseHelper.instance.incrementStateCount(
@@ -284,7 +285,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       _consecutiveDrowsy = 0;
       _checkAndTriggerAlert('DISTRACTED', _consecutiveDistracted);
     } else {
-      // Back to neutral — reset all counters and stop alarm
       _consecutiveDrowsy     = 0;
       _consecutiveDistracted = 0;
       _alertLevel            = 0;
@@ -293,36 +293,30 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // 3-LEVEL ALERT SYSTEM
-  // Thresholds are driven by Alert Sensitivity preference:
-  //   Low    → [5, 10, 15]
-  //   Medium → [3,  6,  9]  (default)
-  //   High   → [2,  4,  6]
+  // ─────────────────────────────────────────────────────────────────────────
+
   Future<void> _checkAndTriggerAlert(
       String type, int consecutive) async {
-    // Get thresholds based on current sensitivity preference
     final thresholds =
         _sensitivityThresholds[_prefAlertSensitivity] ?? [3, 6, 9];
-    final t1 = thresholds[0]; // Level 1 threshold
-    final t2 = thresholds[1]; // Level 2 threshold
-    final t3 = thresholds[2]; // Level 3 threshold
+    final t1 = thresholds[0];
+    final t2 = thresholds[1];
+    final t3 = thresholds[2];
 
-    // Not enough consecutive detections yet
     if (consecutive < t1) return;
 
-    // Determine new alert level
     int newLevel = 1;
     if (consecutive >= t3)      newLevel = 3;
     else if (consecutive >= t2) newLevel = 2;
 
-    // Don't re-trigger level 3 if already at level 3
     if (newLevel <= _alertLevel && _alertLevel == 3) return;
     _alertLevel = newLevel;
 
     ref.read(showAlertBannerProvider.notifier).state = true;
     ref.read(alertBannerTypeProvider.notifier).state = type;
 
-    // Save alert to DB
     if (_currentSessionId != null) {
       await DatabaseHelper.instance.insertAlertEvent(
         sessionId: _currentSessionId!,
@@ -332,13 +326,15 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       final msg =
           type == 'DROWSY' ? 'Microsleep detected' : 'Distraction detected';
       await _addLog(msg, 'WARNING');
+
+      // ── NOTIFY 3 ────────────────────────────────────────────────────────
+      // Increment counter → dashboard alert count updates instantly
+      ref.read(dbChangeCounterProvider.notifier).state++;
     }
 
     // Always play sound — volume controlled via slider in Settings
     await _playAlertSound(newLevel);
 
-    // Level 1 & 2 banners auto-dismiss after 3 seconds
-    // Level 3 stays until driver manually dismisses
     if (newLevel < 3) {
       _alertBannerTimer?.cancel();
       _alertBannerTimer = Timer(const Duration(seconds: 3), () {
@@ -349,22 +345,19 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // AUDIO
-  // Volume and on/off are read fresh from prefs on every alert trigger
-  // so changes in Settings apply immediately without app restart
+  // ─────────────────────────────────────────────────────────────────────────
+
   Future<void> _playAlertSound(int level) async {
-    // Always read volume fresh from prefs so changes in Settings
-    // take effect immediately without needing an app restart
     final volume = await PreferencesHelper.instance.getAlertVolume();
     await _audioPlayer.setVolume(volume);
     await _alarmPlayer.setVolume(volume);
 
     if (level == 1 || level == 2) {
-      // Short notification ping — plays once
       await _audioPlayer.stop();
       await _audioPlayer.play(AssetSource('L1_L2_sound.mp3'));
     } else {
-      // Level 3 — long looping alarm until driver dismisses
       await _alarmPlayer.setReleaseMode(ReleaseMode.loop);
       await _alarmPlayer.play(AssetSource('L3_critical_alert.wav'));
     }
@@ -378,7 +371,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(showAlertBannerProvider.notifier).state = false;
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // HELPERS
+  // ─────────────────────────────────────────────────────────────────────────
+
   Future<void> _addLog(String message, String type) async {
     final now = DateTime.now();
     final timeStr =
@@ -404,7 +400,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   // BUILD
+  // ─────────────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final isDesktop   = Responsive.isDesktop(context);
@@ -465,8 +464,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 flex: 55,
                 child: Column(
                   children: [
-                    Expanded(
-                        child: _buildCameraContainer(isLandscape: true)),
+                    Expanded(child: _buildCameraContainer(isLandscape: true)),
                     const SizedBox(height: 8),
                     _buildEnvironmentBar(isLandscape: true),
                   ],
@@ -507,8 +505,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 flex: 8,
                 child: Column(
                   children: [
-                    Expanded(
-                        child: _buildCameraContainer(isLandscape: true)),
+                    Expanded(child: _buildCameraContainer(isLandscape: true)),
                     SizedBox(
                         height: Responsive.responsiveSpacing(context,
                             mobile: 16, tablet: 20, desktop: 24)),
@@ -545,8 +542,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               color: const Color(0xFF2A0A0A),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color:
-                    Colors.red.withValues(alpha: 0.5 * _warningAnimation.value),
+                color: Colors.red.withValues(alpha: 0.5 * _warningAnimation.value),
               ),
               boxShadow: [
                 BoxShadow(
@@ -562,9 +558,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                     color: Colors.red.shade500, size: 36),
                 const SizedBox(height: 8),
                 Text(
-                  isDrowsy
-                      ? 'DROWSINESS DETECTED'
-                      : 'DISTRACTION DETECTED',
+                  isDrowsy ? 'DROWSINESS DETECTED' : 'DISTRACTION DETECTED',
                   style: TextStyle(
                     color: Colors.red.shade500,
                     fontSize: 18,
@@ -575,8 +569,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 const SizedBox(height: 4),
                 Text(
                   'Audible Alert Active • Tap to dismiss',
-                  style:
-                      TextStyle(color: Colors.red.shade300, fontSize: 12),
+                  style: TextStyle(color: Colors.red.shade300, fontSize: 12),
                 ),
               ],
             ),
@@ -587,10 +580,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   // CAMERA CONTAINER
-  Widget _buildCameraContainer(
-      {double? height, required bool isLandscape}) {
-    final previewSize  = _getPreviewSize(isLandscape);
-    final isRecording  = ref.watch(isRecordingProvider);
+  Widget _buildCameraContainer({double? height, required bool isLandscape}) {
+    final previewSize = _getPreviewSize(isLandscape);
+    final isRecording = ref.watch(isRecordingProvider);
 
     Widget cameraWidget = ClipRect(
       child: FittedBox(
@@ -629,14 +621,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         color: Color(0xFF0f172a),
         borderRadius: BorderRadius.all(Radius.circular(20)),
         boxShadow: [
-          BoxShadow(
-              color: Color(0xFF0b1120),
-              offset: Offset(8, 8),
-              blurRadius: 16),
-          BoxShadow(
-              color: Color(0xFF1e293b),
-              offset: Offset(-8, -8),
-              blurRadius: 16),
+          BoxShadow(color: Color(0xFF0b1120), offset: Offset(8, 8),   blurRadius: 16),
+          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-8, -8), blurRadius: 16),
         ],
       ),
       padding: const EdgeInsets.all(6),
@@ -652,12 +638,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.videocam_off,
-                  color: Color(0xFF64748b), size: 48),
+              const Icon(Icons.videocam_off, color: Color(0xFF64748b), size: 48),
               const SizedBox(height: 12),
               Text(_cameraError!,
-                  style: const TextStyle(
-                      color: Color(0xFF64748b), fontSize: 13),
+                  style: const TextStyle(color: Color(0xFF64748b), fontSize: 13),
                   textAlign: TextAlign.center),
               const SizedBox(height: 12),
               TextButton(
@@ -679,8 +663,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             CircularProgressIndicator(color: Color(0xFF22d3ee)),
             SizedBox(height: 12),
             Text('Initializing camera…',
-                style:
-                    TextStyle(color: Color(0xFF64748b), fontSize: 13)),
+                style: TextStyle(color: Color(0xFF64748b), fontSize: 13)),
           ],
         ),
       ),
@@ -706,11 +689,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   Widget _buildRecBadge() {
     return Positioned(
-      top: 12,
-      right: 12,
+      top: 12, right: 12,
       child: Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
           color: Colors.red.withValues(alpha: 0.85),
           borderRadius: BorderRadius.circular(20),
@@ -719,8 +700,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 8,
-              height: 8,
+              width: 8, height: 8,
               decoration: const BoxDecoration(
                   color: Colors.white, shape: BoxShape.circle),
             ),
@@ -752,10 +732,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 child: Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color:
-                        const Color(0xFF0f172a).withValues(alpha: 0.9),
-                    border: Border.all(
-                        color: Colors.red.withValues(alpha: 0.5)),
+                    color: const Color(0xFF0f172a).withValues(alpha: 0.9),
+                    border: Border.all(color: Colors.red.withValues(alpha: 0.5)),
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
@@ -771,9 +749,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                           size: 48, color: Colors.red.shade500),
                       const SizedBox(height: 12),
                       Text(
-                        isDrowsy
-                            ? 'DROWSINESS DETECTED'
-                            : 'DISTRACTION DETECTED',
+                        isDrowsy ? 'DROWSINESS DETECTED' : 'DISTRACTION DETECTED',
                         style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
@@ -784,8 +760,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       const SizedBox(height: 6),
                       Text('Audible Alert Active',
                           style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.red.shade300)),
+                              fontSize: 12, color: Colors.red.shade300)),
                     ],
                   ),
                 ),
@@ -808,14 +783,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         color: Color(0xFF0f172a),
         borderRadius: BorderRadius.all(Radius.circular(20)),
         boxShadow: [
-          BoxShadow(
-              color: Color(0xFF0b1120),
-              offset: Offset(6, 6),
-              blurRadius: 12),
-          BoxShadow(
-              color: Color(0xFF1e293b),
-              offset: Offset(-6, -6),
-              blurRadius: 12),
+          BoxShadow(color: Color(0xFF0b1120), offset: Offset(6, 6),   blurRadius: 12),
+          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-6, -6), blurRadius: 12),
         ],
       ),
       child: Row(
@@ -824,14 +793,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           Expanded(
             child: InkWell(
               onTap: () {
-                ref.read(clearGlassesProvider.notifier).state =
-                    !clearGlasses;
+                ref.read(clearGlassesProvider.notifier).state = !clearGlasses;
                 if (!clearGlasses && _currentSessionId != null) {
                   _addLog('Clear Glasses Mode Active', 'SUCCESS');
                 }
               },
-              borderRadius: const BorderRadius.horizontal(
-                  left: Radius.circular(20)),
+              borderRadius: const BorderRadius.horizontal(left: Radius.circular(20)),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -843,26 +810,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       borderRadius: BorderRadius.circular(10),
                       boxShadow: clearGlasses
                           ? [
-                              BoxShadow(
-                                  color: const Color(0xFF0b1120)
-                                      .withValues(alpha: 0.8),
-                                  offset: const Offset(3, 3),
-                                  blurRadius: 6),
-                              BoxShadow(
-                                  color: const Color(0xFF1e293b)
-                                      .withValues(alpha: 0.8),
-                                  offset: const Offset(-3, -3),
-                                  blurRadius: 6),
+                              BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.8), offset: const Offset(3, 3),   blurRadius: 6),
+                              BoxShadow(color: const Color(0xFF1e293b).withValues(alpha: 0.8), offset: const Offset(-3, -3), blurRadius: 6),
                             ]
                           : const [
-                              BoxShadow(
-                                  color: Color(0xFF0b1120),
-                                  offset: Offset(4, 4),
-                                  blurRadius: 8),
-                              BoxShadow(
-                                  color: Color(0xFF1e293b),
-                                  offset: Offset(-4, -4),
-                                  blurRadius: 8),
+                              BoxShadow(color: Color(0xFF0b1120), offset: Offset(4, 4),   blurRadius: 8),
+                              BoxShadow(color: Color(0xFF1e293b), offset: Offset(-4, -4), blurRadius: 8),
                             ],
                     ),
                     child: Icon(Icons.visibility,
@@ -893,7 +846,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               height: isLandscape ? 28 : 36,
               color: const Color(0xFF1e293b)),
 
-          // Record / Stop 
+          // Record / Stop
           Expanded(
             child: InkWell(
               onTap: () {
@@ -903,8 +856,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   _startRecording();
                 }
               },
-              borderRadius: const BorderRadius.horizontal(
-                  right: Radius.circular(20)),
+              borderRadius: const BorderRadius.horizontal(right: Radius.circular(20)),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -923,24 +875,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                                   spreadRadius: 2),
                             ]
                           : const [
-                              BoxShadow(
-                                  color: Color(0xFF0b1120),
-                                  offset: Offset(4, 4),
-                                  blurRadius: 8),
-                              BoxShadow(
-                                  color: Color(0xFF1e293b),
-                                  offset: Offset(-4, -4),
-                                  blurRadius: 8),
+                              BoxShadow(color: Color(0xFF0b1120), offset: Offset(4, 4),   blurRadius: 8),
+                              BoxShadow(color: Color(0xFF1e293b), offset: Offset(-4, -4), blurRadius: 8),
                             ],
                     ),
                     child: Icon(
-                      isRecording
-                          ? Icons.stop_circle
-                          : Icons.fiber_manual_record,
+                      isRecording ? Icons.stop_circle : Icons.fiber_manual_record,
                       size: isLandscape ? 16 : 18,
-                      color: isRecording
-                          ? Colors.red
-                          : const Color(0xFF64748b),
+                      color: isRecording ? Colors.red : const Color(0xFF64748b),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -949,9 +891,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                     style: TextStyle(
                       fontSize: isLandscape ? 12 : 13,
                       fontWeight: FontWeight.w500,
-                      color: isRecording
-                          ? Colors.red
-                          : const Color(0xFF64748b),
+                      color: isRecording ? Colors.red : const Color(0xFF64748b),
                     ),
                   ),
                 ],
@@ -1010,14 +950,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         color: Color(0xFF0f172a),
         borderRadius: BorderRadius.all(Radius.circular(16)),
         boxShadow: [
-          BoxShadow(
-              color: Color(0xFF0b1120),
-              offset: Offset(6, 6),
-              blurRadius: 12),
-          BoxShadow(
-              color: Color(0xFF1e293b),
-              offset: Offset(-6, -6),
-              blurRadius: 12),
+          BoxShadow(color: Color(0xFF0b1120), offset: Offset(6, 6),   blurRadius: 12),
+          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-6, -6), blurRadius: 12),
         ],
       ),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
@@ -1126,8 +1060,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               alignment: Alignment.topCenter,
               child: Text(
                 'No logs yet. Start recording to begin.',
-                style:
-                    TextStyle(color: Colors.white24, fontSize: 12),
+                style: TextStyle(color: Colors.white24, fontSize: 12),
                 textAlign: TextAlign.center,
               ),
             )
@@ -1135,14 +1068,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             ..._systemLogs.reversed.take(8).map((log) {
               Color textColor;
               switch (log['type']) {
-                case 'SUCCESS':
-                  textColor = const Color(0xFF10b981);
-                  break;
-                case 'WARNING':
-                  textColor = const Color(0xFFfbbf24);
-                  break;
-                default:
-                  textColor = const Color(0xFF94a3b8);
+                case 'SUCCESS':  textColor = const Color(0xFF10b981); break;
+                case 'WARNING':  textColor = const Color(0xFFfbbf24); break;
+                default:         textColor = const Color(0xFF94a3b8);
               }
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -1172,7 +1100,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   // ⚠️ DEV ONLY — REMOVE BEFORE FINAL BUILD
-  // Test buttons to trigger alert levels without the model
   Widget _buildTestButtons() {
     final isRecording = ref.watch(isRecordingProvider);
 
@@ -1186,141 +1113,69 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           width: 1,
         ),
         boxShadow: const [
-          BoxShadow(
-              color: Color(0xFF0b1120),
-              offset: Offset(4, 4),
-              blurRadius: 8),
-          BoxShadow(
-              color: Color(0xFF1e293b),
-              offset: Offset(-4, -4),
-              blurRadius: 8),
+          BoxShadow(color: Color(0xFF0b1120), offset: Offset(4, 4),   blurRadius: 8),
+          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-4, -4), blurRadius: 8),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
           Row(
             children: [
               const Icon(Icons.bug_report_rounded,
                   color: Color(0xFFfbbf24), size: 14),
               const SizedBox(width: 6),
-              const Text(
-                'DEV — ALERT TEST',
-                style: TextStyle(
-                  color: Color(0xFFfbbf24),
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.2,
-                ),
-              ),
+              const Text('DEV — ALERT TEST',
+                  style: TextStyle(
+                    color: Color(0xFFfbbf24),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1.2,
+                  )),
               const Spacer(),
               if (!isRecording)
-                const Text(
-                  'Start recording first',
-                  style: TextStyle(
-                      color: Color(0xFF475569), fontSize: 10),
-                ),
+                const Text('Start recording first',
+                    style: TextStyle(color: Color(0xFF475569), fontSize: 10)),
             ],
           ),
           const SizedBox(height: 12),
 
-          // DROWSY row
           const Text('DROWSY',
-              style: TextStyle(
-                  color: Color(0xFF64748b),
-                  fontSize: 10,
-                  letterSpacing: 1)),
+              style: TextStyle(color: Color(0xFF64748b), fontSize: 10, letterSpacing: 1)),
           const SizedBox(height: 6),
           Row(
             children: [
-              _testButton(
-                label: 'Level 1',
-                color: const Color(0xFF22d3ee),
-                onTap: isRecording
-                    ? () {
-                        _consecutiveDrowsy = 3;
-                        _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy);
-                      }
-                    : null,
-              ),
+              _testButton(label: 'Level 1', color: const Color(0xFF22d3ee),
+                  onTap: isRecording ? () { _consecutiveDrowsy = 3; _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy); } : null),
               const SizedBox(width: 8),
-              _testButton(
-                label: 'Level 2',
-                color: const Color(0xFFfbbf24),
-                onTap: isRecording
-                    ? () {
-                        _consecutiveDrowsy = 6;
-                        _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy);
-                      }
-                    : null,
-              ),
+              _testButton(label: 'Level 2', color: const Color(0xFFfbbf24),
+                  onTap: isRecording ? () { _consecutiveDrowsy = 6; _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy); } : null),
               const SizedBox(width: 8),
-              _testButton(
-                label: 'Level 3',
-                color: Colors.red,
-                onTap: isRecording
-                    ? () {
-                        _consecutiveDrowsy = 9;
-                        _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy);
-                      }
-                    : null,
-              ),
+              _testButton(label: 'Level 3', color: Colors.red,
+                  onTap: isRecording ? () { _consecutiveDrowsy = 9; _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy); } : null),
             ],
           ),
 
           const SizedBox(height: 10),
 
-          // DISTRACTED row
           const Text('DISTRACTED',
-              style: TextStyle(
-                  color: Color(0xFF64748b),
-                  fontSize: 10,
-                  letterSpacing: 1)),
+              style: TextStyle(color: Color(0xFF64748b), fontSize: 10, letterSpacing: 1)),
           const SizedBox(height: 6),
           Row(
             children: [
-              _testButton(
-                label: 'Level 1',
-                color: const Color(0xFF22d3ee),
-                onTap: isRecording
-                    ? () {
-                        _consecutiveDistracted = 3;
-                        _checkAndTriggerAlert(
-                            'DISTRACTED', _consecutiveDistracted);
-                      }
-                    : null,
-              ),
+              _testButton(label: 'Level 1', color: const Color(0xFF22d3ee),
+                  onTap: isRecording ? () { _consecutiveDistracted = 3; _checkAndTriggerAlert('DISTRACTED', _consecutiveDistracted); } : null),
               const SizedBox(width: 8),
-              _testButton(
-                label: 'Level 2',
-                color: const Color(0xFFfbbf24),
-                onTap: isRecording
-                    ? () {
-                        _consecutiveDistracted = 6;
-                        _checkAndTriggerAlert(
-                            'DISTRACTED', _consecutiveDistracted);
-                      }
-                    : null,
-              ),
+              _testButton(label: 'Level 2', color: const Color(0xFFfbbf24),
+                  onTap: isRecording ? () { _consecutiveDistracted = 6; _checkAndTriggerAlert('DISTRACTED', _consecutiveDistracted); } : null),
               const SizedBox(width: 8),
-              _testButton(
-                label: 'Level 3',
-                color: Colors.red,
-                onTap: isRecording
-                    ? () {
-                        _consecutiveDistracted = 9;
-                        _checkAndTriggerAlert(
-                            'DISTRACTED', _consecutiveDistracted);
-                      }
-                    : null,
-              ),
+              _testButton(label: 'Level 3', color: Colors.red,
+                  onTap: isRecording ? () { _consecutiveDistracted = 9; _checkAndTriggerAlert('DISTRACTED', _consecutiveDistracted); } : null),
             ],
           ),
 
           const SizedBox(height: 12),
 
-          // Reset button
           SizedBox(
             width: double.infinity,
             child: GestureDetector(
@@ -1337,17 +1192,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 decoration: BoxDecoration(
                   color: const Color(0xFF1e293b),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                      color: const Color(0xFF475569), width: 1),
+                  border: Border.all(color: const Color(0xFF475569), width: 1),
                 ),
-                child: const Text(
-                  'Reset All Alerts',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      color: Color(0xFF94a3b8),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500),
-                ),
+                child: const Text('Reset All Alerts',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        color: Color(0xFF94a3b8),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500)),
               ),
             ),
           ),
@@ -1368,14 +1220,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
-            color: isEnabled
-                ? color.withValues(alpha: 0.12)
-                : const Color(0xFF1e293b),
+            color: isEnabled ? color.withValues(alpha: 0.12) : const Color(0xFF1e293b),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: isEnabled
-                  ? color.withValues(alpha: 0.5)
-                  : const Color(0xFF1e293b),
+              color: isEnabled ? color.withValues(alpha: 0.5) : const Color(0xFF1e293b),
               width: 1,
             ),
           ),

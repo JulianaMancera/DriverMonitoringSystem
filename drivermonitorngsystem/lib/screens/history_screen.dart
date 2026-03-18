@@ -1,22 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // history_screen.dart
 // Bantay Drive — History Screen
-// Auto-refreshes via DbChangeNotifier. Pull-to-refresh as backup.
+// Auto-refreshes via dbChangeCounterProvider. Pull-to-refresh as backup.
 // Tap any card → animated bottom sheet with session detail.
 // ─────────────────────────────────────────────────────────────────────────────
 
-class HistoryScreen extends StatefulWidget {
+class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
 
   @override
-  State<HistoryScreen> createState() => _HistoryScreenState();
+  ConsumerState<HistoryScreen> createState() => _HistoryScreenState();
 }
 
-class _HistoryScreenState extends State<HistoryScreen> {
+class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   // ── COLORS ─────────────────────────────────────────────────────────────────
   static const Color _bg          = Color(0xFF080E1A);
   static const Color _surface     = Color(0xFF0D1627);
@@ -49,17 +50,22 @@ class _HistoryScreenState extends State<HistoryScreen> {
     super.initState();
     _loadSessions();
     _searchCtrl.addListener(_applyFilter);
-    DbChangeNotifier.instance.addListener(_onDataChanged);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Watch the counter — when monitor_screen increments it,
+    // this screen reloads its session list automatically
+    final counter = ref.watch(dbChangeCounterProvider);
+    if (counter > 0) _loadSessions();
   }
 
   @override
   void dispose() {
-    DbChangeNotifier.instance.removeListener(_onDataChanged);
     _searchCtrl.dispose();
     super.dispose();
   }
-
-  void _onDataChanged() => _loadSessions();
 
   // ─────────────────────────────────────────────────────────────────────────
   // DATA

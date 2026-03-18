@@ -1,8 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/legacy.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class DbChangeNotifier extends ChangeNotifier {
-  DbChangeNotifier._();
-  static final DbChangeNotifier instance = DbChangeNotifier._();
-
-  void notifyDataChanged() => notifyListeners();
-}
+final dbChangeCounterProvider = StateProvider<int>((ref) => 0);

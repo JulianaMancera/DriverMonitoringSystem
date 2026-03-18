@@ -1,6 +1,5 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
-import 'db_change_notifier.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
@@ -97,11 +96,9 @@ class DatabaseHelper {
   /// Call when driver presses Record — creates a new session
   Future<int> insertSession() async {
     final db = await database;
-    final id = await db.insert('sessions', {
+    return await db.insert('sessions', {
       'started_at': DateTime.now().toIso8601String(),
     });
-    DbChangeNotifier.instance.notifyDataChanged(); // ← notify
-    return id;
   }
 
   /// Call when driver stops recording — updates session end time and scores
@@ -123,7 +120,6 @@ class DatabaseHelper {
       where: 'id = ?',
       whereArgs: [sessionId],
     );
-    DbChangeNotifier.instance.notifyDataChanged(); // ← notify
   }
 
   /// Fetch all sessions (for History Screen)
@@ -262,10 +258,9 @@ class DatabaseHelper {
       'drowsy_count': 0,
       'distracted_count': 0,
     });
-    DbChangeNotifier.instance.notifyDataChanged(); // ← notify
   }
 
-  /// Increment a specific state count — call every time model outputs a state
+  /// Increment a specific state count
   /// [state]: 'neutral', 'drowsy', or 'distracted'
   Future<void> incrementStateCount({
     required int sessionId,
@@ -278,10 +273,9 @@ class DatabaseHelper {
       SET $column = $column + 1
       WHERE session_id = ?
     ''', [sessionId]);
-    DbChangeNotifier.instance.notifyDataChanged(); // ← notify
   }
 
-  /// Get state counts for a session (for Report Screen)
+  /// Get state counts for a session
   Future<Map<String, dynamic>?> getStateCounts(int sessionId) async {
     final db = await database;
     final result = await db.query(
@@ -310,7 +304,6 @@ class DatabaseHelper {
       'alert_level': alertLevel,
       'triggered_at': DateTime.now().toIso8601String(),
     });
-    DbChangeNotifier.instance.notifyDataChanged(); // ← notify
   }
 
   /// Total alert count — Dashboard card "Alert Triggered" & Analytics
@@ -340,7 +333,7 @@ class DatabaseHelper {
 
   /// Count alerts by type — Analytics cards
   Future<int> getAlertCountByType({
-    required String alertType,  // 'DROWSY' or 'DISTRACTED'
+    required String alertType,
     int? days,
   }) async {
     final db = await database;
@@ -395,7 +388,7 @@ class DatabaseHelper {
     ''', [since]);
   }
 
-  /// Alerts for a specific session — Report Screen
+  /// Alerts for a specific session
   Future<List<Map<String, dynamic>>> getAlertsBySession(int sessionId) async {
     final db = await database;
     return await db.query(
@@ -424,10 +417,9 @@ class DatabaseHelper {
       'message': message,
       'log_type': logType,
     });
-    DbChangeNotifier.instance.notifyDataChanged(); // ← notify
   }
 
-  /// Get all system logs for a session — Monitoring Screen
+  /// Get all system logs for a session
   Future<List<Map<String, dynamic>>> getSystemLogs(int sessionId) async {
     final db = await database;
     return await db.query(
@@ -453,7 +445,6 @@ class DatabaseHelper {
       'recorded_at': DateTime.now().toIso8601String(),
       'alertness_pct': alertnessPct,
     });
-    DbChangeNotifier.instance.notifyDataChanged(); // ← notify
   }
 
   /// Get alertness snapshots for a session
@@ -507,8 +498,8 @@ class DatabaseHelper {
   Future<Map<String, dynamic>> getAnalyticsSummary({int? days}) async {
     final totalSessions     = await getTotalSessionCount(days: days);
     final totalAlerts       = await getTotalAlertCount(days: days);
-    final drowsinessEvents  = await getAlertCountByType(alertType: 'DROWSY',      days: days);
-    final distractionEvents = await getAlertCountByType(alertType: 'DISTRACTED',  days: days);
+    final drowsinessEvents  = await getAlertCountByType(alertType: 'DROWSY',     days: days);
+    final distractionEvents = await getAlertCountByType(alertType: 'DISTRACTED', days: days);
     final dailyTrends       = await getDailyAlertTrends(days: days ?? 7);
     final hourlyDistribution = await getHourlyAlertDistribution(days: days ?? 7);
 
@@ -539,6 +530,5 @@ class DatabaseHelper {
     await db.delete('alert_events');
     await db.delete('state_counts');
     await db.delete('sessions');
-    DbChangeNotifier.instance.notifyDataChanged(); // ← notify (clears UI too)
   }
 }
