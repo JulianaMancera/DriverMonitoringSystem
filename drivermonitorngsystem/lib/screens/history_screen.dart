@@ -6,6 +6,7 @@ import '../core/database/db_change_notifier.dart';
 // history_screen.dart
 // Bantay Drive — History Screen
 // Auto-refreshes via DbChangeNotifier. Pull-to-refresh as backup.
+// Tap any card → animated bottom sheet with session detail.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class HistoryScreen extends StatefulWidget {
@@ -25,6 +26,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   static const Color _red         = Color(0xFFFF4757);
   static const Color _orange      = Color(0xFFFFA500);
   static const Color _textPrimary = Color(0xFFEEF2FF);
+  static const Color _textMuted   = Color(0xFF94A3B8);
   static const Color _textDim     = Color(0xFF6B7A99);
   static const Color _divider     = Color(0xFF1E2D45);
 
@@ -48,8 +50,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     super.initState();
     _loadSessions();
     _searchCtrl.addListener(_applyFilter);
-
-    // Auto-refresh whenever DatabaseHelper writes new data
     DbChangeNotifier.instance.addListener(_onDataChanged);
   }
 
@@ -68,16 +68,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   Future<void> _loadSessions() async {
     setState(() => _isLoading = true);
-
     final sessions = await DatabaseHelper.instance.getAllSessions();
-
     final enriched = <Map<String, dynamic>>[];
     for (final s in sessions) {
       final alerts = await DatabaseHelper.instance
           .getAlertsBySession(s['id'] as int);
       enriched.add({...s, 'alert_count': alerts.length});
     }
-
     if (mounted) {
       setState(() {
         _sessions  = enriched;
@@ -126,6 +123,21 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // BOTTOM SHEET — session detail
+  // ─────────────────────────────────────────────────────────────────────────
+
+  void _openSessionDetail(Map<String, dynamic> session) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,         // allows full height control
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withOpacity(0.6),
+      enableDrag: true,
+      builder: (_) => _SessionDetailSheet(session: session),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // HELPERS
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -159,7 +171,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   String _dateGroupLabel(String? iso) {
     if (iso == null) return 'UNKNOWN';
-    final d   = DateTime.tryParse(iso);
+    final d = DateTime.tryParse(iso);
     if (d == null) return 'UNKNOWN';
     final now   = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -211,7 +223,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // SEARCH BAR — refresh button removed
+  // SEARCH BAR
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildSearchBar() {
@@ -286,16 +298,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // SESSION LIST — wrapped in RefreshIndicator for pull-to-refresh
+  // SESSION LIST
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildList() {
     final groups = _groupByDate(_filtered);
-
     return RefreshIndicator(
       color: _cyan,
       backgroundColor: _surface,
-      onRefresh: _loadSessions,  // pull-to-refresh as manual backup
+      onRefresh: _loadSessions,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
@@ -324,7 +335,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // SESSION CARD
+  // SESSION CARD — chevron now centered vertically in Row
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildCard(Map<String, dynamic> s) {
@@ -333,91 +344,110 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final alertCount = s['alert_count'] as int? ?? 0;
     final color      = _scoreColor(score);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: _surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _divider, width: 1),
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.97, end: 1.0),
+      duration: const Duration(milliseconds: 300),
+      builder: (context, scale, child) => Transform.scale(
+        scale: scale,
+        child: child,
       ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        decoration: BoxDecoration(
+          color: _surface,
           borderRadius: BorderRadius.circular(14),
-          onTap: () {
-            // TODO: navigate to session detail
-          },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            child: Row(
-              children: [
-                // Score circle
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: color.withOpacity(0.12),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: color.withOpacity(0.3), width: 2),
-                  ),
-                  child: Center(
-                    child: Text(
-                      '${score.toStringAsFixed(0)}%',
-                      style: TextStyle(
-                        color: color,
-                        fontSize: score >= 100 ? 10 : 12,
-                        fontWeight: FontWeight.w700,
+          border: Border.all(color: _divider, width: 1),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            splashColor: _cyan.withOpacity(0.08),
+            highlightColor: _cyan.withOpacity(0.04),
+            onTap: () => _openSessionDetail(s),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center, // ← centered
+                children: [
+
+                  // ── Score circle ──────────────────────────────────────
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: color.withOpacity(0.12),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                          color: color.withOpacity(0.3), width: 2),
+                    ),
+                    child: Center(
+                      child: Text(
+                        '${score.toStringAsFixed(0)}%',
+                        style: TextStyle(
+                          color: color,
+                          fontSize: score >= 100 ? 10 : 12,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ),
-                ),
 
-                const SizedBox(width: 14),
+                  const SizedBox(width: 14),
 
-                // Date + time + duration
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _formatDate(s['started_at']),
-                        style: TextStyle(
-                          color: _textPrimary,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Text(_formatTime(s['started_at']),
-                              style: TextStyle(color: _textDim, fontSize: 11)),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 6),
-                            child: Container(
-                              width: 3, height: 3,
-                              decoration: BoxDecoration(
-                                  color: _textDim, shape: BoxShape.circle),
-                            ),
+                  // ── Date + time + duration ────────────────────────────
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          _formatDate(s['started_at']),
+                          style: TextStyle(
+                            color: _textPrimary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
                           ),
-                          Text(_formatDuration(duration),
-                              style: TextStyle(color: _textDim, fontSize: 11)),
-                        ],
-                      ),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Text(_formatTime(s['started_at']),
+                                style: TextStyle(
+                                    color: _textDim, fontSize: 11)),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6),
+                              child: Container(
+                                width: 3,
+                                height: 3,
+                                decoration: BoxDecoration(
+                                    color: _textDim,
+                                    shape: BoxShape.circle),
+                              ),
+                            ),
+                            Text(_formatDuration(duration),
+                                style: TextStyle(
+                                    color: _textDim, fontSize: 11)),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // ── Alert badge + chevron (both centered) ─────────────
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      _buildAlertBadge(alertCount),
+                      const SizedBox(width: 6),
+                      Icon(Icons.chevron_right_rounded,
+                          color: _textDim, size: 18),
                     ],
                   ),
-                ),
-
-                // Alert badge + chevron
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    _buildAlertBadge(alertCount),
-                    const SizedBox(height: 6),
-                    Icon(Icons.chevron_right_rounded, color: _divider, size: 18),
-                  ],
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -461,7 +491,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
           const SizedBox(width: 4),
           Text(label,
               style: TextStyle(
-                  color: color, fontSize: 10, fontWeight: FontWeight.w600)),
+                  color: color,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -485,13 +517,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
             children: [
               Icon(Icons.history_rounded, color: _textDim, size: 56),
               const SizedBox(height: 16),
-              Text(
-                'No sessions found',
-                style: TextStyle(
-                    color: _textPrimary,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600),
-              ),
+              Text('No sessions found',
+                  style: TextStyle(
+                      color: _textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600)),
               const SizedBox(height: 6),
               Text(
                 _selectedFilter == 0
@@ -503,6 +533,616 @@ class _HistoryScreenState extends State<HistoryScreen> {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SESSION DETAIL BOTTOM SHEET
+// Pops up with slide + scale animation. Has close X button.
+// Loads all session details from DB on open.
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SessionDetailSheet extends StatefulWidget {
+  final Map<String, dynamic> session;
+  const _SessionDetailSheet({required this.session});
+
+  @override
+  State<_SessionDetailSheet> createState() => _SessionDetailSheetState();
+}
+
+class _SessionDetailSheetState extends State<_SessionDetailSheet>
+    with SingleTickerProviderStateMixin {
+
+  // ── COLORS ─────────────────────────────────────────────────────────────────
+  static const Color _sheetBg    = Color(0xFF0D1627);
+  static const Color _surfaceAlt = Color(0xFF1A2235);
+  static const Color _cyan       = Color(0xFF00D4FF);
+  static const Color _green      = Color(0xFF00FF88);
+  static const Color _red        = Color(0xFFFF4757);
+  static const Color _orange     = Color(0xFFFFA500);
+  static const Color _textPrimary= Color(0xFFEEF2FF);
+  static const Color _textMuted  = Color(0xFF94A3B8);
+  static const Color _textDim    = Color(0xFF6B7A99);
+  static const Color _divider    = Color(0xFF1E2D45);
+
+  // ── STATE ──────────────────────────────────────────────────────────────────
+  bool _loading = true;
+  Map<String, dynamic>? _counts;
+  List<Map<String, dynamic>> _alerts = [];
+  List<Map<String, dynamic>> _logs   = [];
+
+  late AnimationController _animCtrl;
+  late Animation<double>    _scaleAnim;
+  late Animation<double>    _fadeAnim;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // LIFECYCLE
+  // ─────────────────────────────────────────────────────────────────────────
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Entry animation — scale from 0.93 → 1.0 + fade in
+    _animCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 320),
+    );
+    _scaleAnim = CurvedAnimation(
+        parent: _animCtrl, curve: Curves.easeOutBack);
+    _fadeAnim = CurvedAnimation(
+        parent: _animCtrl, curve: Curves.easeOut);
+    _animCtrl.forward();
+
+    _loadDetail();
+  }
+
+  @override
+  void dispose() {
+    _animCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadDetail() async {
+    final id = widget.session['id'] as int;
+    final counts = await DatabaseHelper.instance.getStateCounts(id);
+    final alerts = await DatabaseHelper.instance.getAlertsBySession(id);
+    final logs   = await DatabaseHelper.instance.getSystemLogs(id);
+    if (mounted) {
+      setState(() {
+        _counts  = counts;
+        _alerts  = alerts;
+        _logs    = logs;
+        _loading = false;
+      });
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // HELPERS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  String _formatDate(String? iso) {
+    if (iso == null) return '—';
+    final d = DateTime.tryParse(iso);
+    if (d == null) return '—';
+    const mo = ['Jan','Feb','Mar','Apr','May','Jun',
+                 'Jul','Aug','Sep','Oct','Nov','Dec'];
+    return '${mo[d.month - 1]} ${d.day}, ${d.year}';
+  }
+
+  String _formatTime(String? iso) {
+    if (iso == null) return '—';
+    final d = DateTime.tryParse(iso);
+    if (d == null) return '—';
+    final h    = d.hour > 12 ? d.hour - 12 : (d.hour == 0 ? 12 : d.hour);
+    final m    = d.minute.toString().padLeft(2, '0');
+    final ampm = d.hour >= 12 ? 'PM' : 'AM';
+    return '$h:$m $ampm';
+  }
+
+  String _formatDuration(int seconds) {
+    final h = seconds ~/ 3600;
+    final m = (seconds % 3600) ~/ 60;
+    final s = seconds % 60;
+    if (h > 0) return '${h}h ${m}m ${s}s';
+    if (m > 0) return '${m}m ${s}s';
+    return '${s}s';
+  }
+
+  Color _scoreColor(double score) {
+    if (score >= 80) return _green;
+    if (score >= 60) return _orange;
+    return _red;
+  }
+
+  Color _alertTypeColor(String type) =>
+      type == 'DROWSY' ? _red : _orange;
+
+  String _alertLevelLabel(int level) {
+    switch (level) {
+      case 1: return 'L1';
+      case 2: return 'L2';
+      case 3: return 'L3';
+      default: return 'L?';
+    }
+  }
+
+  Color _logColor(String type) {
+    switch (type) {
+      case 'SUCCESS': return _green;
+      case 'WARNING': return _orange;
+      default:        return _textMuted;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // BUILD
+  // ─────────────────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    final score    = (widget.session['safety_score'] as double? ?? 0.0);
+    final duration = widget.session['duration_sec'] as int? ?? 0;
+    final color    = _scoreColor(score);
+
+    return FadeTransition(
+      opacity: _fadeAnim,
+      child: ScaleTransition(
+        scale: Tween<double>(begin: 0.93, end: 1.0).animate(_scaleAnim),
+        alignment: Alignment.bottomCenter,
+        child: Container(
+          // max 88% of screen height
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.88,
+          ),
+          decoration: BoxDecoration(
+            color: _sheetBg,
+            borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.5),
+                blurRadius: 40,
+                offset: const Offset(0, -8),
+              ),
+              BoxShadow(
+                color: _cyan.withOpacity(0.04),
+                blurRadius: 60,
+                spreadRadius: 2,
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+
+              // ── DRAG HANDLE ─────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 4),
+                child: Container(
+                  width: 40, height: 4,
+                  decoration: BoxDecoration(
+                    color: _divider,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+
+              // ── HEADER ──────────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 16, 12),
+                child: Row(
+                  children: [
+
+                    // Score circle
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: color.withOpacity(0.12),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                            color: color.withOpacity(0.35), width: 2.5),
+                      ),
+                      child: Center(
+                        child: Text(
+                          '${score.toStringAsFixed(0)}%',
+                          style: TextStyle(
+                            color: color,
+                            fontSize: score >= 100 ? 10 : 13,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(width: 14),
+
+                    // Date + time range
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _formatDate(widget.session['started_at']),
+                            style: TextStyle(
+                              color: _textPrimary,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            '${_formatTime(widget.session['started_at'])}  →  ${_formatTime(widget.session['ended_at'])}',
+                            style: TextStyle(
+                                color: _textDim, fontSize: 12),
+                          ),
+                          Text(
+                            _formatDuration(duration),
+                            style: TextStyle(
+                                color: _textMuted,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // ── CLOSE BUTTON ─────────────────────────────────────
+                    GestureDetector(
+                      onTap: () => Navigator.of(context).pop(),
+                      child: Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: _surfaceAlt,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: _divider, width: 1),
+                        ),
+                        child: Icon(
+                          Icons.close_rounded,
+                          color: _textMuted,
+                          size: 18,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              Divider(color: _divider, height: 1, thickness: 1),
+
+              // ── SCROLLABLE CONTENT ───────────────────────────────────────
+              Flexible(
+                child: _loading
+                    ? const Padding(
+                        padding: EdgeInsets.all(40),
+                        child: CircularProgressIndicator(
+                            color: Color(0xFF00D4FF)),
+                      )
+                    : SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+
+                            // ── STATE BREAKDOWN ──────────────────────────
+                            _sectionLabel('STATE BREAKDOWN'),
+                            _buildStateBreakdown(),
+
+                            const SizedBox(height: 20),
+
+                            // ── ALERT EVENTS ─────────────────────────────
+                            _sectionLabel('ALERT EVENTS'),
+                            _buildAlertEvents(),
+
+                            const SizedBox(height: 20),
+
+                            // ── SYSTEM LOG ───────────────────────────────
+                            _sectionLabel('SYSTEM LOG'),
+                            _buildSystemLog(),
+                          ],
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SECTION LABEL
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Widget _sectionLabel(String label) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: _textDim,
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 1.2,
+        ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // STATE BREAKDOWN
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Widget _buildStateBreakdown() {
+    final neutral    = _counts?['neutral_count']    as int? ?? 0;
+    final drowsy     = _counts?['drowsy_count']     as int? ?? 0;
+    final distracted = _counts?['distracted_count'] as int? ?? 0;
+    final total      = (neutral + drowsy + distracted).toDouble();
+    final hasData    = total > 0;
+
+    if (!hasData) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: _surfaceAlt,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Center(
+          child: Text('No state data recorded',
+              style: TextStyle(color: _textDim, fontSize: 13)),
+        ),
+      );
+    }
+
+    final nPct = (neutral / total * 100).round();
+    final dPct = (drowsy / total * 100).round();
+    final xPct = (distracted / total * 100).round();
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _surfaceAlt,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _divider, width: 1),
+      ),
+      child: Column(
+        children: [
+          // Segmented bar
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: Row(
+              children: [
+                if (neutral > 0)
+                  Flexible(
+                    flex: neutral,
+                    child: Container(height: 10, color: _cyan),
+                  ),
+                if (drowsy > 0)
+                  Flexible(
+                    flex: drowsy,
+                    child: Container(
+                        height: 10,
+                        color: _red,
+                        margin: const EdgeInsets.only(left: 2)),
+                  ),
+                if (distracted > 0)
+                  Flexible(
+                    flex: distracted,
+                    child: Container(
+                        height: 10,
+                        color: _orange,
+                        margin: const EdgeInsets.only(left: 2)),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // Labels row
+          Row(
+            children: [
+              Expanded(child: _statePill(_cyan, 'Neutral', '$nPct%')),
+              const SizedBox(width: 8),
+              Expanded(child: _statePill(_red, 'Drowsy', '$dPct%')),
+              const SizedBox(width: 8),
+              Expanded(child: _statePill(_orange, 'Distracted', '$xPct%')),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statePill(Color color, String label, String pct) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.2), width: 1),
+      ),
+      child: Column(
+        children: [
+          Text(pct,
+              style: TextStyle(
+                  color: color,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700)),
+          const SizedBox(height: 2),
+          Text(label,
+              style: TextStyle(
+                  color: _textDim, fontSize: 10, fontWeight: FontWeight.w500)),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ALERT EVENTS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Widget _buildAlertEvents() {
+    if (_alerts.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: _surfaceAlt,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.check_circle_outline_rounded,
+                color: _green, size: 18),
+            const SizedBox(width: 10),
+            Text('No alerts triggered — safe drive!',
+                style: TextStyle(color: _green, fontSize: 13)),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: _surfaceAlt,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _divider, width: 1),
+      ),
+      child: Column(
+        children: _alerts.asMap().entries.map((entry) {
+          final i     = entry.key;
+          final alert = entry.value;
+          final type  = alert['alert_type'] as String? ?? 'DROWSY';
+          final level = alert['alert_level'] as int? ?? 1;
+          final time  = _formatTime(alert['triggered_at']);
+          final color = _alertTypeColor(type);
+          final isLast = i == _alerts.length - 1;
+
+          return Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 10),
+                child: Row(
+                  children: [
+                    // Level badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: color.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                            color: color.withOpacity(0.3), width: 1),
+                      ),
+                      child: Text(
+                        _alertLevelLabel(level),
+                        style: TextStyle(
+                          color: color,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(width: 10),
+
+                    // Type
+                    Expanded(
+                      child: Text(
+                        type == 'DROWSY'
+                            ? 'Drowsiness Detected'
+                            : 'Distraction Detected',
+                        style: TextStyle(
+                          color: _textPrimary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+
+                    // Time
+                    Text(time,
+                        style:
+                            TextStyle(color: _textDim, fontSize: 11)),
+                  ],
+                ),
+              ),
+              if (!isLast)
+                Divider(
+                    color: _divider,
+                    height: 1,
+                    thickness: 1,
+                    indent: 14),
+            ],
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SYSTEM LOG
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Widget _buildSystemLog() {
+    if (_logs.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: _surfaceAlt,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text('No log entries.',
+            style: TextStyle(color: _textDim, fontSize: 13)),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: _surfaceAlt,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _divider, width: 1),
+      ),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        children: _logs.map((log) {
+          final type    = log['log_type'] as String? ?? 'INFO';
+          final message = log['message'] as String? ?? '';
+          final time    = log['log_time'] as String? ?? '';
+          final color   = _logColor(type);
+          final timeStr = time.length >= 19 ? time.substring(11, 19) : time;
+
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '[$timeStr]',
+                  style: TextStyle(
+                      color: _textDim,
+                      fontSize: 10,
+                      fontFamily: 'monospace'),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    message,
+                    style: TextStyle(
+                        color: color,
+                        fontSize: 10,
+                        fontFamily: 'monospace'),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }).toList(),
       ),
     );
   }
