@@ -26,7 +26,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
   static const Color _red         = Color(0xFFFF4757);
   static const Color _orange      = Color(0xFFFFA500);
   static const Color _textPrimary = Color(0xFFEEF2FF);
-  static const Color _textMuted   = Color(0xFF94A3B8);
   static const Color _textDim     = Color(0xFF6B7A99);
   static const Color _divider     = Color(0xFF1E2D45);
 
@@ -85,14 +84,51 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   void _applyFilter() {
-    final query = _searchCtrl.text.toLowerCase();
+    final query = _searchCtrl.text.toLowerCase().trim();
     final now   = DateTime.now();
     List<Map<String, dynamic>> result = List.from(_sessions);
 
     if (query.isNotEmpty) {
-      result = result.where((s) =>
-          (s['started_at'] ?? '').toString().toLowerCase().contains(query)
-      ).toList();
+      result = result.where((s) {
+        final iso        = s['started_at'] as String? ?? '';
+        final d          = DateTime.tryParse(iso);
+        final alertCount = s['alert_count'] as int? ?? 0;
+
+        // Build a searchable string from friendly formats:
+        // "Mar 17, 2026", "march", "2026", "safe", "alert", "11:04 PM"
+        final searchables = <String>[];
+
+        if (d != null) {
+          const months = [
+            'january','february','march','april','may','june',
+            'july','august','september','october','november','december'
+          ];
+          const short = [
+            'jan','feb','mar','apr','may','jun',
+            'jul','aug','sep','oct','nov','dec'
+          ];
+          searchables.addAll([
+            months[d.month - 1],           // "march"
+            short[d.month - 1],             // "mar"
+            '${short[d.month - 1]} ${d.day}', // "mar 17"
+            '${d.day}',                     // "17"
+            '${d.year}',                    // "2026"
+            '${d.month}/${d.day}/${d.year}',// "3/17/2026"
+          ]);
+          // Time: "11:04 pm" or "am"
+          final h    = d.hour > 12 ? d.hour - 12 : (d.hour == 0 ? 12 : d.hour);
+          final m    = d.minute.toString().padLeft(2, '0');
+          final ampm = d.hour >= 12 ? 'pm' : 'am';
+          searchables.add('$h:$m $ampm');
+          searchables.add(ampm);
+        }
+
+        // Keywords: "safe", "alert", "alerts"
+        if (alertCount == 0) searchables.add('safe');
+        if (alertCount > 0)  searchables.addAll(['alert', 'alerts']);
+
+        return searchables.any((s) => s.contains(query));
+      }).toList();
     }
 
     switch (_selectedFilter) {
@@ -127,9 +163,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
   // ─────────────────────────────────────────────────────────────────────────
 
   void _openSessionDetail(Map<String, dynamic> session) {
+    // Dismiss keyboard before opening — prevents it from
+    // reappearing when the sheet closes
+    FocusScope.of(context).unfocus();
+
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true,         // allows full height control
+      isScrollControlled: true,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.black.withOpacity(0.6),
       enableDrag: true,
@@ -239,10 +279,21 @@ class _HistoryScreenState extends State<HistoryScreen> {
         child: TextField(
           controller: _searchCtrl,
           style: TextStyle(color: _textPrimary, fontSize: 13),
+          textInputAction: TextInputAction.search,
+          onSubmitted: (_) => FocusScope.of(context).unfocus(),
           decoration: InputDecoration(
-            hintText: 'Search sessions...',
+            hintText: 'Search by date, month, or "safe"...',
             hintStyle: TextStyle(color: _textDim, fontSize: 13),
             prefixIcon: Icon(Icons.search_rounded, color: _textDim, size: 18),
+            suffixIcon: _searchCtrl.text.isNotEmpty
+                ? GestureDetector(
+                    onTap: () {
+                      _searchCtrl.clear();
+                      FocusScope.of(context).unfocus();
+                    },
+                    child: Icon(Icons.close_rounded, color: _textDim, size: 16),
+                  )
+                : null,
             border: InputBorder.none,
             contentPadding: const EdgeInsets.symmetric(vertical: 10),
           ),
