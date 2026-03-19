@@ -255,8 +255,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Switch(
             value: value,
             onChanged: onChanged,
-            activeColor: _cyan,
-            activeTrackColor: _cyan.withOpacity(0.3),
+            activeThumbColor: _cyan,
+            activeTrackColor: _cyan.withValues(alpha: 0.3),
             inactiveThumbColor: _textSecondary,
             inactiveTrackColor: _surfaceAlt,
           ),
@@ -316,7 +316,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               activeTrackColor: _cyan,
               inactiveTrackColor: _divider,
               thumbColor: _cyan,
-              overlayColor: _cyan.withOpacity(0.15),
+              overlayColor: _cyan.withValues(alpha: 0.15),
               trackHeight: 3,
               thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
             ),
@@ -390,7 +390,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     decoration: BoxDecoration(
-                      color: selected ? _cyan.withOpacity(0.15) : _surfaceAlt,
+                      color: selected ? _cyan.withValues(alpha: 0.15) : _surfaceAlt,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
                         color: selected ? _cyan : _divider,
@@ -555,7 +555,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       width: 36,
       height: 36,
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Icon(icon, color: color, size: 18),
@@ -594,7 +594,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   borderRadius: BorderRadius.circular(8)),
             ),
             onPressed: () {
-              Navigator.pop(context);
+              Navigator.pop(context);                                                                                              
               // TODO: implement CSV export using DatabaseHelper
               // Example:
               // final sessions = await DatabaseHelper.instance.getAllSessions();

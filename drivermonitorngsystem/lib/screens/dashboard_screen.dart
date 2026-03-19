@@ -3,11 +3,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../core/database/database_helper.dart';
+import '../core/database/db_change_notifier.dart';
 import '../utils/responsive.dart';
 
 // RIVERPOD PROVIDER
+// Watches dbChangeCounterProvider — auto re-fetches whenever
+// monitor_screen increments the counter (on session start/stop/alert)
 final dashboardProvider =
     FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
+  ref.watch(dbChangeCounterProvider); // ← this is all that's needed
   return await DatabaseHelper.instance.getDashboardSummary();
 });
 
@@ -25,6 +29,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    // Periodic refresh every 30 seconds as a fallback
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       ref.invalidate(dashboardProvider);
     });
@@ -42,27 +47,26 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     return ColoredBox(
       color: const Color(0xFF080E1A),
       child: Column(
-      children: [
-        Expanded(
-          child: dashAsync.when(
-            loading: () => const Center(
-              child: CircularProgressIndicator(color: Color(0xFF22d3ee)),
+        children: [
+          Expanded(
+            child: dashAsync.when(
+              loading: () => const Center(
+                child: CircularProgressIndicator(color: Color(0xFF22d3ee)),
+              ),
+              error: (e, _) => const Center(
+                child: Text('Error loading data',
+                    style: TextStyle(color: Colors.white54)),
+              ),
+              data: (data) => _buildContent(context, data),
             ),
-            error: (e, _) => const Center(
-              child: Text('Error loading data',
-                  style: TextStyle(color: Colors.white54)),
-            ),
-            data: (data) => _buildContent(context, data),
           ),
-        ),
-      ],
+        ],
       ),
     );
   }
 
   // MAIN SCROLLABLE CONTENT
   Widget _buildContent(BuildContext context, Map<String, dynamic> data) {
-    // Extract DB values
     final safetyScore   = data['safety_score']        as double? ?? 0.0;
     final totalDriveHrs = data['total_drive_hrs']      as double? ?? 0.0;
     final alertsLast24h = data['alerts_last_24h']      as int?    ?? 0;
@@ -70,11 +74,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final avgAlertness  = data['avg_alertness_pct']    as double? ?? 0.0;
     final snapshots     = (data['alertness_snapshots'] as List<Map<String, dynamic>>?) ?? [];
 
-    // Score label
     String scoreLabel = 'EXCELLENT';
-    if (safetyScore < 60)      scoreLabel = 'POOR';
-    else if (safetyScore < 75) scoreLabel = 'FAIR';
-    else if (safetyScore < 90) scoreLabel = 'GOOD';
+    if (safetyScore < 60)       scoreLabel = 'POOR';
+    else if (safetyScore < 75)  scoreLabel = 'FAIR';
+    else if (safetyScore < 90)  scoreLabel = 'GOOD';
 
     final isMobile = Responsive.isMobile(context);
 
@@ -154,7 +157,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       ),
       child: Stack(
         children: [
-          // Top gradient bar
           Positioned(
             top: 0, left: 0, right: 0,
             child: Container(
@@ -168,8 +170,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ),
             ),
           ),
-
-          // Main content
           Center(
             child: Padding(
               padding: EdgeInsets.all(
@@ -211,20 +211,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // Outer ring shadow
           Container(
             width: outerSize, height: outerSize,
             decoration: BoxDecoration(
               color: const Color(0xFF0f172a),
               shape: BoxShape.circle,
               boxShadow: [
-                BoxShadow(color: const Color(0xFF0b1120).withOpacity(0.8), offset: const Offset(6, 6),   blurRadius: 12),
-                BoxShadow(color: const Color(0xFF1e293b).withOpacity(0.8), offset: const Offset(-6, -6), blurRadius: 12),
+                BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.8), offset: const Offset(6, 6),   blurRadius: 12),
+                BoxShadow(color: const Color(0xFF1e293b).withValues(alpha: 0.8), offset: const Offset(-6, -6), blurRadius: 12),
               ],
             ),
           ),
-
-          // Progress ring — DB driven
           SizedBox(
             width: progressSize, height: progressSize,
             child: CircularProgressIndicator(
@@ -235,8 +232,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               strokeCap: StrokeCap.round,
             ),
           ),
-
-          // Inner circle with score
           Container(
             width: innerSize, height: innerSize,
             decoration: BoxDecoration(
@@ -275,7 +270,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  // QUICK STATS GRID 
+  // QUICK STATS GRID
   Widget _buildQuickStatsGrid(
     BuildContext context, {
     required double totalDriveHrs,
@@ -291,10 +286,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       crossAxisSpacing: Responsive.responsiveSpacing(context, mobile: 12, tablet: 14, desktop: 16),
       childAspectRatio: Responsive.responsiveValue(context, mobile: 1.0, tablet: 1.4, desktop: 2.1),
       children: [
-        _StatCard(icon: Icons.access_time_outlined,          label: 'Total Drive Time', value: '${totalDriveHrs.toStringAsFixed(1)} hrs', subtext: 'Last 30 days',                               accent: false),
-        _StatCard(icon: Icons.shield_outlined,                label: 'Alert Triggered',  value: '$alertsLast24h',                           subtext: 'Last 24 hours',                              accent: true),
+        _StatCard(icon: Icons.access_time_outlined,          label: 'Total Drive Time', value: '${totalDriveHrs.toStringAsFixed(1)} hrs', subtext: 'Last 30 days',                                    accent: false),
+        _StatCard(icon: Icons.shield_outlined,                label: 'Alert Triggered',  value: '$alertsLast24h',                           subtext: 'Last 24 hours',                                   accent: true),
         _StatCard(icon: Icons.local_fire_department_outlined, label: 'Safety Streak',    value: '$safetyStreak days',                        subtext: safetyStreak > 0 ? 'No incidents' : 'Stay alert!', accent: false),
-        _StatCard(icon: Icons.trending_up,                    label: 'Avg Alertness',    value: '${avgAlertness.toStringAsFixed(0)}%',        subtext: 'Last 7 days',                                accent: false),
+        _StatCard(icon: Icons.trending_up,                    label: 'Avg Alertness',    value: '${avgAlertness.toStringAsFixed(0)}%',        subtext: 'Last 7 days',                                     accent: false),
       ],
     );
   }
@@ -412,8 +407,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       show: true,
                       gradient: LinearGradient(
                         colors: [
-                          const Color(0xFF22d3ee).withOpacity(0.3),
-                          const Color(0xFF22d3ee).withOpacity(0.0),
+                          const Color(0xFF22d3ee).withValues(alpha: 0.3),
+                          const Color(0xFF22d3ee).withValues(alpha: 0.0),
                         ],
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
@@ -441,7 +436,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 }
 
-// REUSABLE STAT CARD 
+// REUSABLE STAT CARD
 class _StatCard extends StatefulWidget {
   final IconData icon;
   final String label, value, subtext;
@@ -492,7 +487,6 @@ class _StatCardState extends State<_StatCard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // Icon + pulse dot
               Row(
                 mainAxisAlignment: MainAxisAlignment.start,
                 children: [
@@ -502,7 +496,7 @@ class _StatCardState extends State<_StatCard> {
                     ),
                     decoration: BoxDecoration(
                       color: widget.accent
-                          ? const Color(0xFF22d3ee).withOpacity(0.1)
+                          ? const Color(0xFF22d3ee).withValues(alpha: 0.1)
                           : const Color(0xFF1e293b),
                       borderRadius: BorderRadius.circular(
                         Responsive.responsiveBorderRadius(context, mobile: 10, tablet: 11, desktop: 12),
@@ -527,7 +521,7 @@ class _StatCardState extends State<_StatCard> {
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xFF22d3ee).withOpacity(0.4),
+                              color: const Color(0xFF22d3ee).withValues(alpha: 0.4),
                               blurRadius: 8, spreadRadius: 2,
                             ),
                           ],
@@ -536,8 +530,6 @@ class _StatCardState extends State<_StatCard> {
                     ),
                 ],
               ),
-
-              // Label / value / subtext
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [

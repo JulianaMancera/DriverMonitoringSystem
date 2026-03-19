@@ -3,13 +3,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import '../core/database/database_helper.dart';
+import '../core/database/db_change_notifier.dart';
 import '../utils/responsive.dart';
 
 // RIVERPOD PROVIDERS
 final analyticsFilterProvider = StateProvider<int?>((ref) => 7);
 
+// Watches dbChangeCounterProvider — auto re-fetches whenever
+// monitor_screen increments the counter (on session start/stop/alert)
 final analyticsDataProvider =
     FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
+  ref.watch(dbChangeCounterProvider); // ← this is all that's needed
   final days = ref.watch(analyticsFilterProvider);
   return await DatabaseHelper.instance.getAnalyticsSummary(days: days);
 });
@@ -25,38 +29,49 @@ class AnalyticsScreen extends ConsumerStatefulWidget {
 class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
 
   @override
+  void initState() {
+    super.initState();
+    // No manual listeners needed — the provider watches
+    // dbChangeCounterProvider and re-fetches automatically
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final analyticsAsync = ref.watch(analyticsDataProvider);
     final selectedDays   = ref.watch(analyticsFilterProvider);
     final isMobile       = Responsive.isMobile(context);
     final isTablet       = Responsive.isTablet(context);
 
-    // No Scaffold/SafeArea — nav shell handles that
     return ColoredBox(
       color: const Color(0xFF080E1A),
       child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildHeader(selectedDays),
-        Expanded(
-          child: analyticsAsync.when(
-            loading: () => const Center(
-              child: CircularProgressIndicator(color: Color(0xFF22d3ee)),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildHeader(selectedDays),
+          Expanded(
+            child: analyticsAsync.when(
+              loading: () => const Center(
+                child: CircularProgressIndicator(color: Color(0xFF22d3ee)),
+              ),
+              error: (e, _) => const Center(
+                child: Text('Error loading analytics',
+                    style: TextStyle(color: Colors.white54)),
+              ),
+              data: (data) => _buildContent(context, data, isMobile, isTablet),
             ),
-            error: (e, _) => const Center(
-              child: Text('Error loading analytics',
-                  style: TextStyle(color: Colors.white54)),
-            ),
-            data: (data) => _buildContent(context, data, isMobile, isTablet),
           ),
-        ),
-      ],
+        ],
       ),
     );
   }
 
   // HEADER + FILTER TABS
-    Widget _buildHeader(int? selectedDays) {
+  Widget _buildHeader(int? selectedDays) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
       child: Container(
@@ -66,11 +81,11 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
           color: const Color(0xFF0f172a),
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
-            BoxShadow(color: const Color(0xFF0b1120).withOpacity(0.8), offset: const Offset(4, 4),   blurRadius: 8),
-            BoxShadow(color: const Color(0xFF1e293b).withOpacity(0.8), offset: const Offset(-4, -4), blurRadius: 8),
+            BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.8), offset: const Offset(4, 4),   blurRadius: 8),
+            BoxShadow(color: const Color(0xFF1e293b).withValues(alpha: 0.8), offset: const Offset(-4, -4), blurRadius: 8),
           ],
         ),
-        child: IntrinsicWidth(  
+        child: IntrinsicWidth(
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -99,7 +114,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
           color: isSelected ? const Color(0xFF1e293b) : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
           boxShadow: isSelected
-              ? [BoxShadow(color: const Color(0xFF0b1120).withOpacity(0.6), offset: const Offset(2, 2), blurRadius: 4)]
+              ? [BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.6), offset: const Offset(2, 2), blurRadius: 4)]
               : [],
         ),
         child: Text(
@@ -121,13 +136,12 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     bool isMobile,
     bool isTablet,
   ) {
-    // Extract DB values
     final totalSessions     = data['total_sessions']     as int? ?? 0;
     final totalAlerts       = data['total_alerts']       as int? ?? 0;
     final drowsinessEvents  = data['drowsiness_events']  as int? ?? 0;
     final distractionEvents = data['distraction_events'] as int? ?? 0;
-    final dailyTrends       = (data['daily_trends']         as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
-    final hourlyDist        = (data['hourly_distribution']  as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
+    final dailyTrends       = (data['daily_trends']        as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
+    final hourlyDist        = (data['hourly_distribution'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
 
     return RefreshIndicator(
       color: const Color(0xFF22d3ee),
@@ -141,7 +155,6 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Summary Cards
             _buildSummaryCards(
               context,
               isMobile: isMobile,
@@ -151,17 +164,13 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
               drowsinessEvents: drowsinessEvents,
               distractionEvents: distractionEvents,
             ),
-
             SizedBox(height: Responsive.responsiveSpacing(context, mobile: 24, tablet: 28, desktop: 32)),
-
-            // Charts
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: isMobile || isTablet
                   ? _buildMobileChartsLayout(context, dailyTrends, hourlyDist)
                   : _buildDesktopChartsLayout(context, dailyTrends, hourlyDist),
             ),
-
             SizedBox(height: isMobile ? 96 : 32),
           ],
         ),
@@ -182,18 +191,18 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
       child: GridView.count(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: isMobile ? 2 : 4,
-      mainAxisSpacing:  Responsive.responsiveSpacing(context, mobile: 12, tablet: 14, desktop: 16),
-      crossAxisSpacing: Responsive.responsiveSpacing(context, mobile: 12, tablet: 14, desktop: 16),
-      childAspectRatio: Responsive.responsiveValue(context, mobile: 0.95, tablet: 1.2, desktop: 1.5),
-      children: [
-        _HoverableSummaryCard(icon: Icons.timer_outlined,          label: 'Total Sessions',     value: '$totalSessions',     change: '+12%', isPositive: true),
-        _HoverableSummaryCard(icon: Icons.warning_amber_outlined,  label: 'Total Alerts',       value: '$totalAlerts',       change: '-8%',  isPositive: true),
-        _HoverableSummaryCard(icon: Icons.bedtime_outlined,        label: 'Drowsiness Events',  value: '$drowsinessEvents',  change: '-15%', isPositive: true),
-        _HoverableSummaryCard(icon: Icons.visibility_off_outlined, label: 'Distraction Events', value: '$distractionEvents', change: '+5%',  isPositive: false),
-      ],
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        crossAxisCount: isMobile ? 2 : 4,
+        mainAxisSpacing:  Responsive.responsiveSpacing(context, mobile: 12, tablet: 14, desktop: 16),
+        crossAxisSpacing: Responsive.responsiveSpacing(context, mobile: 12, tablet: 14, desktop: 16),
+        childAspectRatio: Responsive.responsiveValue(context, mobile: 0.95, tablet: 1.2, desktop: 1.5),
+        children: [
+          _HoverableSummaryCard(icon: Icons.timer_outlined,          label: 'Total Sessions',     value: '$totalSessions',     change: '+12%', isPositive: true),
+          _HoverableSummaryCard(icon: Icons.warning_amber_outlined,  label: 'Total Alerts',       value: '$totalAlerts',       change: '-8%',  isPositive: true),
+          _HoverableSummaryCard(icon: Icons.bedtime_outlined,        label: 'Drowsiness Events',  value: '$drowsinessEvents',  change: '-15%', isPositive: true),
+          _HoverableSummaryCard(icon: Icons.visibility_off_outlined, label: 'Distraction Events', value: '$distractionEvents', change: '+5%',  isPositive: false),
+        ],
       ),
     );
   }
@@ -233,7 +242,6 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     BuildContext context,
     List<Map<String, dynamic>> dailyTrends,
   ) {
-    // Build spots — DB data or fallback
     List<FlSpot> drowsySpots;
     List<FlSpot> distractedSpots;
 
@@ -272,8 +280,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Drowsiness vs Distraction Trends',
+                Text('Drowsiness vs Distraction Trends',
                   style: TextStyle(
                     fontSize:   Responsive.responsiveFont(context, mobile: 15, tablet: 16, desktop: 17),
                     fontWeight: FontWeight.w600,
@@ -294,8 +301,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  'Drowsiness vs Distraction Trends',
+                Text('Drowsiness vs Distraction Trends',
                   style: TextStyle(
                     fontSize:   Responsive.responsiveFont(context, mobile: 15, tablet: 16, desktop: 17),
                     fontWeight: FontWeight.w600,
@@ -366,10 +372,8 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
                   ),
                 ),
                 borderData: FlBorderData(show: false),
-                minX: 0,
-                maxX: 6,
-                minY: 0,
-                maxY: 20,
+                minX: 0, maxX: 6,
+                minY: 0, maxY: 20,
                 lineBarsData: [
                   LineChartBarData(
                     spots: drowsySpots,
@@ -422,8 +426,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 6),
-        Text(
-          label,
+        Text(label,
           style: TextStyle(
             fontSize: Responsive.responsiveFont(context, mobile: 11, tablet: 12, desktop: 13),
             color: const Color(0xFF94a3b8),
@@ -475,8 +478,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Hourly Alert Distribution',
+          Text('Hourly Alert Distribution',
             style: TextStyle(
               fontSize:   Responsive.responsiveFont(context, mobile: 15, tablet: 16, desktop: 17),
               fontWeight: FontWeight.w600,
@@ -566,7 +568,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
   }
 }
 
-// HOVERABLE SUMMARY CARD 
+// HOVERABLE SUMMARY CARD
 class _HoverableSummaryCard extends StatefulWidget {
   final IconData icon;
   final String label, value, change;
@@ -600,8 +602,8 @@ class _HoverableSummaryCardState extends State<_HoverableSummaryCard> {
           ),
           boxShadow: isHovered
               ? [
-                  BoxShadow(color: const Color(0xFF0b1120).withOpacity(0.8), offset: const Offset(-3, -3), blurRadius: 6),
-                  BoxShadow(color: const Color(0xFF1e293b).withOpacity(0.8), offset: const Offset(3, 3),   blurRadius: 6),
+                  BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.8), offset: const Offset(-3, -3), blurRadius: 6),
+                  BoxShadow(color: const Color(0xFF1e293b).withValues(alpha: 0.8), offset: const Offset(3, 3),   blurRadius: 6),
                 ]
               : const [
                   BoxShadow(color: Color(0xFF0b1120), offset: Offset(6, 6),   blurRadius: 12),
@@ -615,7 +617,6 @@ class _HoverableSummaryCardState extends State<_HoverableSummaryCard> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            // Icon + change badge
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -640,8 +641,8 @@ class _HoverableSummaryCardState extends State<_HoverableSummaryCard> {
                   ),
                   decoration: BoxDecoration(
                     color: widget.isPositive
-                        ? const Color(0xFF10b981).withOpacity(0.1)
-                        : const Color(0xFFef4444).withOpacity(0.1),
+                        ? const Color(0xFF10b981).withValues(alpha: 0.1)
+                        : const Color(0xFFef4444).withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Row(
@@ -649,9 +650,7 @@ class _HoverableSummaryCardState extends State<_HoverableSummaryCard> {
                       Icon(
                         widget.isPositive ? Icons.trending_down : Icons.trending_up,
                         size:  Responsive.responsiveIconSize(context, mobile: 11, tablet: 12, desktop: 14),
-                        color: widget.isPositive
-                            ? const Color(0xFF10b981)
-                            : const Color(0xFFef4444),
+                        color: widget.isPositive ? const Color(0xFF10b981) : const Color(0xFFef4444),
                       ),
                       const SizedBox(width: 2),
                       Text(
@@ -659,9 +658,7 @@ class _HoverableSummaryCardState extends State<_HoverableSummaryCard> {
                         style: TextStyle(
                           fontSize:   Responsive.responsiveFont(context, mobile: 9, tablet: 10, desktop: 12),
                           fontWeight: FontWeight.w600,
-                          color:      widget.isPositive
-                              ? const Color(0xFF10b981)
-                              : const Color(0xFFef4444),
+                          color:      widget.isPositive ? const Color(0xFF10b981) : const Color(0xFFef4444),
                         ),
                       ),
                     ],
@@ -669,13 +666,10 @@ class _HoverableSummaryCardState extends State<_HoverableSummaryCard> {
                 ),
               ],
             ),
-
-            // Value + label
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  widget.value,
+                Text(widget.value,
                   style: TextStyle(
                     fontSize:   Responsive.responsiveFont(context, mobile: 24, tablet: 28, desktop: 32),
                     fontWeight: FontWeight.bold,
@@ -683,8 +677,7 @@ class _HoverableSummaryCardState extends State<_HoverableSummaryCard> {
                   ),
                 ),
                 SizedBox(height: Responsive.responsiveSpacing(context, mobile: 4, tablet: 5, desktop: 6)),
-                Text(
-                  widget.label,
+                Text(widget.label,
                   style: TextStyle(
                     fontSize: Responsive.responsiveFont(context, mobile: 10, tablet: 11, desktop: 13),
                     color:    const Color(0xFF64748b),
