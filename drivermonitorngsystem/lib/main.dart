@@ -73,8 +73,8 @@ class MainShell extends ConsumerWidget {
     const DashboardScreen(),
     const MonitorScreen(),
     const AnalyticsScreen(),
-    const HistoryScreen(),             
-    const SettingsScreen(),          
+    const HistoryScreen(),             // ← index 3
+    const SettingsScreen(),            // ← index 4
   ];
 
   @override
@@ -173,7 +173,7 @@ class MainShell extends ConsumerWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BOTTOM NAV
+// BOTTOM NAV — Telegram-style sliding pill indicator
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _BottomNav extends StatelessWidget {
@@ -182,14 +182,21 @@ class _BottomNav extends StatelessWidget {
 
   const _BottomNav({required this.currentIndex, required this.onTap});
 
+  static const List<_NavData> _items = [
+    _NavData(icon: Icons.home_rounded,      label: 'Home'),
+    _NavData(icon: Icons.videocam_rounded,  label: 'Monitor'),
+    _NavData(icon: Icons.bar_chart_rounded, label: 'Analytics'),
+    _NavData(icon: Icons.history_rounded,   label: 'History'),
+    _NavData(icon: Icons.settings_rounded,  label: 'Settings'),
+  ];
+
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0D1627),
         border: Border(
-          top: BorderSide(
-              color: Colors.white.withOpacity(0.05), width: 1),
+          top: BorderSide(color: Colors.white.withOpacity(0.05), width: 1),
         ),
         boxShadow: [
           BoxShadow(
@@ -200,17 +207,78 @@ class _BottomNav extends StatelessWidget {
         ],
       ),
       child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _NavItem(icon: Icons.home_rounded,      label: 'Home',      index: 0, currentIndex: currentIndex, onTap: onTap),
-              _NavItem(icon: Icons.videocam_rounded,  label: 'Monitor',   index: 1, currentIndex: currentIndex, onTap: onTap),
-              _NavItem(icon: Icons.bar_chart_rounded, label: 'Analytics', index: 2, currentIndex: currentIndex, onTap: onTap),
-              _NavItem(icon: Icons.history_rounded,   label: 'History',   index: 3, currentIndex: currentIndex, onTap: onTap),
-              _NavItem(icon: Icons.settings_rounded,  label: 'Settings',  index: 4, currentIndex: currentIndex, onTap: onTap),
-            ],
+        child: SizedBox(
+          height: 56,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final totalWidth = constraints.maxWidth;
+              final itemWidth  = totalWidth / _items.length;
+              const pillWidth  = 48.0;
+              const pillHeight = 40.0;
+              final pillLeft   = currentIndex * itemWidth + (itemWidth - pillWidth) / 2;
+
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+
+                  // ── SLIDING PILL ──────────────────────────────────────
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 280),
+                    curve: Curves.easeInOutCubic,
+                    left: pillLeft,
+                    top: (56 - pillHeight) / 2,
+                    child: Container(
+                      width: pillWidth,
+                      height: pillHeight,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF00D4FF).withOpacity(0.13),
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF00D4FF).withOpacity(0.15),
+                            blurRadius: 10,
+                            spreadRadius: 1,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // ── ICONS ─────────────────────────────────────────────
+                  Row(
+                    children: _items.asMap().entries.map((entry) {
+                      final i      = entry.key;
+                      final item   = entry.value;
+                      final active = i == currentIndex;
+
+                      return GestureDetector(
+                        onTap: () => onTap(i),
+                        behavior: HitTestBehavior.opaque,
+                        child: SizedBox(
+                          width: itemWidth,
+                          height: 56,
+                          child: Center(
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 200),
+                              transitionBuilder: (child, anim) =>
+                                  ScaleTransition(scale: anim, child: child),
+                              child: Icon(
+                                item.icon,
+                                key: ValueKey('nav_${i}_$active'),
+                                size: active ? 25 : 23,
+                                color: active
+                                    ? const Color(0xFF00D4FF)
+                                    : Colors.white38,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ),
@@ -218,40 +286,8 @@ class _BottomNav extends StatelessWidget {
   }
 }
 
-class _NavItem extends StatelessWidget {
+class _NavData {
   final IconData icon;
   final String label;
-  final int index;
-  final int currentIndex;
-  final ValueChanged<int> onTap;
-
-  const _NavItem({
-    required this.icon,
-    required this.label,
-    required this.index,
-    required this.currentIndex,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isActive = index == currentIndex;
-    return GestureDetector(
-      onTap: () => onTap(index),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-        decoration: BoxDecoration(
-          color: isActive
-              ? const Color(0xFF00D4FF).withOpacity(0.15)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Icon(
-          icon,
-          color: isActive ? const Color(0xFF00D4FF) : Colors.white38,
-          size: 24,
-        ),
-      ),
-    );
-  }
+  const _NavData({required this.icon, required this.label});
 }
