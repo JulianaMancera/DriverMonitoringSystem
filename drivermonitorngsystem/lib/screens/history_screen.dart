@@ -53,15 +53,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // Watch the counter — when monitor_screen increments it,
-    // this screen reloads its session list automatically
-    final counter = ref.watch(dbChangeCounterProvider);
-    if (counter > 0) _loadSessions();
-  }
-
-  @override
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
@@ -249,6 +240,14 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // ── AUTO-REFRESH ───────────────────────────────────────────────────────
+    // ref.listen fires every time dbChangeCounterProvider increments
+    // (i.e. when monitor_screen starts/stops recording or triggers an alert)
+    // This is the correct Riverpod way to trigger side effects on state change
+    ref.listen<int>(dbChangeCounterProvider, (previous, next) {
+      if (next > (previous ?? 0)) _loadSessions();
+    });
+
     return Scaffold(
       backgroundColor: _bg,
       body: Column(
