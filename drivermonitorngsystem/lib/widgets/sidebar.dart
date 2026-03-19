@@ -1,5 +1,12 @@
 import 'package:flutter/material.dart';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// sidebar.dart
+// Bantay Drive — Sidebar / Bottom Nav
+// Mobile: sliding pill indicator (Telegram-style) on bottom nav
+// Desktop: sliding highlight on sidebar
+// ─────────────────────────────────────────────────────────────────────────────
+
 class Sidebar extends StatelessWidget {
   final String activeTab;
   final Function(String) onTabChanged;
@@ -19,45 +26,48 @@ class Sidebar extends StatelessWidget {
         : _buildDesktopSidebar(context);
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // MOBILE BOTTOM NAV — sliding pill indicator
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildMobileNavBar(BuildContext context) {
-    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
-
-    // Adjusted sizes to match the goal UI proportions
+    final isLandscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
     final double barHeight = isLandscape ? 56 : 72;
-    final double btnSize = isLandscape ? 40 : 48;
-    final double iconSize = isLandscape ? 18 : 22;
+    final double btnSize   = isLandscape ? 40 : 48;
+    final double iconSize  = isLandscape ? 18 : 22;
+    final items = _getNavItems();
 
-    final List<Widget> items = [
-      ..._getNavItems().map((item) => _NavButton(
-            item: item,
-            isMobile: true,
-            isActive: activeTab == item.id,
-            btnSize: btnSize,
-            iconSize: iconSize,
-            onTap: () => onTabChanged(item.id),
-          )),
-      _UserButton(btnSize: btnSize, iconSize: iconSize),
-    ];
+    // Find index of active tab for sliding pill position
+    final activeIndex = items.indexWhere((i) => i.id == activeTab);
 
     return Container(
       height: barHeight,
-      decoration: const BoxDecoration(
-        color: Color(0xFF0f172a),
-      ),
+      decoration: const BoxDecoration(color: Color(0xFF0f172a)),
       child: SafeArea(
         top: false,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: items,
+          child: _SlidingNavBar(
+            items: items,
+            activeIndex: activeIndex,
+            btnSize: btnSize,
+            iconSize: iconSize,
+            onTabChanged: onTabChanged,
           ),
         ),
       ),
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // DESKTOP SIDEBAR — sliding highlight
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildDesktopSidebar(BuildContext context) {
+    final items       = _getNavItems();
+    final activeIndex = items.indexWhere((i) => i.id == activeTab);
+
     return Container(
       width: 96,
       color: const Color(0xFF0f172a),
@@ -67,23 +77,10 @@ class Sidebar extends StatelessWidget {
           const Icon(Icons.show_chart, size: 32, color: Color(0xFF22d3ee)),
           const SizedBox(height: 32),
           Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                children: _getNavItems()
-                    .map((item) => Padding(
-                          padding: const EdgeInsets.only(bottom: 24),
-                          child: _NavButton(
-                            item: item,
-                            isMobile: false,
-                            isActive: activeTab == item.id,
-                            btnSize: 64,
-                            iconSize: 24,
-                            onTap: () => onTabChanged(item.id),
-                          ),
-                        ))
-                    .toList(),
-              ),
+            child: _SlidingDesktopNav(
+              items: items,
+              activeIndex: activeIndex,
+              onTabChanged: onTabChanged,
             ),
           ),
           const _UserButton(btnSize: 48, iconSize: 20),
@@ -95,104 +92,275 @@ class Sidebar extends StatelessWidget {
 
   List<NavItem> _getNavItems() {
     return [
-      NavItem(id: 'home', icon: Icons.home, label: 'Home'),
-      NavItem(id: 'monitor', icon: Icons.videocam, label: 'Monitor'),
+      NavItem(id: 'home',      icon: Icons.home,      label: 'Home'),
+      NavItem(id: 'monitor',   icon: Icons.videocam,  label: 'Monitor'),
       NavItem(id: 'analytics', icon: Icons.analytics, label: 'Analytics'),
-      NavItem(id: 'settings', icon: Icons.settings, label: 'Settings'),
+      NavItem(id: 'history',   icon: Icons.history,   label: 'History'),
+      NavItem(id: 'settings',  icon: Icons.settings,  label: 'Settings'),
     ];
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SLIDING MOBILE NAV BAR
+// Uses a Stack: sliding pill behind, icons on top
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SlidingNavBar extends StatefulWidget {
+  final List<NavItem> items;
+  final int activeIndex;
+  final double btnSize;
+  final double iconSize;
+  final Function(String) onTabChanged;
+
+  const _SlidingNavBar({
+    required this.items,
+    required this.activeIndex,
+    required this.btnSize,
+    required this.iconSize,
+    required this.onTabChanged,
+  });
+
+  @override
+  State<_SlidingNavBar> createState() => _SlidingNavBarState();
+}
+
+class _SlidingNavBarState extends State<_SlidingNavBar> {
+  // Total items = nav items + user button
+  int get _totalItems => widget.items.length + 1;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final totalWidth   = constraints.maxWidth;
+        final itemWidth    = totalWidth / _totalItems;
+        final pillWidth    = widget.btnSize;
+        // Center the pill within the item slot
+        final pillOffset   = (itemWidth - pillWidth) / 2;
+        final pillLeft     = widget.activeIndex * itemWidth + pillOffset;
+
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+
+            // ── SLIDING PILL ───────────────────────────────────────────────
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 280),
+              curve: Curves.easeInOutCubic,
+              left: pillLeft,
+              top: (constraints.maxHeight - widget.btnSize) / 2,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 280),
+                curve: Curves.easeInOutCubic,
+                width: pillWidth,
+                height: widget.btnSize,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0f172a),
+                  borderRadius: BorderRadius.circular(14),
+                  // Inset shadow = pressed/sunken look for active
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF0b1120).withOpacity(0.9),
+                      offset: const Offset(3, 3),
+                      blurRadius: 6,
+                    ),
+                    BoxShadow(
+                      color: const Color(0xFF1e293b).withOpacity(0.9),
+                      offset: const Offset(-3, -3),
+                      blurRadius: 6,
+                    ),
+                    // Cyan glow on active pill
+                    BoxShadow(
+                      color: const Color(0xFF22d3ee).withOpacity(0.12),
+                      blurRadius: 12,
+                      spreadRadius: 1,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // ── NAV ICONS ──────────────────────────────────────────────────
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                ...widget.items.asMap().entries.map((entry) {
+                  final i      = entry.key;
+                  final item   = entry.value;
+                  final active = i == widget.activeIndex;
+
+                  return GestureDetector(
+                    onTap: () => widget.onTabChanged(item.id),
+                    behavior: HitTestBehavior.opaque,
+                    child: SizedBox(
+                      width: itemWidth,
+                      height: widget.btnSize,
+                      child: Center(
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 220),
+                          transitionBuilder: (child, anim) => ScaleTransition(
+                            scale: anim,
+                            child: child,
+                          ),
+                          child: Icon(
+                            item.icon,
+                            key: ValueKey('${item.id}_$active'),
+                            size: active
+                                ? widget.iconSize + 1
+                                : widget.iconSize,
+                            color: active
+                                ? const Color(0xFF22d3ee)
+                                : const Color(0xFF64748b),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+
+                // User button slot
+                SizedBox(
+                  width: itemWidth,
+                  height: widget.btnSize,
+                  child: Center(
+                    child: Icon(
+                      Icons.person_outline,
+                      size: widget.iconSize,
+                      color: const Color(0xFF64748b),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SLIDING DESKTOP NAV
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SlidingDesktopNav extends StatefulWidget {
+  final List<NavItem> items;
+  final int activeIndex;
+  final Function(String) onTabChanged;
+
+  const _SlidingDesktopNav({
+    required this.items,
+    required this.activeIndex,
+    required this.onTabChanged,
+  });
+
+  @override
+  State<_SlidingDesktopNav> createState() => _SlidingDesktopNavState();
+}
+
+class _SlidingDesktopNavState extends State<_SlidingDesktopNav> {
+  static const double _btnSize    = 64.0;
+  static const double _spacing    = 24.0;
+  static const double _itemHeight = _btnSize + _spacing;
+
+  @override
+  Widget build(BuildContext context) {
+    final pillTop = widget.activeIndex * _itemHeight;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: SizedBox(
+        width: double.infinity,
+        child: Stack(
+          children: [
+
+            // ── SLIDING HIGHLIGHT ──────────────────────────────────────────
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 280),
+              curve: Curves.easeInOutCubic,
+              top: pillTop,
+              left: 0,
+              right: 0,
+              child: Container(
+                width: _btnSize,
+                height: _btnSize,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0f172a),
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF0b1120).withOpacity(0.9),
+                      offset: const Offset(3, 3),
+                      blurRadius: 6,
+                    ),
+                    BoxShadow(
+                      color: const Color(0xFF1e293b).withOpacity(0.9),
+                      offset: const Offset(-3, -3),
+                      blurRadius: 6,
+                    ),
+                    BoxShadow(
+                      color: const Color(0xFF22d3ee).withOpacity(0.12),
+                      blurRadius: 14,
+                      spreadRadius: 1,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // ── ICONS ──────────────────────────────────────────────────────
+            Column(
+              children: widget.items.asMap().entries.map((entry) {
+                final i      = entry.key;
+                final item   = entry.value;
+                final active = i == widget.activeIndex;
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: _spacing),
+                  child: GestureDetector(
+                    onTap: () => widget.onTabChanged(item.id),
+                    child: SizedBox(
+                      width: _btnSize,
+                      height: _btnSize,
+                      child: Center(
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 220),
+                          transitionBuilder: (child, anim) => ScaleTransition(
+                            scale: anim,
+                            child: child,
+                          ),
+                          child: Icon(
+                            item.icon,
+                            key: ValueKey('${item.id}_$active'),
+                            size: active ? 26 : 24,
+                            color: active
+                                ? const Color(0xFF22d3ee)
+                                : const Color(0xFF64748b),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SHARED WIDGETS
+// ─────────────────────────────────────────────────────────────────────────────
 
 class NavItem {
   final String id;
   final IconData icon;
   final String label;
   NavItem({required this.id, required this.icon, required this.label});
-}
-
-// Neumorphic Buttons
-class _NavButton extends StatefulWidget {
-  final NavItem item;
-  final bool isMobile;
-  final bool isActive;
-  final double btnSize;
-  final double iconSize;
-  final VoidCallback onTap;
-
-  const _NavButton({
-    required this.item,
-    required this.isMobile,
-    required this.isActive,
-    required this.btnSize,
-    required this.iconSize,
-    required this.onTap,
-  });
-
-  @override
-  State<_NavButton> createState() => _NavButtonState();
-}
-
-class _NavButtonState extends State<_NavButton> {
-  bool isHovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final bool isPressed = widget.isActive || isHovered;
-
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => isHovered = true),
-      onExit: (_) => setState(() => isHovered = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          width: widget.btnSize,
-          height: widget.btnSize,
-          decoration: BoxDecoration(
-            color: const Color(0xFF0f172a),
-            borderRadius: BorderRadius.circular(12),
-            // Outward shadows for unselected state
-            boxShadow: !isPressed
-                ? const [
-                    BoxShadow(
-                        color: Color(0xFF0b1120),
-                        offset: Offset(4, 4),
-                        blurRadius: 8),
-                    BoxShadow(
-                        color: Color(0xFF1e293b),
-                        offset: Offset(-4, -4),
-                        blurRadius: 8),
-                  ]
-                : null,
-          ),
-          child: Stack(
-            children: [
-              if (isPressed)
-                Positioned.fill(
-                  child: CustomPaint(
-                    painter: _InnerShadowPainter(
-                      borderRadius: 12,
-                      shadowColor: const Color(0xFF0b1120),
-                      lightColor: const Color(0xFF1e293b),
-                    ),
-                  ),
-                ),
-              Center(
-                child: Icon(
-                  widget.item.icon,
-                  size: widget.iconSize,
-                  color: widget.isActive
-                      ? const Color(0xFF22d3ee)
-                      : const Color(0xFF64748b),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 class _UserButton extends StatelessWidget {
@@ -210,54 +378,17 @@ class _UserButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         boxShadow: const [
           BoxShadow(
-              color: Color(0xFF0b1120), offset: Offset(4, 4), blurRadius: 8),
+              color: Color(0xFF0b1120),
+              offset: Offset(4, 4),
+              blurRadius: 8),
           BoxShadow(
-              color: Color(0xFF1e293b), offset: Offset(-4, -4), blurRadius: 8),
+              color: Color(0xFF1e293b),
+              offset: Offset(-4, -4),
+              blurRadius: 8),
         ],
       ),
       child: Icon(Icons.person_outline,
           size: iconSize, color: const Color(0xFF64748b)),
     );
   }
-}
-
-//Custom Painter for that "Sunken" Look 
-class _InnerShadowPainter extends CustomPainter {
-  final double borderRadius;
-  final Color shadowColor;
-  final Color lightColor;
-
-  _InnerShadowPainter({
-    required this.borderRadius,
-    required this.shadowColor,
-    required this.lightColor,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Offset.zero & size;
-    final rrect = RRect.fromRectAndRadius(rect, Radius.circular(borderRadius));
-
-    canvas.clipRRect(rrect);
-
-    final Paint shadowPaint = Paint()
-      ..color = shadowColor
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 5;
-
-    final Paint lightPaint = Paint()
-      ..color = lightColor
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 5;
-
-    // Draws the dark inset shadow on top/left
-    canvas.drawRRect(rrect.shift(const Offset(2, 2)), shadowPaint);
-    // Draws the light inset highlight on bottom/right
-    canvas.drawRRect(rrect.shift(const Offset(-2, -2)), lightPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
