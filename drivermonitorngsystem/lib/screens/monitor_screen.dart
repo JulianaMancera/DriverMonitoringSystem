@@ -396,7 +396,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   Future<void> _dismissAlert() async {
     // Slide the notification back up before hiding
-    if (_alertLevel < 3 && (_notifController?.isCompleted ?? false)) {
+    if (_alertLevel < 3 && (_notifController?.status != AnimationStatus.dismissed)) {
       await _notifController?.reverse();
     }
     await _alarmPlayer.stop();
@@ -781,8 +781,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           _buildGradientOverlay(),
           if (isRecording) _buildRecBadge(),
           // Show warning overlay for any alert level
-          if (ref.watch(showAlertBannerProvider))
-            _buildWarningOverlay(ref.watch(alertBannerTypeProvider)),
+          if (ref.watch(showAlertBannerProvider) && _alertLevel == 3)
+             _buildWarningOverlay(ref.watch(alertBannerTypeProvider)),
         ],
       ),
     );
