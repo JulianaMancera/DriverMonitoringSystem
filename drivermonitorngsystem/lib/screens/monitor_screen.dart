@@ -441,42 +441,48 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // BUILD
   // ─────────────────────────────────────────────────────────────────────────
 
-  @override
-  Widget build(BuildContext context) {
-    final isDesktop   = Responsive.isDesktop(context);
-    final isLandscape =
-        MediaQuery.of(context).orientation == Orientation.landscape;
+ @override
+Widget build(BuildContext context) {
+  final isDesktop   = Responsive.isDesktop(context);
+  final isLandscape =
+      MediaQuery.of(context).orientation == Orientation.landscape;
 
-    final showAlert = ref.watch(showAlertBannerProvider);
-    final alertType = ref.watch(alertBannerTypeProvider);
-    final isLevel3  = _alertLevel == 3;
+  final showAlert = ref.watch(showAlertBannerProvider);
+  final alertType = ref.watch(alertBannerTypeProvider);
+  final isLevel3  = _alertLevel == 3;
 
-    return ColoredBox(
-      color: const Color(0xFF080E1A),
-      child: Stack(
-        children: [
-          // Main content — never shifts, banner floats above
-          isDesktop
-              ? _buildDesktopLayout()
-              : isLandscape
-                  ? _buildLandscapeLayout()
-                  : _buildPortraitLayout(),
+  return ColoredBox(
+    color: const Color(0xFF080E1A),
+    child: Stack(
+      children: [
+        // Main content — never shifts, banner floats above
+        isDesktop
+            ? _buildDesktopLayout()
+            : isLandscape
+                ? _buildLandscapeLayout()
+                : _buildPortraitLayout(),
 
-          // Floating iOS-style banner overlay — Level 1 & 2 only
-          if (showAlert && !isLevel3)
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: SafeArea(
-                bottom: false,
-                child: _buildAlertBanner(alertType),
-              ),
+        // Floating iOS-style banner overlay — Level 1 & 2 only
+        if (showAlert && !isLevel3)
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              bottom: false,
+              child: _buildAlertBanner(alertType),
             ),
-        ],
-      ),
-    );
-  }
+          ),
+
+        // ✅ NEW: Level 3 fullscreen overlay — covers entire screen
+        if (showAlert && isLevel3)
+          Positioned.fill(
+            child: _buildWarningOverlay(alertType),
+          ),
+      ],
+    ),
+  );
+}
 
   // ─────────────────────────────────────────────────────────────────────────
   // PORTRAIT LAYOUT
@@ -780,9 +786,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           cameraWidget,
           _buildGradientOverlay(),
           if (isRecording) _buildRecBadge(),
-          // Show warning overlay for any alert level
-          if (ref.watch(showAlertBannerProvider) && _alertLevel == 3)
-             _buildWarningOverlay(ref.watch(alertBannerTypeProvider)),
         ],
       ),
     );
