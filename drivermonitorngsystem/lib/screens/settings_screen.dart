@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:volume_controller/volume_controller.dart';
 import '../core/database/database_helper.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
+import 'dart:async';
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -34,13 +35,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
   static const Color _red           = Color(0xFFFF4757);
   static const Color _divider       = Color(0xFF1E2D45);
 
+  StreamSubscription<double>? _volumeSubscription;
+
   // LIFECYCLE
   @override
   void initState() {
     super.initState();
     _loadSettings();
+
+    // Listen to phone volume button changes 
+    _volumeSubscription = VolumeController.instance.addListener((volume) {
+      if (mounted) setState(() => _alertVolume = volume);
+    }, fetchInitialVolume: true);
   }
 
+  @override
+  void dispose() {
+    _volumeSubscription?.cancel();  
+    super.dispose();
+  }
   /// Load all saved preferences when screen opens
   Future<void> _loadSettings() async {
   final prefs = PreferencesHelper.instance;
