@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:volume_controller/volume_controller.dart';
 import '../core/database/database_helper.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 class SettingsScreen extends StatefulWidget {
@@ -42,23 +43,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// Load all saved preferences when screen opens
   Future<void> _loadSettings() async {
-    final prefs = PreferencesHelper.instance;
+  final prefs = PreferencesHelper.instance;
 
-    final alertVolume     = await prefs.getAlertVolume();
-    final alertSensitivity= await prefs.getAlertSensitivity();
-    final autoStart       = await prefs.getAutoStart();
-    final retention       = await prefs.getRetention();
+  final alertSensitivity = await prefs.getAlertSensitivity();
+  final autoStart        = await prefs.getAutoStart();
+  final retention        = await prefs.getRetention();
 
-    if (mounted) {
-      setState(() {
-        _alertVolume        = alertVolume;
-        _alertSensitivity   = alertSensitivity;
-        _autoStartEnabled   = autoStart;
-        _retentionPeriod    = retention;
-        _isLoading          = false;
-      });
-    }
+  // Read ACTUAL system volume instead of saved preference
+  final systemVolume = await VolumeController.instance.getVolume();
+
+  if (mounted) {
+    setState(() {
+      _alertVolume      = systemVolume;  
+      _alertSensitivity = alertSensitivity;
+      _autoStartEnabled = autoStart;
+      _retentionPeriod  = retention;
+      _isLoading        = false;
+    });
   }
+}
 
   // BUILD
   @override
@@ -91,6 +94,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               displayValue: '${(_alertVolume * 100).round()}%',
               onChanged: (v) {
                 setState(() => _alertVolume = v);
+                // Sets the phone's actual system volume
+                VolumeController.instance.setVolume(v);
                 PreferencesHelper.instance.setAlertVolume(v);
               },
             ),
