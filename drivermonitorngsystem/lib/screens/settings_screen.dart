@@ -38,22 +38,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
   StreamSubscription<double>? _volumeSubscription;
 
   // LIFECYCLE
-  @override
-  void initState() {
-    super.initState();
-    _loadSettings();
+    @override
+      void initState() {
+        super.initState();
+        _loadSettings();
 
-    // Listen to phone volume button changes 
-    _volumeSubscription = VolumeController.instance.addListener((volume) {
-      if (mounted) setState(() => _alertVolume = volume);
-    }, fetchInitialVolume: true);
-  }
+        // Listen to physical buttons → update slider
+        _volumeSubscription = VolumeController.instance.addListener((volume) {
+          if (mounted) setState(() => _alertVolume = volume);
+        }, fetchInitialVolume: true);
+      }
 
-  @override
-  void dispose() {
-    _volumeSubscription?.cancel();  
-    super.dispose();
-  }
+    @override
+      void dispose() {
+        _volumeSubscription?.cancel();
+        super.dispose();
+      }
   /// Load all saved preferences when screen opens
   Future<void> _loadSettings() async {
   final prefs = PreferencesHelper.instance;
@@ -106,10 +106,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               max: 1.0,
               displayValue: '${(_alertVolume * 100).round()}%',
               onChanged: (v) {
-                setState(() => _alertVolume = v);
-                // Sets the phone's actual system volume
-                VolumeController.instance.setVolume(v);
-                PreferencesHelper.instance.setAlertVolume(v);
+              setState(() => _alertVolume = v);
+              VolumeController.instance.setVolume(v);  
+              PreferencesHelper.instance.setAlertVolume(v);
               },
             ),
             _dividerLine(),
