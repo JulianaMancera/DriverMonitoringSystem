@@ -125,10 +125,10 @@ packages:
     dependency: "direct main"
     description:
       name: camera
-      sha256: "46f391e9bbdaa373d15e296abc5de8bfb0dd0d0c7487592dd8f20e8ef980429f"
+      sha256: "034c38cb8014d29698dcae6d20276688a1bf74e6487dfeb274d70ea05d5f7777"
       url: "https://pub.dev"
     source: hosted
-    version: "0.12.0"
+    version: "0.12.0+1"
   camera_android_camerax:
     dependency: transitive
     description:
@@ -933,6 +933,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "15.0.2"
+  volume_controller:
+    dependency: "direct main"
+    description:
+      name: volume_controller
+      sha256: "109c31a8d4f8cb0e18a1a231b1db97cdbc7084cb4f43928051e9fad59916dd09"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.4.3"
   watcher:
     dependency: transitive
     description:

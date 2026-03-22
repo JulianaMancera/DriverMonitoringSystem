@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:volume_controller/volume_controller.dart';
 import '../core/database/database_helper.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
+import 'dart:async';
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -33,32 +35,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
   static const Color _red           = Color(0xFFFF4757);
   static const Color _divider       = Color(0xFF1E2D45);
 
-  // LIFECYCLE
-  @override
-  void initState() {
-    super.initState();
-    _loadSettings();
-  }
+  StreamSubscription<double>? _volumeSubscription;
 
+  // LIFECYCLE
+    @override
+      void initState() {
+        super.initState();
+        _loadSettings();
+
+        // Listen to physical buttons → update slider
+        _volumeSubscription = VolumeController.instance.addListener((volume) {
+          if (mounted) setState(() => _alertVolume = volume);
+        }, fetchInitialVolume: true);
+      }
+
+    @override
+      void dispose() {
+        _volumeSubscription?.cancel();
+        super.dispose();
+      }
   /// Load all saved preferences when screen opens
   Future<void> _loadSettings() async {
-    final prefs = PreferencesHelper.instance;
+  final prefs = PreferencesHelper.instance;
 
-    final alertVolume     = await prefs.getAlertVolume();
-    final alertSensitivity= await prefs.getAlertSensitivity();
-    final autoStart       = await prefs.getAutoStart();
-    final retention       = await prefs.getRetention();
+  final alertSensitivity = await prefs.getAlertSensitivity();
+  final autoStart        = await prefs.getAutoStart();
+  final retention        = await prefs.getRetention();
 
-    if (mounted) {
-      setState(() {
-        _alertVolume        = alertVolume;
-        _alertSensitivity   = alertSensitivity;
-        _autoStartEnabled   = autoStart;
-        _retentionPeriod    = retention;
-        _isLoading          = false;
-      });
-    }
+  // Read ACTUAL system volume instead of saved preference
+  final systemVolume = await VolumeController.instance.getVolume();
+
+  if (mounted) {
+    setState(() {
+      _alertVolume      = systemVolume;  
+      _alertSensitivity = alertSensitivity;
+      _autoStartEnabled = autoStart;
+      _retentionPeriod  = retention;
+      _isLoading        = false;
+    });
   }
+}
 
   // BUILD
   @override
@@ -90,8 +106,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               max: 1.0,
               displayValue: '${(_alertVolume * 100).round()}%',
               onChanged: (v) {
-                setState(() => _alertVolume = v);
-                PreferencesHelper.instance.setAlertVolume(v);
+              setState(() => _alertVolume = v);
+              VolumeController.instance.setVolume(v);  
+              PreferencesHelper.instance.setAlertVolume(v);
               },
             ),
             _dividerLine(),
