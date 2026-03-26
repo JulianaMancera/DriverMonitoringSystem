@@ -2,14 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// history_screen.dart
-// Bantay Drive — History Screen
-// Auto-refreshes via dbChangeCounterProvider. Pull-to-refresh as backup.
-// Tap any card → animated bottom sheet with session detail.
-// ─────────────────────────────────────────────────────────────────────────────
-
 class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
 
@@ -18,7 +10,7 @@ class HistoryScreen extends ConsumerStatefulWidget {
 }
 
 class _HistoryScreenState extends ConsumerState<HistoryScreen> {
-  // ── COLORS ─────────────────────────────────────────────────────────────────
+  // COLORS
   static const Color _bg          = Color(0xFF080E1A);
   static const Color _surface     = Color(0xFF0D1627);
   static const Color _surfaceAlt  = Color(0xFF1A2235);
@@ -30,7 +22,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   static const Color _textDim     = Color(0xFF6B7A99);
   static const Color _divider     = Color(0xFF1E2D45);
 
-  // ── STATE ──────────────────────────────────────────────────────────────────
+  // STATE
   bool   _isLoading      = true;
   List<Map<String, dynamic>> _sessions = [];
   List<Map<String, dynamic>> _filtered = [];
@@ -41,10 +33,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     'All', 'This Week', 'This Month', 'With Alerts', 'Safe Drives',
   ];
 
-  // ─────────────────────────────────────────────────────────────────────────
   // LIFECYCLE
-  // ─────────────────────────────────────────────────────────────────────────
-
   @override
   void initState() {
     super.initState();
@@ -58,10 +47,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     super.dispose();
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // DATA
-  // ─────────────────────────────────────────────────────────────────────────
-
   Future<void> _loadSessions() async {
     setState(() => _isLoading = true);
     final sessions = await DatabaseHelper.instance.getAllSessions();
@@ -155,10 +141,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     setState(() => _filtered = result);
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // BOTTOM SHEET — session detail
-  // ─────────────────────────────────────────────────────────────────────────
-
   void _openSessionDetail(Map<String, dynamic> session) {
     // Dismiss keyboard before opening — prevents it from
     // reappearing when the sheet closes
@@ -174,10 +157,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // HELPERS
-  // ─────────────────────────────────────────────────────────────────────────
-
   String _formatDuration(int seconds) {
     final h = seconds ~/ 3600;
     final m = (seconds % 3600) ~/ 60;
@@ -234,13 +214,10 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     return _red;
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // BUILD
-  // ─────────────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
-    // ── AUTO-REFRESH ───────────────────────────────────────────────────────
+    // AUTO-REFRESH 
     // ref.listen fires every time dbChangeCounterProvider increments
     // (i.e. when monitor_screen starts/stops recording or triggers an alert)
     // This is the correct Riverpod way to trigger side effects on state change
@@ -267,10 +244,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // SEARCH BAR
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildSearchBar() {
     return Container(
       color: _surface,
@@ -307,10 +281,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // FILTER CHIPS
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildFilterChips() {
     return Container(
       color: _surface,
@@ -353,10 +324,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // SESSION LIST
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildList() {
     final groups = _groupByDate(_filtered);
     return RefreshIndicator(
@@ -390,10 +358,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // SESSION CARD — chevron now centered vertically in Row
-  // ─────────────────────────────────────────────────────────────────────────
-
+  // SESSION CARD 
   Widget _buildCard(Map<String, dynamic> s) {
     final score      = (s['safety_score'] as double? ?? 0.0);
     final duration   = s['duration_sec'] as int? ?? 0;
@@ -427,7 +392,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                 crossAxisAlignment: CrossAxisAlignment.center, // ← centered
                 children: [
 
-                  // ── Score circle ──────────────────────────────────────
+                  // Score circle 
                   Container(
                     width: 48,
                     height: 48,
@@ -451,7 +416,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 
                   const SizedBox(width: 14),
 
-                  // ── Date + time + duration ────────────────────────────
+                  // Date + time + duration
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -491,7 +456,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     ),
                   ),
 
-                  // ── Alert badge + chevron (both centered) ─────────────
+                  // Alert badge + chevron
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.center,
@@ -555,10 +520,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // EMPTY STATE
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildEmpty() {
     return RefreshIndicator(
       color: _cyan,
@@ -594,12 +556,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // SESSION DETAIL BOTTOM SHEET
-// Pops up with slide + scale animation. Has close X button.
 // Loads all session details from DB on open.
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _SessionDetailSheet extends StatefulWidget {
   final Map<String, dynamic> session;
   const _SessionDetailSheet({required this.session});
@@ -611,7 +569,7 @@ class _SessionDetailSheet extends StatefulWidget {
 class _SessionDetailSheetState extends State<_SessionDetailSheet>
     with SingleTickerProviderStateMixin {
 
-  // ── COLORS ─────────────────────────────────────────────────────────────────
+  //  COLORS 
   static const Color _sheetBg    = Color(0xFF0D1627);
   static const Color _surfaceAlt = Color(0xFF1A2235);
   static const Color _cyan       = Color(0xFF00D4FF);
@@ -623,7 +581,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
   static const Color _textDim    = Color(0xFF6B7A99);
   static const Color _divider    = Color(0xFF1E2D45);
 
-  // ── STATE ──────────────────────────────────────────────────────────────────
+  // STATE
   bool _loading = true;
   Map<String, dynamic>? _counts;
   List<Map<String, dynamic>> _alerts = [];
@@ -633,10 +591,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
   late Animation<double>    _scaleAnim;
   late Animation<double>    _fadeAnim;
 
-  // ─────────────────────────────────────────────────────────────────────────
   // LIFECYCLE
-  // ─────────────────────────────────────────────────────────────────────────
-
   @override
   void initState() {
     super.initState();
@@ -676,10 +631,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // HELPERS
-  // ─────────────────────────────────────────────────────────────────────────
-
   String _formatDate(String? iso) {
     if (iso == null) return '—';
     final d = DateTime.tryParse(iso);
@@ -734,10 +686,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // BUILD
-  // ─────────────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     final score    = (widget.session['safety_score'] as double? ?? 0.0);
@@ -775,7 +724,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
             mainAxisSize: MainAxisSize.min,
             children: [
 
-              // ── DRAG HANDLE ─────────────────────────────────────────────
+              // DRAG HANDLE 
               Padding(
                 padding: const EdgeInsets.only(top: 12, bottom: 4),
                 child: Container(
@@ -787,7 +736,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                 ),
               ),
 
-              // ── HEADER ──────────────────────────────────────────────────
+              // HEADER 
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 16, 12),
                 child: Row(
@@ -847,7 +796,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                       ),
                     ),
 
-                    // ── CLOSE BUTTON ─────────────────────────────────────
+                    // CLOSE BUTTON 
                     GestureDetector(
                       onTap: () => Navigator.of(context).pop(),
                       child: Container(
@@ -871,7 +820,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
 
               Divider(color: _divider, height: 1, thickness: 1),
 
-              // ── SCROLLABLE CONTENT ───────────────────────────────────────
+              // SCROLLABLE CONTENT 
               Flexible(
                 child: _loading
                     ? const Padding(
@@ -885,19 +834,19 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
 
-                            // ── STATE BREAKDOWN ──────────────────────────
+                            // STATE BREAKDOWN 
                             _sectionLabel('STATE BREAKDOWN'),
                             _buildStateBreakdown(),
 
                             const SizedBox(height: 20),
 
-                            // ── ALERT EVENTS ─────────────────────────────
+                            // ALERT EVENTS 
                             _sectionLabel('ALERT EVENTS'),
                             _buildAlertEvents(),
 
                             const SizedBox(height: 20),
 
-                            // ── SYSTEM LOG ───────────────────────────────
+                            // SYSTEM LOG 
                             _sectionLabel('SYSTEM LOG'),
                             _buildSystemLog(),
                           ],
@@ -911,10 +860,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // SECTION LABEL
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _sectionLabel(String label) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -930,10 +876,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // STATE BREAKDOWN
-  // ─────────────────────────────────────────────────────────────────────────
-
+ // STATE BREAKDOWN
   Widget _buildStateBreakdown() {
     final neutral    = _counts?['neutral_count']    as int? ?? 0;
     final drowsy     = _counts?['drowsy_count']     as int? ?? 0;
@@ -1038,10 +981,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // ALERT EVENTS
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildAlertEvents() {
     if (_alerts.isEmpty) {
       return Container(
@@ -1141,10 +1081,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // SYSTEM LOG
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildSystemLog() {
     if (_logs.isEmpty) {
       return Container(

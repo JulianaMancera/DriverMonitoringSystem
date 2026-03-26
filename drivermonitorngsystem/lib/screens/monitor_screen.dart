@@ -76,10 +76,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     2: [2,  4,  6], // High
   };
 
-  // ─────────────────────────────────────────────────────────────────────────
   // LIFECYCLE
-  // ─────────────────────────────────────────────────────────────────────────
-
   @override
   void initState() {
     super.initState();
@@ -127,10 +124,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     super.dispose();
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // PREFERENCES
-  // ─────────────────────────────────────────────────────────────────────────
-
   Future<void> _loadPreferencesAndInit() async {
     final prefs = PreferencesHelper.instance;
     _prefAlertSensitivity = await prefs.getAlertSensitivity();
@@ -144,10 +138,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _prefAutoStart        = await prefs.getAutoStart();
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // CAMERA
-  // ─────────────────────────────────────────────────────────────────────────
-
   Future<void> _initCamera() async {
     try {
       _cameras = await availableCameras();
@@ -192,10 +183,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     return Size(ps.height, ps.width);
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // SESSION CONTROL
-  // ─────────────────────────────────────────────────────────────────────────
-
   Future<void> _startRecording() async {
     _currentSessionId = await DatabaseHelper.instance.insertSession();
     await DatabaseHelper.instance.insertStateCount(_currentSessionId!);
@@ -223,7 +211,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       await _addLog('Clear Glasses Detected', 'INFO');
     }
 
-    // ── NOTIFY 1 ──────────────────────────────────────────────────────────
+    //  NOTIFY 1
     ref.read(dbChangeCounterProvider.notifier).state++;
   }
 
@@ -272,14 +260,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _currentSessionId = null;
     _sessionStartTime = null;
 
-    // ── NOTIFY 2 ──────────────────────────────────────────────────────────
+    //  NOTIFY 2 
     ref.read(dbChangeCounterProvider.notifier).state++;
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // MODEL OUTPUT — plug TFLite inference results here (not activated yet)
-  // ─────────────────────────────────────────────────────────────────────────
 
+  // MODEL OUTPUT — plug TFLite inference results here (not activated yet)
   void onModelOutput({
     required String state,
     required double alertnessPct,
@@ -317,10 +303,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // 3-LEVEL ALERT SYSTEM
-  // ─────────────────────────────────────────────────────────────────────────
-
   Future<void> _checkAndTriggerAlert(
       String type, int consecutive) async {
     final thresholds =
@@ -356,7 +339,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           type == 'DROWSY' ? 'Microsleep detected' : 'Distraction detected';
       await _addLog(msg, 'WARNING');
 
-      // ── NOTIFY 3 ────────────────────────────────────────────────────────
+      // NOTIFY 3 
       ref.read(dbChangeCounterProvider.notifier).state++;
     }
 
@@ -376,12 +359,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // AUDIO
-  // System volume is controlled by the Settings slider via VolumeController.
-  // audioplayers plays at full — the phone's system volume controls the level.
-  // ─────────────────────────────────────────────────────────────────────────
-
   Future<void> _playAlertSound(int level) async {
     if (level == 1 || level == 2) {
       await _audioPlayer.stop();
@@ -407,10 +385,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // HELPERS
-  // ─────────────────────────────────────────────────────────────────────────
-
   Future<void> _addLog(String message, String type) async {
     final now = DateTime.now();
     final timeStr =
@@ -436,12 +411,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // BUILD
-  // L1/L2 → iOS banner slides from top
-  // L3    → Positioned.fill fullscreen overlay
-  // ─────────────────────────────────────────────────────────────────────────
 
+  // BUILD
   @override
   Widget build(BuildContext context) {
     final isDesktop   = Responsive.isDesktop(context);
@@ -483,10 +454,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // PORTRAIT LAYOUT
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildPortraitLayout() {
     return SingleChildScrollView(
       child: Column(
@@ -510,10 +478,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // LANDSCAPE LAYOUT
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildLandscapeLayout() {
     return Column(
       children: [
@@ -550,10 +515,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // DESKTOP LAYOUT
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildDesktopLayout() {
     return Column(
       children: [
@@ -586,11 +548,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // ALERT BANNER — iOS-style push notification (Level 1 & 2 only)
   // Slides down with elastic spring, fades in, slides back up on dismiss
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildAlertBanner(String type) {
     final isDrowsy  = type == 'DROWSY';
     final slideAnim = _notifSlide ?? AlwaysStoppedAnimation(Offset.zero);
@@ -765,10 +724,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // CAMERA CONTAINER
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildCameraContainer({double? height, required bool isLandscape}) {
     final previewSize = _getPreviewSize(isLandscape);
     final isRecording = ref.watch(isRecordingProvider);
@@ -916,12 +872,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // WARNING OVERLAY — Level 3 ONLY
   // Called via Positioned.fill in build() — covers entire screen
-  // Steady content (no pop/bounce) — only border & glow pulse
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildWarningOverlay(String type) {
     final isDrowsy = type == 'DROWSY';
 
@@ -1116,10 +1068,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // ENVIRONMENT BAR (Clear Glasses + Record button)
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildEnvironmentBar({required bool isLandscape}) {
     final clearGlasses = ref.watch(clearGlassesProvider);
     final isRecording  = ref.watch(isRecordingProvider);
@@ -1286,10 +1235,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // METRICS SIDEBAR
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildMetricsSidebar({required bool isLandscape}) {
     final alertness   = ref.watch(alertnessPctProvider);
     final drowsiness  = ref.watch(drowsinessPctProvider);
@@ -1417,10 +1363,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // SYSTEM LOG
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildSystemLog() {
     return Container(
       width: double.infinity,
