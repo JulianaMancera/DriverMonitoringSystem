@@ -1,23 +1,16 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// preferences_helper.dart
-// Bantay Drive — SharedPreferences wrapper
-// Stores simple key-value settings that persist between app sessions.
-// Place at: lib/core/preferences/preferences_helper.dart
-// ─────────────────────────────────────────────────────────────────────────────
-
 class PreferencesHelper {
   static final PreferencesHelper instance = PreferencesHelper._init();
   PreferencesHelper._init();
 
-  // ── KEYS ──────────────────────────────────────────────────────────────────
+  // KEYS 
   static const String _keyAlertVolume      = 'alert_volume';
   static const String _keyAlertSensitivity = 'alert_sensitivity';
   static const String _keyAutoStart        = 'auto_start';
   static const String _keyRetention        = 'session_retention';
 
-  // ── ALERT SETTINGS ────────────────────────────────────────────────────────
+  // ALERT SETTINGS 
 
   /// Alert volume — 0.0 to 1.0
   Future<double> getAlertVolume() async =>
@@ -32,7 +25,7 @@ class PreferencesHelper {
   Future<void> setAlertSensitivity(int value) async =>
       (await _prefs()).setInt(_keyAlertSensitivity, value);
 
-  // ── MONITORING SETTINGS ───────────────────────────────────────────────────
+  // MONITORING SETTINGS
 
   /// Auto-start recording — if true, recording starts when app opens
   Future<bool> getAutoStart() async =>
@@ -40,7 +33,7 @@ class PreferencesHelper {
   Future<void> setAutoStart(bool value) async =>
       (await _prefs()).setBool(_keyAutoStart, value);
 
-  // ── DATA & PRIVACY ────────────────────────────────────────────────────────
+  //  DATA & PRIVACY 
 
   /// Session retention period — '7 days', '30 days', '90 days', 'Forever'
   Future<String> getRetention() async =>
@@ -48,7 +41,7 @@ class PreferencesHelper {
   Future<void> setRetention(String value) async =>
       (await _prefs()).setString(_keyRetention, value);
 
-  // ── PRIVATE ───────────────────────────────────────────────────────────────
+  // PRIVATE
 
   Future<SharedPreferences> _prefs() async =>
       await SharedPreferences.getInstance();

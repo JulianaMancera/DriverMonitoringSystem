@@ -1,12 +1,5 @@
 import 'package:flutter/material.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// sidebar.dart
-// Bantay Drive — Sidebar / Bottom Nav
-// Mobile: sliding pill indicator (Telegram-style) on bottom nav
-// Desktop: sliding highlight on sidebar
-// ─────────────────────────────────────────────────────────────────────────────
-
 class Sidebar extends StatelessWidget {
   final String activeTab;
   final Function(String) onTabChanged;
@@ -26,10 +19,7 @@ class Sidebar extends StatelessWidget {
         : _buildDesktopSidebar(context);
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // MOBILE BOTTOM NAV — sliding pill indicator
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildMobileNavBar(BuildContext context) {
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
@@ -60,10 +50,7 @@ class Sidebar extends StatelessWidget {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // DESKTOP SIDEBAR — sliding highlight
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildDesktopSidebar(BuildContext context) {
     final items       = _getNavItems();
     final activeIndex = items.indexWhere((i) => i.id == activeTab);
@@ -101,11 +88,8 @@ class Sidebar extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // SLIDING MOBILE NAV BAR
 // Uses a Stack: sliding pill behind, icons on top
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _SlidingNavBar extends StatefulWidget {
   final List<NavItem> items;
   final int activeIndex;
@@ -144,7 +128,7 @@ class _SlidingNavBarState extends State<_SlidingNavBar> {
           alignment: Alignment.center,
           children: [
 
-            // ── SLIDING PILL ───────────────────────────────────────────────
+            // SLIDING PILL 
             AnimatedPositioned(
               duration: const Duration(milliseconds: 280),
               curve: Curves.easeInOutCubic,
@@ -181,7 +165,7 @@ class _SlidingNavBarState extends State<_SlidingNavBar> {
               ),
             ),
 
-            // ── NAV ICONS ──────────────────────────────────────────────────
+            //  NAV ICONS
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
@@ -240,10 +224,7 @@ class _SlidingNavBarState extends State<_SlidingNavBar> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // SLIDING DESKTOP NAV
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _SlidingDesktopNav extends StatefulWidget {
   final List<NavItem> items;
   final int activeIndex;
@@ -275,7 +256,7 @@ class _SlidingDesktopNavState extends State<_SlidingDesktopNav> {
         child: Stack(
           children: [
 
-            // ── SLIDING HIGHLIGHT ──────────────────────────────────────────
+            // SLIDING HIGHLIGHT
             AnimatedPositioned(
               duration: const Duration(milliseconds: 280),
               curve: Curves.easeInOutCubic,
@@ -309,7 +290,7 @@ class _SlidingDesktopNavState extends State<_SlidingDesktopNav> {
               ),
             ),
 
-            // ── ICONS ──────────────────────────────────────────────────────
+            // ICONS 
             Column(
               children: widget.items.asMap().entries.map((entry) {
                 final i      = entry.key;
@@ -352,10 +333,7 @@ class _SlidingDesktopNavState extends State<_SlidingDesktopNav> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // SHARED WIDGETS
-// ─────────────────────────────────────────────────────────────────────────────
-
 class NavItem {
   final String id;
   final IconData icon;
