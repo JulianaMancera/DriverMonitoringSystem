@@ -69,8 +69,8 @@ class MainShell extends ConsumerWidget {
     const DashboardScreen(),
     const MonitorScreen(),
     const AnalyticsScreen(),
-    const HistoryScreen(),             // ← index 3
-    const SettingsScreen(),            // ← index 4
+    const HistoryScreen(),            
+    const SettingsScreen(),            
   ];
 
   @override

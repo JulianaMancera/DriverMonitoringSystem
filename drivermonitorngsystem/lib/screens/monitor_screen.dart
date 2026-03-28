@@ -77,13 +77,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     2: [2,  4,  6], // High
   };
 
-  // ── MODEL STATUS ────────────────────────────────────────────────────────
+  // MODEL STATUS 
   bool _modelLoaded = false;
 
-  // ─────────────────────────────────────────────────────────────────────────
   // LIFECYCLE
-  // ─────────────────────────────────────────────────────────────────────────
-
   @override
   void initState() {
     super.initState();
@@ -124,24 +121,30 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _cameraController?.dispose();
     _audioPlayer.dispose();
     _alarmPlayer.dispose();
-    TfliteService.instance.dispose(); // ← NEW
+    TfliteService.instance.dispose(); 
     super.dispose();
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // PREFERENCES + MODEL INIT
-  // ─────────────────────────────────────────────────────────────────────────
-
   Future<void> _loadPreferencesAndInit() async {
     final prefs = PreferencesHelper.instance;
     _prefAlertSensitivity = await prefs.getAlertSensitivity();
     _prefAutoStart        = await prefs.getAutoStart();
 
-    // ── Load TFLite model ──────────────────────────────────────────────────
-    _modelLoaded = await TfliteService.instance.initialize();
-    if (mounted) setState(() {}); // refresh AI ON / DEMO badge
-
-    await _initCamera();
+    // Load TFLite model 
+    final success = await TfliteService.instance.initialize();
+      if (mounted) {
+      setState(() {
+        _modelLoaded = success;
+      });
+      
+      if (success) {
+        debugPrint('[Monitor] AI Mode Active ✅');
+      } else {
+        debugPrint('[Monitor] Falling back to Demo Mode ⚠️');
+      }
+    }
+      await _initCamera();
   }
 
   Future<void> _refreshPreferences() async {
@@ -150,10 +153,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _prefAutoStart        = await prefs.getAutoStart();
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // CAMERA
-  // ─────────────────────────────────────────────────────────────────────────
-
   Future<void> _initCamera() async {
     try {
       _cameras = await availableCameras();
@@ -198,10 +198,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     return Size(ps.height, ps.width);
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // SESSION CONTROL
-  // ─────────────────────────────────────────────────────────────────────────
-
   Future<void> _startRecording() async {
     _currentSessionId = await DatabaseHelper.instance.insertSession();
     await DatabaseHelper.instance.insertStateCount(_currentSessionId!);
@@ -217,7 +214,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           if (result != null && mounted && ref.read(isRecordingProvider)) {
             onModelOutput(
               state:          result.state,
-              alertnessPct:   result.alertnessPct,
+              alertnessPct:   result.neutralPct,
               drowsinessPct:  result.drowsyPct,
               distractionPct: result.distractedPct,
             );
@@ -262,7 +259,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _consecutiveDrowsy     = 0;
     _consecutiveDistracted = 0;
 
-    // ── Stop image stream before stopping video ──────────────────────────
+    // Stop image stream before stopping video
     if (_cameraInitialized && _cameraController!.value.isStreamingImages) {
       await _cameraController!.stopImageStream();
     }
@@ -305,10 +302,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(dbChangeCounterProvider.notifier).state++;
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // MODEL OUTPUT — receives results from TfliteService, drives alert system
-  // ─────────────────────────────────────────────────────────────────────────
-
   void onModelOutput({
     required String state,
     required double alertnessPct,
@@ -346,10 +340,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // 3-LEVEL ALERT SYSTEM
-  // ─────────────────────────────────────────────────────────────────────────
-
   Future<void> _checkAndTriggerAlert(String type, int consecutive) async {
     final thresholds = _sensitivityThresholds[_prefAlertSensitivity] ?? [3, 6, 9];
     final t1 = thresholds[0];
@@ -398,10 +389,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // AUDIO
-  // ─────────────────────────────────────────────────────────────────────────
-
   Future<void> _playAlertSound(int level) async {
     if (level == 1 || level == 2) {
       await _audioPlayer.stop();
@@ -426,10 +414,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // HELPERS
-  // ─────────────────────────────────────────────────────────────────────────
-
   Future<void> _addLog(String message, String type) async {
     final now = DateTime.now();
     final timeStr =
@@ -455,10 +440,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // BUILD
-  // ─────────────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     final isDesktop   = Responsive.isDesktop(context);
@@ -493,10 +475,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // LAYOUTS
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildPortraitLayout() {
     return SingleChildScrollView(
       child: Padding(
@@ -578,10 +557,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // ALERT BANNER (L1 & L2)
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildAlertBanner(String type) {
     final isDrowsy  = type == 'DROWSY';
     final slideAnim = _notifSlide ?? AlwaysStoppedAnimation(Offset.zero);
@@ -690,10 +666,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // CAMERA CONTAINER
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildCameraContainer({double? height, required bool isLandscape}) {
     final previewSize = _getPreviewSize(isLandscape);
     final isRecording = ref.watch(isRecordingProvider);
@@ -722,7 +695,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           cameraWidget,
           _buildGradientOverlay(),
           if (isRecording) _buildRecBadge(),
-          // ── AI ON / DEMO badge ──────────────────────────────────────────
+          // AI ON / DEMO badge
           Positioned(
             top: 12, left: 12,
             child: Container(
@@ -835,11 +808,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       ),
     );
   }
-
-  // ─────────────────────────────────────────────────────────────────────────
   // WARNING OVERLAY — Level 3
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildWarningOverlay(String type) {
     final isDrowsy = type == 'DROWSY';
     return GestureDetector(
@@ -935,10 +904,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // ENVIRONMENT BAR
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildEnvironmentBar({required bool isLandscape}) {
     final clearGlasses = ref.watch(clearGlassesProvider);
     final isRecording  = ref.watch(isRecordingProvider);
@@ -1042,10 +1008,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // METRICS SIDEBAR
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildMetricsSidebar({required bool isLandscape}) {
     final alertness   = ref.watch(alertnessPctProvider);
     final drowsiness  = ref.watch(drowsinessPctProvider);
@@ -1128,10 +1091,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // SYSTEM LOG
-  // ─────────────────────────────────────────────────────────────────────────
-
   Widget _buildSystemLog() {
     return Container(
       width: double.infinity,
