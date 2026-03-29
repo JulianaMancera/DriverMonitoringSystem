@@ -75,8 +75,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final snapshots     = (data['alertness_snapshots'] as List<Map<String, dynamic>>?) ?? [];
 
     String scoreLabel = 'EXCELLENT';
-    if (safetyScore < 60)       scoreLabel = 'POOR';
-    else if (safetyScore < 75)  scoreLabel = 'FAIR';
+    if (safetyScore < 60) {
+      scoreLabel = 'POOR';
+    } else if (safetyScore < 75)  scoreLabel = 'FAIR';
     else if (safetyScore < 90)  scoreLabel = 'GOOD';
 
     final isMobile = Responsive.isMobile(context);

@@ -350,8 +350,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (consecutive < t1) return;
 
     int newLevel = 1;
-    if (consecutive >= t3)      newLevel = 3;
-    else if (consecutive >= t2) newLevel = 2;
+    if (consecutive >= t3) {
+      newLevel = 3;
+    } else if (consecutive >= t2) newLevel = 2;
 
     if (newLevel <= _alertLevel && _alertLevel == 3) return;
     _alertLevel = newLevel;

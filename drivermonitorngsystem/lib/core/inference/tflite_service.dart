@@ -35,50 +35,61 @@ class TfliteService {
   Future<bool> initialize() async {
     if (_isInitialized) return true;
 
-    try {
-      debugPrint('[TfliteService] 🔄 Loading model from assets/dms_hybridnet.tflite...');
-
-      // ✅ FORCE CPU ONLY — explicitly disables NNAPI/MirrorManager
+    // Strategy 1: CPU only, NNAPI off
+    // The gradle dep (tensorflow-lite-select-tf-ops) handles Select TF Ops natively
+    if (await _tryLoad('CPU + Select TF Ops', () async {
       final options = InterpreterOptions()
-        ..threads = 2
-        ..useNnApiForAndroid = false;
-
-      _interpreter = await Interpreter.fromAsset(
+        ..useNnApiForAndroid = false
+        ..threads = 2;
+      return Interpreter.fromAsset(
         'assets/dms_hybridnet.tflite',
         options: options,
       );
+    })) return true;
+
+    // Strategy 2: XNNPack delegate
+    if (await _tryLoad('XNNPack', () async {
+      final options = InterpreterOptions()
+        ..useNnApiForAndroid = false
+        ..addDelegate(XNNPackDelegate(
+          options: XNNPackDelegateOptions(numThreads: 2),
+        ));
+      return Interpreter.fromAsset(
+        'assets/dms_hybridnet.tflite',
+        options: options,
+      );
+    })) return true;
+
+    // Strategy 3: Bare minimum
+    if (await _tryLoad('Bare CPU', () async {
+      return Interpreter.fromAsset('assets/dms_hybridnet.tflite');
+    })) return true;
+
+    debugPrint('[TfliteService] ❌ All strategies failed. Running in Demo Mode.');
+    return false;
+  }
+
+  Future<bool> _tryLoad(
+    String strategyName,
+    Future<Interpreter> Function() loader,
+  ) async {
+    try {
+      debugPrint('[TfliteService] 🔄 Trying strategy: $strategyName...');
+      _interpreter = await loader();
 
       final inputShape  = _interpreter!.getInputTensor(0).shape;
       final outputShape = _interpreter!.getOutputTensor(0).shape;
 
-      debugPrint('[TfliteService] ✅ Model Loaded.');
+      debugPrint('[TfliteService] ✅ Strategy "$strategyName" succeeded!');
       debugPrint('[TfliteService] 📥 Input Shape: $inputShape');
       debugPrint('[TfliteService] 📤 Output Shape: $outputShape');
 
       _isInitialized = true;
       return true;
     } catch (e) {
-      debugPrint('[TfliteService] ❌ Primary load failed: $e');
-
-      // ✅ FALLBACK: bare minimum CPU, no options at all
-      try {
-        debugPrint('[TfliteService] 🔄 Retrying with bare CPU fallback...');
-        _interpreter = await Interpreter.fromAsset('assets/dms_hybridnet.tflite');
-
-        final inputShape  = _interpreter!.getInputTensor(0).shape;
-        final outputShape = _interpreter!.getOutputTensor(0).shape;
-
-        debugPrint('[TfliteService] ✅ Fallback load successful.');
-        debugPrint('[TfliteService] 📥 Input Shape: $inputShape');
-        debugPrint('[TfliteService] 📤 Output Shape: $outputShape');
-
-        _isInitialized = true;
-        return true;
-      } catch (e2) {
-        debugPrint('[TfliteService] ❌ Fallback also failed: $e2');
-        _isInitialized = false;
-        return false;
-      }
+      debugPrint('[TfliteService] ❌ Strategy "$strategyName" failed: $e');
+      _interpreter = null;
+      return false;
     }
   }
 
