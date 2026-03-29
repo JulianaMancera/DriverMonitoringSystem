@@ -5,10 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:camera/camera.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_riverpod/legacy.dart';
-import 'package:gal/gal.dart';
 import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
-import '../core/inference/tflite_service.dart';   // ← NEW
+import '../core/inference/tflite_service.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import '../utils/responsive.dart';
 
@@ -67,7 +66,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   Animation<double>?   _notifFade;
 
   // PREFERENCES
-  int    _prefAlertSensitivity = 1;   // 0=Low, 1=Medium, 2=High
+  int    _prefAlertSensitivity = 1;
   bool   _prefAutoStart        = false;
 
   // SENSITIVITY THRESHOLDS
@@ -77,7 +76,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     2: [2,  4,  6], // High
   };
 
-  // MODEL STATUS 
+  // MODEL STATUS
   bool _modelLoaded = false;
 
   // LIFECYCLE
@@ -121,7 +120,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _cameraController?.dispose();
     _audioPlayer.dispose();
     _alarmPlayer.dispose();
-    TfliteService.instance.dispose(); 
+    TfliteService.instance.dispose();
     super.dispose();
   }
 
@@ -131,20 +130,20 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _prefAlertSensitivity = await prefs.getAlertSensitivity();
     _prefAutoStart        = await prefs.getAutoStart();
 
-    // Load TFLite model 
     final success = await TfliteService.instance.initialize();
-      if (mounted) {
+    if (mounted) {
       setState(() {
         _modelLoaded = success;
       });
-      
+
       if (success) {
         debugPrint('[Monitor] AI Mode Active ✅');
       } else {
         debugPrint('[Monitor] Falling back to Demo Mode ⚠️');
       }
     }
-      await _initCamera();
+
+    await _initCamera();
   }
 
   Future<void> _refreshPreferences() async {
@@ -171,7 +170,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         selectedCamera,
         ResolutionPreset.medium,
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.yuv420, // ← yuv420 for inference
+        imageFormatGroup: ImageFormatGroup.yuv420,
       );
 
       await _cameraController!.initialize();
@@ -205,12 +204,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _sessionStartTime = DateTime.now();
 
     if (_cameraInitialized) {
-      await _cameraController!.startVideoRecording();
-
-      // ── Start image stream → TfliteService ──────────────────────────────
       if (_modelLoaded) {
-        await _cameraController!.startImageStream((CameraImage frame) async {
-          final result = await TfliteService.instance.runInference(frame);
+        // ✅ Synchronous inference — no async/await blocking
+        _cameraController!.startImageStream((CameraImage frame) {
+          final result = TfliteService.instance.runInferenceSync(frame);
           if (result != null && mounted && ref.read(isRecordingProvider)) {
             onModelOutput(
               state:          result.state,
@@ -259,19 +256,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _consecutiveDrowsy     = 0;
     _consecutiveDistracted = 0;
 
-    // Stop image stream before stopping video
+    // Stop image stream
     if (_cameraInitialized && _cameraController!.value.isStreamingImages) {
       await _cameraController!.stopImageStream();
-    }
-
-    if (_cameraInitialized && _cameraController!.value.isRecordingVideo) {
-      try {
-        final XFile videoFile = await _cameraController!.stopVideoRecording();
-        await Gal.putVideo(videoFile.path, album: 'Bantay Drive');
-        await _addLog('Video saved to gallery', 'SUCCESS');
-      } catch (e) {
-        await _addLog('Failed to save video: $e', 'WARNING');
-      }
     }
 
     final durationSec = _sessionStartTime != null
@@ -302,7 +289,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(dbChangeCounterProvider.notifier).state++;
   }
 
-  // MODEL OUTPUT — receives results from TfliteService, drives alert system
+  // MODEL OUTPUT
   void onModelOutput({
     required String state,
     required double alertnessPct,
@@ -350,9 +337,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (consecutive < t1) return;
 
     int newLevel = 1;
-    if (consecutive >= t3) {
-      newLevel = 3;
-    } else if (consecutive >= t2) newLevel = 2;
+    if (consecutive >= t3)      newLevel = 3;
+    else if (consecutive >= t2) newLevel = 2;
 
     if (newLevel <= _alertLevel && _alertLevel == 3) return;
     _alertLevel = newLevel;
@@ -696,7 +682,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           cameraWidget,
           _buildGradientOverlay(),
           if (isRecording) _buildRecBadge(),
-          // AI ON / DEMO badge
           Positioned(
             top: 12, left: 12,
             child: Container(
@@ -809,6 +794,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       ),
     );
   }
+
   // WARNING OVERLAY — Level 3
   Widget _buildWarningOverlay(String type) {
     final isDrowsy = type == 'DROWSY';
@@ -1025,8 +1011,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         _buildMetricCard(label: 'Distraction', value: distraction, color: const Color(0xFFfbbf24), icon: Icons.visibility),
         const SizedBox(height: 20),
         SizedBox(height: isLandscape ? 260.0 : 320.0, child: _buildSystemLog()),
-        const SizedBox(height: 16),
-        _buildTestButtons(),
+        // ⚠️ DEV TEST BUTTONS REMOVED — alerts now triggered by AI model only
       ],
     );
   }
@@ -1138,114 +1123,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               );
             }),
         ],
-      ),
-    );
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // ⚠️ DEV ONLY — REMOVE BEFORE FINAL BUILD
-  // ─────────────────────────────────────────────────────────────────────────
-
-  Widget _buildTestButtons() {
-    final isRecording = ref.watch(isRecordingProvider);
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFfbbf24).withValues(alpha: 0.4), width: 1),
-        boxShadow: const [
-          BoxShadow(color: Color(0xFF0b1120), offset: Offset(4, 4),   blurRadius: 8),
-          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-4, -4), blurRadius: 8),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.bug_report_rounded, color: Color(0xFFfbbf24), size: 14),
-              const SizedBox(width: 6),
-              const Text('DEV — ALERT TEST',
-                  style: TextStyle(color: Color(0xFFfbbf24), fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1.2)),
-              const Spacer(),
-              if (!isRecording)
-                const Text('Start recording first', style: TextStyle(color: Color(0xFF475569), fontSize: 10)),
-            ],
-          ),
-          const SizedBox(height: 12),
-          const Text('DROWSY', style: TextStyle(color: Color(0xFF64748b), fontSize: 10, letterSpacing: 1)),
-          const SizedBox(height: 6),
-          Row(children: [
-            _testButton(label: 'Level 1', color: const Color(0xFF22d3ee),
-                onTap: isRecording ? () { _consecutiveDrowsy = 3; _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy); } : null),
-            const SizedBox(width: 8),
-            _testButton(label: 'Level 2', color: const Color(0xFFfbbf24),
-                onTap: isRecording ? () { _consecutiveDrowsy = 6; _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy); } : null),
-            const SizedBox(width: 8),
-            _testButton(label: 'Level 3', color: Colors.red,
-                onTap: isRecording ? () { _consecutiveDrowsy = 9; _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy); } : null),
-          ]),
-          const SizedBox(height: 10),
-          const Text('DISTRACTED', style: TextStyle(color: Color(0xFF64748b), fontSize: 10, letterSpacing: 1)),
-          const SizedBox(height: 6),
-          Row(children: [
-            _testButton(label: 'Level 1', color: const Color(0xFF22d3ee),
-                onTap: isRecording ? () { _consecutiveDistracted = 3; _checkAndTriggerAlert('DISTRACTED', _consecutiveDistracted); } : null),
-            const SizedBox(width: 8),
-            _testButton(label: 'Level 2', color: const Color(0xFFfbbf24),
-                onTap: isRecording ? () { _consecutiveDistracted = 6; _checkAndTriggerAlert('DISTRACTED', _consecutiveDistracted); } : null),
-            const SizedBox(width: 8),
-            _testButton(label: 'Level 3', color: Colors.red,
-                onTap: isRecording ? () { _consecutiveDistracted = 9; _checkAndTriggerAlert('DISTRACTED', _consecutiveDistracted); } : null),
-          ]),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: GestureDetector(
-              onTap: () {
-                _consecutiveDrowsy = 0; _consecutiveDistracted = 0; _alertLevel = 0;
-                _alarmPlayer.stop();
-                ref.read(showAlertBannerProvider.notifier).state = false;
-                _addLog('Alert reset by dev', 'INFO');
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1e293b),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFF475569), width: 1),
-                ),
-                child: const Text('Reset All Alerts',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Color(0xFF94a3b8), fontSize: 12, fontWeight: FontWeight.w500)),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _testButton({required String label, required Color color, required VoidCallback? onTap}) {
-    final isEnabled = onTap != null;
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          decoration: BoxDecoration(
-            color: isEnabled ? color.withValues(alpha: 0.12) : const Color(0xFF1e293b),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: isEnabled ? color.withValues(alpha: 0.5) : const Color(0xFF1e293b),
-              width: 1,
-            ),
-          ),
-          child: Text(label,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: isEnabled ? color : const Color(0xFF475569), fontSize: 12, fontWeight: FontWeight.w600)),
-        ),
       ),
     );
   }

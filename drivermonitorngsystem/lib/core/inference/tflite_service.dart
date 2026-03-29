@@ -25,19 +25,21 @@ class TfliteService {
   bool _isInitialized = false;
   bool _isRunning = false;
 
+  // Model shape info
+  List<int> _inputShape  = [1, 224, 224, 3];
+  List<int> _outputShape = [1, 3];
+
   // Settings
-  final double _confidenceThreshold = 0.6;
+  final double _confidenceThreshold = 0.5;
   int _frameCounter = 0;
-  final int _frameSkip = 3;
+  final int _frameSkip = 5;
 
   bool get isInitialized => _isInitialized;
 
   Future<bool> initialize() async {
     if (_isInitialized) return true;
 
-    // Strategy 1: CPU only, NNAPI off
-    // The gradle dep (tensorflow-lite-select-tf-ops) handles Select TF Ops natively
-    if (await _tryLoad('CPU + Select TF Ops', () async {
+    if (await _tryLoad('CPU', () async {
       final options = InterpreterOptions()
         ..useNnApiForAndroid = false
         ..threads = 2;
@@ -47,20 +49,6 @@ class TfliteService {
       );
     })) return true;
 
-    // Strategy 2: XNNPack delegate
-    if (await _tryLoad('XNNPack', () async {
-      final options = InterpreterOptions()
-        ..useNnApiForAndroid = false
-        ..addDelegate(XNNPackDelegate(
-          options: XNNPackDelegateOptions(numThreads: 2),
-        ));
-      return Interpreter.fromAsset(
-        'assets/dms_hybridnet.tflite',
-        options: options,
-      );
-    })) return true;
-
-    // Strategy 3: Bare minimum
     if (await _tryLoad('Bare CPU', () async {
       return Interpreter.fromAsset('assets/dms_hybridnet.tflite');
     })) return true;
@@ -77,12 +65,12 @@ class TfliteService {
       debugPrint('[TfliteService] 🔄 Trying strategy: $strategyName...');
       _interpreter = await loader();
 
-      final inputShape  = _interpreter!.getInputTensor(0).shape;
-      final outputShape = _interpreter!.getOutputTensor(0).shape;
+      _inputShape  = _interpreter!.getInputTensor(0).shape;
+      _outputShape = _interpreter!.getOutputTensor(0).shape;
 
       debugPrint('[TfliteService] ✅ Strategy "$strategyName" succeeded!');
-      debugPrint('[TfliteService] 📥 Input Shape: $inputShape');
-      debugPrint('[TfliteService] 📤 Output Shape: $outputShape');
+      debugPrint('[TfliteService] 📥 Input Shape:  $_inputShape');
+      debugPrint('[TfliteService] 📤 Output Shape: $_outputShape');
 
       _isInitialized = true;
       return true;
@@ -93,37 +81,88 @@ class TfliteService {
     }
   }
 
-  Future<InferenceResult?> runInference(CameraImage cameraImage) async {
+  InferenceResult? runInferenceSync(CameraImage cameraImage) {
     if (!_isInitialized || _interpreter == null || _isRunning) return null;
 
-    // Frame skip logic to save CPU
     _frameCounter++;
     if (_frameCounter % _frameSkip != 0) return null;
 
     _isRunning = true;
 
     try {
-      // 1. Preprocess
-      final inputShape  = _interpreter!.getInputTensor(0).shape;
-      final inputTensor = FramePreprocessor.instance.process(
+      // 1. Get target dimensions from model input shape [1, H, W, 3]
+      final targetH = _inputShape[1];
+      final targetW = _inputShape[2];
+
+      // 2. Preprocess — returns flat Float32List of size H*W*3
+      final flatTensor = FramePreprocessor.instance.process(
         cameraImage,
-        targetWidth:  inputShape[1],
-        targetHeight: inputShape[2],
+        targetWidth:  targetW,
+        targetHeight: targetH,
       );
 
-      // 2. Prepare Output Buffer [1, 3]
-      var outputBuffer = List.generate(1, (_) => List<double>.filled(3, 0.0));
+      // 3. ✅ Reshape flat [H*W*3] into [1, H, W, 3] nested list
+      final input = _reshapeToInput(flatTensor, targetH, targetW);
 
-      // 3. Run Inference
-      _interpreter!.run(inputTensor, outputBuffer);
+      // 4. Build output buffer dynamically
+      final output = _buildOutputBuffer();
 
-      return _parseOutput(outputBuffer[0]);
+      // 5. Run inference
+      _interpreter!.run(input, output);
+
+      // 6. Extract result
+      final rawOutput = _extractOutput(output);
+      debugPrint('[TfliteService] 🔍 Raw output: $rawOutput');
+
+      return _parseOutput(rawOutput);
     } catch (e) {
       debugPrint('[TfliteService] ⚠️ Inference error: $e');
       return null;
     } finally {
       _isRunning = false;
     }
+  }
+
+  /// Reshape flat Float32List → [1][H][W][3] nested List
+  List _reshapeToInput(List<double> flat, int h, int w) {
+    int idx = 0;
+    return [
+      List.generate(h, (y) =>
+        List.generate(w, (x) =>
+          List.generate(3, (c) => flat[idx++])
+        )
+      )
+    ];
+  }
+
+  /// Build output buffer matching model output shape
+  dynamic _buildOutputBuffer() {
+    if (_outputShape.length == 1) {
+      // Shape [3]
+      return List<double>.filled(_outputShape[0], 0.0);
+    } else if (_outputShape.length == 2) {
+      // Shape [1, 3]
+      return List.generate(
+        _outputShape[0], (_) => List<double>.filled(_outputShape[1], 0.0)
+      );
+    } else {
+      // Fallback
+      return List.generate(1, (_) => List<double>.filled(3, 0.0));
+    }
+  }
+
+  /// Extract flat output from buffer
+  List<double> _extractOutput(dynamic output) {
+    if (output is List<double>) {
+      return output; // Shape [3]
+    } else if (output is List && output[0] is List<double>) {
+      return output[0] as List<double>; // Shape [1, 3]
+    }
+    return [1.0, 0.0, 0.0]; // fallback neutral
+  }
+
+  Future<InferenceResult?> runInference(CameraImage cameraImage) async {
+    return runInferenceSync(cameraImage);
   }
 
   InferenceResult _parseOutput(List<double> probs) {
@@ -143,10 +182,11 @@ class TfliteService {
       state   = 'distracted';
     }
 
-    // Confidence gate
     if (state != 'neutral' && maxProb < _confidenceThreshold) {
       state = 'neutral';
     }
+
+    debugPrint('[TfliteService] 🎯 State: $state | N:${(neutral*100).toInt()}% D:${(drowsy*100).toInt()}% X:${(distracted*100).toInt()}%');
 
     return InferenceResult(
       state:         state,
