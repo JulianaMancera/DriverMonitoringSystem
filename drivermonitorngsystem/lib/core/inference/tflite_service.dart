@@ -47,11 +47,15 @@ class TfliteService {
         'assets/dms_hybridnet.tflite',
         options: options,
       );
-    })) return true;
+    })) {
+      return true;
+    }
 
     if (await _tryLoad('Bare CPU', () async {
       return Interpreter.fromAsset('assets/dms_hybridnet.tflite');
-    })) return true;
+    })) {
+      return true;
+    }
 
     debugPrint('[TfliteService] ❌ All strategies failed. Running in Demo Mode.');
     return false;
