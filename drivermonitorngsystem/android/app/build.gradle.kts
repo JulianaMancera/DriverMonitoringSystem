@@ -40,7 +40,12 @@ android {
         }
     }
 }
-
+dependencies {
+    implementation("org.tensorflow:tensorflow-lite-select-tf-ops:2.16.1") {
+        exclude(group = "org.tensorflow", module = "tensorflow-lite")
+        exclude(group = "com.google.ai.edge.litert", module = "litert")
+    }
+}
 
 flutter {
     source = "../.."
