@@ -89,10 +89,7 @@ class DatabaseHelper {
     ''');
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // SESSIONS — CRUD
-  // ─────────────────────────────────────────────────────────────────────────
-
   /// Call when driver presses Record — creates a new session
   Future<int> insertSession() async {
     final db = await database;
@@ -245,10 +242,7 @@ class DatabaseHelper {
     return (result.first['cnt'] as int?) ?? 0;
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // STATE COUNTS — CRUD
-  // ─────────────────────────────────────────────────────────────────────────
-
   /// Insert initial state_counts row when session starts
   Future<void> insertStateCount(int sessionId) async {
     final db = await database;
@@ -287,10 +281,7 @@ class DatabaseHelper {
     return result.isNotEmpty ? result.first : null;
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // ALERT EVENTS — CRUD
-  // ─────────────────────────────────────────────────────────────────────────
-
   /// Insert an alert event — call when alert is triggered
   Future<void> insertAlertEvent({
     required int sessionId,
@@ -399,10 +390,7 @@ class DatabaseHelper {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // SYSTEM LOGS — CRUD
-  // ─────────────────────────────────────────────────────────────────────────
-
   /// Insert a system log entry
   /// [logType]: 'INFO' (white), 'SUCCESS' (green), 'WARNING' (orange/red)
   Future<void> insertSystemLog({
@@ -430,10 +418,7 @@ class DatabaseHelper {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // ALERTNESS SNAPSHOTS — CRUD
-  // ─────────────────────────────────────────────────────────────────────────
-
   /// Insert alertness snapshot — call every ~5 seconds during monitoring
   Future<void> insertAlertnesSnapshot({
     required int sessionId,
@@ -471,10 +456,7 @@ class DatabaseHelper {
     return await getAlertnessSnapshots(sessionId);
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // COMBINED QUERIES
-  // ─────────────────────────────────────────────────────────────────────────
-
   /// Get all dashboard summary data in one call
   Future<Map<String, dynamic>> getDashboardSummary() async {
     final totalDriveSec = await getTotalDriveTimeSec(days: 30);
@@ -513,10 +495,7 @@ class DatabaseHelper {
     };
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   // UTILITY
-  // ─────────────────────────────────────────────────────────────────────────
-
   Future<void> close() async {
     final db = await database;
     db.close();

@@ -1,9 +1,14 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:volume_controller/volume_controller.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:share_plus/share_plus.dart';           // ← NEW
 import '../core/database/database_helper.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import 'dart:async';
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -12,20 +17,12 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  // STATE 
-  bool _isLoading = true; // shows loading indicator while prefs load
+  bool   _isLoading        = true;
+  double _alertVolume      = 0.8;
+  int    _alertSensitivity = 1;
+  bool   _autoStartEnabled = false;
+  String _retentionPeriod  = '30 days';
 
-  // Alert Settings
-  double _alertVolume        = 0.8;
-  int    _alertSensitivity   = 1; // 0=Low, 1=Medium, 2=High
-
-  // Monitoring Settings
-  bool   _autoStartEnabled   = false;
-
-  // Data & Privacy
-  String _retentionPeriod    = '30 days';
-
-  // COLORS
   static const Color _bg            = Color(0xFF080E1A);
   static const Color _surface       = Color(0xFF0D1627);
   static const Color _surfaceAlt    = Color(0xFF1A2235);
@@ -37,54 +34,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   StreamSubscription<double>? _volumeSubscription;
 
-  // LIFECYCLE
-    @override
-      void initState() {
-        super.initState();
-        _loadSettings();
-
-        // Listen to physical buttons → update slider
-        _volumeSubscription = VolumeController.instance.addListener((volume) {
-          if (mounted) setState(() => _alertVolume = volume);
-        }, fetchInitialVolume: true);
-      }
-
-    @override
-      void dispose() {
-        _volumeSubscription?.cancel();
-        super.dispose();
-      }
-  /// Load all saved preferences when screen opens
-  Future<void> _loadSettings() async {
-  final prefs = PreferencesHelper.instance;
-
-  final alertSensitivity = await prefs.getAlertSensitivity();
-  final autoStart        = await prefs.getAutoStart();
-  final retention        = await prefs.getRetention();
-
-  // Read ACTUAL system volume instead of saved preference
-  final systemVolume = await VolumeController.instance.getVolume();
-
-  if (mounted) {
-    setState(() {
-      _alertVolume      = systemVolume;  
-      _alertSensitivity = alertSensitivity;
-      _autoStartEnabled = autoStart;
-      _retentionPeriod  = retention;
-      _isLoading        = false;
-    });
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+    _volumeSubscription = VolumeController.instance.addListener((volume) {
+      if (mounted) setState(() => _alertVolume = volume);
+    }, fetchInitialVolume: true);
   }
-}
 
-  // BUILD
+  @override
+  void dispose() {
+    _volumeSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs        = PreferencesHelper.instance;
+    final sensitivity  = await prefs.getAlertSensitivity();
+    final autoStart    = await prefs.getAutoStart();
+    final retention    = await prefs.getRetention();
+    final systemVolume = await VolumeController.instance.getVolume();
+    if (mounted) {
+      setState(() {
+        _alertVolume      = systemVolume;
+        _alertSensitivity = sensitivity;
+        _autoStartEnabled = autoStart;
+        _retentionPeriod  = retention;
+        _isLoading        = false;
+      });
+    }
+  }
+
+  // ── BUILD ──────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
       return Scaffold(
         backgroundColor: _bg,
         body: const Center(
-          child: CircularProgressIndicator(color: Color(0xFF00D4FF)),
-        ),
+            child: CircularProgressIndicator(color: Color(0xFF00D4FF))),
       );
     }
 
@@ -93,8 +83,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         children: [
-
-          // ALERT SETTINGS
           _sectionLabel('ALERT SETTINGS'),
           _buildCard([
             _sliderTile(
@@ -102,13 +90,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               iconColor: _cyan,
               title: 'Alert Volume',
               value: _alertVolume,
-              min: 0.0,
-              max: 1.0,
+              min: 0.0, max: 1.0,
               displayValue: '${(_alertVolume * 100).round()}%',
               onChanged: (v) {
-              setState(() => _alertVolume = v);
-              VolumeController.instance.setVolume(v);  
-              PreferencesHelper.instance.setAlertVolume(v);
+                setState(() => _alertVolume = v);
+                VolumeController.instance.setVolume(v);
+                PreferencesHelper.instance.setAlertVolume(v);
               },
             ),
             _dividerLine(),
@@ -125,10 +112,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
             ),
           ]),
-
           const SizedBox(height: 24),
-
-          // MONITORING SETTINGS 
           _sectionLabel('MONITORING SETTINGS'),
           _buildCard([
             _toggleTile(
@@ -143,10 +127,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
             ),
           ]),
-
           const SizedBox(height: 24),
-
-          // DATA & PRIVACY 
           _sectionLabel('DATA & PRIVACY'),
           _buildCard([
             _dropdownTile(
@@ -166,7 +147,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: Icons.download_rounded,
               iconColor: _cyan,
               title: 'Export Session Data',
-              subtitle: 'Download all sessions as CSV',
+              subtitle: 'Share all sessions as CSV',
               onTap: () => _onExportData(context),
             ),
             _dividerLine(),
@@ -179,65 +160,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onTap: () => _onClearHistory(context),
             ),
           ]),
-
           const SizedBox(height: 24),
-
-          // ABOUT
           _sectionLabel('ABOUT'),
           _buildCard([
-            _infoTile(
-              icon: Icons.school_rounded,
-              title: 'Institution',
-              value: 'New Era University',
-            ),
+            _infoTile(icon: Icons.school_rounded,  title: 'Institution', value: 'New Era University'),
             _dividerLine(),
-            _infoTile(
-              icon: Icons.people_rounded,
-              title: 'Authors',
-              value: 'Macalanda & Mancera',
-            ),
+            _infoTile(icon: Icons.people_rounded,  title: 'Authors',     value: 'Macalanda & Mancera'),
           ]),
-
           const SizedBox(height: 32),
         ],
       ),
     );
   }
 
-  // SECTION LABEL
-  Widget _sectionLabel(String label) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 4, bottom: 8, top: 4),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: _textSecondary,
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 1.2,
-        ),
-      ),
-    );
-  }
+  // ── TILE WIDGETS ───────────────────────────────────────────────────────────
 
-  // CARD WRAPPER
-  Widget _buildCard(List<Widget> children) {
-    return Container(
-      decoration: BoxDecoration(
+  Widget _sectionLabel(String label) => Padding(
+    padding: const EdgeInsets.only(left: 4, bottom: 8, top: 4),
+    child: Text(label,
+        style: TextStyle(
+            color: _textSecondary,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1.2)),
+  );
+
+  Widget _buildCard(List<Widget> children) => Container(
+    decoration: BoxDecoration(
         color: _surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _divider, width: 1),
-      ),
-      child: Column(children: children),
-    );
-  }
+        border: Border.all(color: _divider, width: 1)),
+    child: Column(children: children),
+  );
 
-  Widget _dividerLine() {
-    return Divider(color: _divider, height: 1, thickness: 1, indent: 56);
-  }
+  Widget _dividerLine() =>
+      Divider(color: _divider, height: 1, thickness: 1, indent: 56);
 
-  // TILE TYPES
-  /// Toggle tile — ON/OFF switch
   Widget _toggleTile({
     required IconData icon,
     required Color iconColor,
@@ -248,41 +206,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      child: Row(
-        children: [
-          _iconBox(icon, iconColor),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title,
-                    style: TextStyle(
-                        color: _textPrimary,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500)),
-                if (subtitle != null) ...[
-                  const SizedBox(height: 2),
-                  Text(subtitle,
-                      style: TextStyle(color: _textSecondary, fontSize: 12)),
-                ],
-              ],
-            ),
-          ),
-          Switch(
-            value: value,
-            onChanged: onChanged,
-            activeThumbColor: _cyan,
-            activeTrackColor: _cyan.withValues(alpha: 0.3),
-            inactiveThumbColor: _textSecondary,
-            inactiveTrackColor: _surfaceAlt,
-          ),
-        ],
-      ),
+      child: Row(children: [
+        _iconBox(icon, iconColor),
+        const SizedBox(width: 14),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title,
+              style: TextStyle(
+                  color: _textPrimary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500)),
+          if (subtitle != null) ...[
+            const SizedBox(height: 2),
+            Text(subtitle,
+                style: TextStyle(color: _textSecondary, fontSize: 12))
+          ],
+        ])),
+        Switch(
+          value: value,
+          onChanged: onChanged,
+          activeThumbColor: _cyan,
+          activeTrackColor: _cyan.withValues(alpha: 0.3),
+          inactiveThumbColor: _textSecondary,
+          inactiveTrackColor: _surfaceAlt,
+        ),
+      ]),
     );
   }
 
-  /// Slider tile — volume, battery %, etc.
   Widget _sliderTile({
     required IconData icon,
     required Color iconColor,
@@ -297,60 +247,49 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              _iconBox(icon, iconColor),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title,
-                        style: TextStyle(
-                            color: _textPrimary,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500)),
-                    if (subtitle != null) ...[
-                      const SizedBox(height: 2),
-                      Text(subtitle,
-                          style:
-                              TextStyle(color: _textSecondary, fontSize: 12)),
-                    ],
-                  ],
-                ),
-              ),
-              Text(
-                displayValue,
+      child: Column(children: [
+        Row(children: [
+          _iconBox(icon, iconColor),
+          const SizedBox(width: 14),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title,
                 style: TextStyle(
-                    color: _cyan, fontSize: 14, fontWeight: FontWeight.bold),
-              ),
+                    color: _textPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500)),
+            if (subtitle != null) ...[
+              const SizedBox(height: 2),
+              Text(subtitle,
+                  style: TextStyle(color: _textSecondary, fontSize: 12))
             ],
+          ])),
+          Text(displayValue,
+              style: TextStyle(
+                  color: _cyan,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold)),
+        ]),
+        SliderTheme(
+          data: SliderThemeData(
+            activeTrackColor: _cyan,
+            inactiveTrackColor: _divider,
+            thumbColor: _cyan,
+            overlayColor: _cyan.withValues(alpha: 0.15),
+            trackHeight: 3,
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
           ),
-          SliderTheme(
-            data: SliderThemeData(
-              activeTrackColor: _cyan,
-              inactiveTrackColor: _divider,
-              thumbColor: _cyan,
-              overlayColor: _cyan.withValues(alpha: 0.15),
-              trackHeight: 3,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-            ),
-            child: Slider(
-              value: value,
-              min: min,
-              max: max,
-              divisions: divisions,
-              onChanged: onChanged,
-            ),
+          child: Slider(
+            value: value,
+            min: min,
+            max: max,
+            divisions: divisions,
+            onChanged: onChanged,
           ),
-        ],
-      ),
+        ),
+      ]),
     );
   }
 
-  /// Segmented tile — Low / Medium / High
   Widget _segmentedTile({
     required IconData icon,
     required Color iconColor,
@@ -362,79 +301,67 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              _iconBox(icon, iconColor),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title,
-                        style: TextStyle(
-                            color: _textPrimary,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500)),
-                    if (subtitle != null) ...[
-                      const SizedBox(height: 2),
-                      Text(subtitle,
-                          style:
-                              TextStyle(color: _textSecondary, fontSize: 12)),
-                    ],
-                  ],
-                ),
-              ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          _iconBox(icon, iconColor),
+          const SizedBox(width: 14),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title,
+                style: TextStyle(
+                    color: _textPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500)),
+            if (subtitle != null) ...[
+              const SizedBox(height: 2),
+              Text(subtitle,
+                  style: TextStyle(color: _textSecondary, fontSize: 12))
             ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: List.generate(options.length, (i) {
-              final selected = i == selectedIndex;
-              return Expanded(
-                child: GestureDetector(
-                  onTap: () {
-                    HapticFeedback.lightImpact();
-                    onChanged(i);
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    margin: EdgeInsets.only(
-                      left: i == 0 ? 0 : 4,
-                      right: i == options.length - 1 ? 0 : 4,
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    decoration: BoxDecoration(
-                      color: selected ? _cyan.withValues(alpha: 0.15) : _surfaceAlt,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: selected ? _cyan : _divider,
-                        width: 1,
-                      ),
-                    ),
-                    child: Text(
-                      options[i],
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: selected ? _cyan : _textSecondary,
-                        fontSize: 13,
-                        fontWeight:
-                            selected ? FontWeight.bold : FontWeight.normal,
-                      ),
+          ])),
+        ]),
+        const SizedBox(height: 12),
+        Row(
+          children: List.generate(options.length, (i) {
+            final selected = i == selectedIndex;
+            return Expanded(
+              child: GestureDetector(
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  onChanged(i);
+                },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  margin: EdgeInsets.only(
+                    left: i == 0 ? 0 : 4,
+                    right: i == options.length - 1 ? 0 : 4,
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? _cyan.withValues(alpha: 0.15)
+                        : _surfaceAlt,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                        color: selected ? _cyan : _divider, width: 1),
+                  ),
+                  child: Text(options[i],
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: selected ? _cyan : _textSecondary,
+                      fontSize: 13,
+                      fontWeight: selected
+                          ? FontWeight.bold
+                          : FontWeight.normal,
                     ),
                   ),
                 ),
-              );
-            }),
-          ),
-        ],
-      ),
+              ),
+            );
+          }),
+        ),
+      ]),
     );
   }
 
-  /// Dropdown tile — Camera position, retention period
   Widget _dropdownTile({
     required IconData icon,
     required Color iconColor,
@@ -446,51 +373,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      child: Row(
-        children: [
-          _iconBox(icon, iconColor),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title,
-                    style: TextStyle(
-                        color: _textPrimary,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500)),
-                if (subtitle != null) ...[
-                  const SizedBox(height: 2),
-                  Text(subtitle,
-                      style: TextStyle(color: _textSecondary, fontSize: 12)),
-                ],
-              ],
-            ),
+      child: Row(children: [
+        _iconBox(icon, iconColor),
+        const SizedBox(width: 14),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title,
+              style: TextStyle(
+                  color: _textPrimary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500)),
+          if (subtitle != null) ...[
+            const SizedBox(height: 2),
+            Text(subtitle,
+                style: TextStyle(color: _textSecondary, fontSize: 12))
+          ],
+        ])),
+        DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            value: value,
+            dropdownColor: _surfaceAlt,
+            icon: Icon(Icons.chevron_right_rounded,
+                color: _textSecondary, size: 20),
+            style: TextStyle(color: _cyan, fontSize: 13),
+            items: options
+                .map((o) => DropdownMenuItem(
+                    value: o,
+                    child: Text(o,
+                        style:
+                            TextStyle(color: _textPrimary, fontSize: 13))))
+                .toList(),
+            onChanged: onChanged,
           ),
-          DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: value,
-              dropdownColor: _surfaceAlt,
-              icon: Icon(Icons.chevron_right_rounded,
-                  color: _textSecondary, size: 20),
-              style: TextStyle(color: _cyan, fontSize: 13),
-              items: options
-                  .map((o) => DropdownMenuItem(
-                        value: o,
-                        child: Text(o,
-                            style: TextStyle(
-                                color: _textPrimary, fontSize: 13)),
-                      ))
-                  .toList(),
-              onChanged: onChanged,
-            ),
-          ),
-        ],
-      ),
+        ),
+      ]),
     );
   }
 
-  /// Action tile — Export, Clear History, Thesis Title
   Widget _actionTile({
     required IconData icon,
     required Color iconColor,
@@ -504,37 +422,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
       borderRadius: BorderRadius.circular(16),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Row(
-          children: [
-            _iconBox(icon, iconColor),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title,
-                      style: TextStyle(
-                          color: titleColor ?? _textPrimary,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500)),
-                  if (subtitle != null) ...[
-                    const SizedBox(height: 2),
-                    Text(subtitle,
-                        style:
-                            TextStyle(color: _textSecondary, fontSize: 12)),
-                  ],
-                ],
-              ),
-            ),
-            Icon(Icons.chevron_right_rounded,
-                color: _textSecondary, size: 20),
-          ],
-        ),
+        child: Row(children: [
+          _iconBox(icon, iconColor),
+          const SizedBox(width: 14),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title,
+                style: TextStyle(
+                    color: titleColor ?? _textPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500)),
+            if (subtitle != null) ...[
+              const SizedBox(height: 2),
+              Text(subtitle,
+                  style: TextStyle(color: _textSecondary, fontSize: 12))
+            ],
+          ])),
+          Icon(Icons.chevron_right_rounded, color: _textSecondary, size: 20),
+        ]),
       ),
     );
   }
 
-  /// Info tile — read-only (About section)
   Widget _infoTile({
     required IconData icon,
     required String title,
@@ -542,46 +450,126 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      child: Row(
-        children: [
-          _iconBox(icon, _textSecondary),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Text(title,
-                style: TextStyle(
-                    color: _textSecondary,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w400)),
-          ),
-          Text(value,
-              style: TextStyle(
-                  color: _textPrimary,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500)),
-        ],
-      ),
+      child: Row(children: [
+        _iconBox(icon, _textSecondary),
+        const SizedBox(width: 14),
+        Expanded(child: Text(title,
+            style: TextStyle(
+                color: _textSecondary,
+                fontSize: 14,
+                fontWeight: FontWeight.w400))),
+        Text(value,
+            style: TextStyle(
+                color: _textPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w500)),
+      ]),
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // ICON BOX
-  // ─────────────────────────────────────────────────────────────────────────
-
-  Widget _iconBox(IconData icon, Color color) {
-    return Container(
-      width: 36,
-      height: 36,
-      decoration: BoxDecoration(
+  Widget _iconBox(IconData icon, Color color) => Container(
+    width: 36,
+    height: 36,
+    decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Icon(icon, color: color, size: 18),
-    );
+        borderRadius: BorderRadius.circular(10)),
+    child: Icon(icon, color: color, size: 18),
+  );
+
+  // ── SNACKBAR ───────────────────────────────────────────────────────────────
+
+  void _showSnackbar(BuildContext context, String message,
+      {required bool isError}) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(message,
+          style: TextStyle(
+              color: isError ? Colors.white : _bg, fontSize: 13)),
+      backgroundColor: isError ? _red : _cyan,
+      behavior: SnackBarBehavior.floating,
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      duration: const Duration(seconds: 5),
+    ));
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // ACTION HANDLERS
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── CSV EXPORT — FIXED for Android 13+ ────────────────────────────────────
+  // Old approach: Permission.storage → always denied on Android 13+
+  // New approach: write to app documents dir (no permission needed),
+  //               then use share_plus to let user save/share anywhere.
+
+  String _pad(int n) => n.toString().padLeft(2, '0');
+
+  Future<void> _exportCSV(BuildContext ctx) async {
+    try {
+      // 1. Fetch all sessions
+      final sessions = await DatabaseHelper.instance.getAllSessions();
+      if (sessions.isEmpty) {
+        if (ctx.mounted) {
+          _showSnackbar(ctx, 'No sessions to export.', isError: false);
+        }
+        return;
+      }
+
+      // 2. Build CSV
+      final buf = StringBuffer();
+      buf.writeln(
+          'Session ID,Date,Start Time,End Time,Duration (sec),'
+          'Alertness Avg (%),Safety Score (%),Alert Count');
+
+      for (final s in sessions) {
+        final id       = s['id'] as int;
+        final alerts   = await DatabaseHelper.instance.getAlertsBySession(id);
+        final started  = s['started_at'] as String? ?? '';
+        final ended    = s['ended_at']   as String? ?? '';
+        final duration = s['duration_sec'] as int? ?? 0;
+        final alertAvg = (s['alertness_avg'] as double? ?? 0.0).toStringAsFixed(1);
+        final safety   = (s['safety_score']  as double? ?? 0.0).toStringAsFixed(1);
+
+        final sd = DateTime.tryParse(started);
+        final ed = DateTime.tryParse(ended);
+        final date  = sd != null
+            ? '${sd.year}-${_pad(sd.month)}-${_pad(sd.day)}'
+            : '';
+        final sTime = sd != null
+            ? '${_pad(sd.hour)}:${_pad(sd.minute)}:${_pad(sd.second)}'
+            : '';
+        final eTime = ed != null
+            ? '${_pad(ed.hour)}:${_pad(ed.minute)}:${_pad(ed.second)}'
+            : '';
+
+        buf.writeln(
+            '$id,$date,$sTime,$eTime,$duration,$alertAvg,$safety,${alerts.length}');
+      }
+
+      // 3. Save to app's internal documents directory
+      //    → no permission needed on ANY Android version
+      final docsDir  = await getApplicationDocumentsDirectory();
+      final now      = DateTime.now();
+      final stamp    =
+          '${now.year}${_pad(now.month)}${_pad(now.day)}'
+          '_${_pad(now.hour)}${_pad(now.minute)}';
+      final fileName = 'bantaydrive_sessions_$stamp.csv';
+      final file     = File('${docsDir.path}/$fileName');
+      await file.writeAsString(buf.toString());
+
+      if (!ctx.mounted) return;
+
+      // 4. Open native share sheet — user picks where to save
+      //    (Downloads, Google Drive, Gmail, etc.)
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'text/csv', name: fileName)],
+        subject: 'Bantay Drive Session Export',
+        text: 'Bantay Drive — ${sessions.length} sessions exported',
+      );
+
+    } catch (e) {
+      if (ctx.mounted) {
+        _showSnackbar(ctx, 'Export failed: $e', isError: true);
+      }
+    }
+  }
+
+  // ── ACTION HANDLERS ────────────────────────────────────────────────────────
 
   void _onExportData(BuildContext context) {
     showDialog(
@@ -594,7 +582,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             style: TextStyle(
                 color: _textPrimary, fontWeight: FontWeight.bold)),
         content: Text(
-          'All your session data will be exported as a CSV file and saved to your Downloads folder.',
+          'All sessions will be exported as a CSV file.\n\n'
+          'A share sheet will open so you can save it to '
+          'Downloads, Google Drive, email, or any app.',
           style: TextStyle(color: _textSecondary, fontSize: 14),
         ),
         actions: [
@@ -611,21 +601,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   borderRadius: BorderRadius.circular(8)),
             ),
             onPressed: () {
-              Navigator.pop(context);                                                                                              
-              // TODO: implement CSV export using DatabaseHelper
-              // Example:
-              // final sessions = await DatabaseHelper.instance.getAllSessions();
-              // convert to CSV → save to Downloads via path_provider + permission
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content:
-                    Text('Export coming soon!', style: TextStyle(color: _bg)),
-                backgroundColor: _cyan,
-                behavior: SnackBarBehavior.floating,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-              ));
+              Navigator.pop(context);
+              _exportCSV(context);
             },
-            child: const Text('Export'),
+            child: const Text('Export & Share'),
           ),
         ],
       ),
@@ -640,10 +619,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text('Clear All History',
-            style:
-                TextStyle(color: _red, fontWeight: FontWeight.bold)),
+            style: TextStyle(
+                color: _red, fontWeight: FontWeight.bold)),
         content: Text(
-          'This will permanently delete ALL session data including alerts, logs, and analytics. This action cannot be undone.',
+          'This will permanently delete ALL session data including '
+          'alerts, logs, and analytics. This action cannot be undone.',
           style: TextStyle(color: _textSecondary, fontSize: 14),
         ),
         actions: [
@@ -661,17 +641,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             onPressed: () async {
               Navigator.pop(context);
-              // Calls DatabaseHelper to wipe all tables
               await DatabaseHelper.instance.clearAllData();
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: const Text('All history cleared.',
-                      style: TextStyle(color: Colors.white)),
-                  backgroundColor: _red,
-                  behavior: SnackBarBehavior.floating,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
-                ));
+                _showSnackbar(context, 'All history cleared.',
+                    isError: false);
               }
             },
             child: const Text('Delete All'),

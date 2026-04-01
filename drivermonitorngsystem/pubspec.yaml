@@ -29,6 +29,10 @@ dependencies:
   gal: ^2.3.0
   shared_preferences: ^2.3.0
   volume_controller: ^3.4.3
+  path_provider: ^2.1.2
+  tflite_flutter: ^0.12.1
+  image: ^4.1.7
+  share_plus: ^7.2.2
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -59,6 +63,7 @@ flutter:
     - assets/text_logo.png
     - assets/L1_L2_sound.mp3
     - assets/L3_critical_alert.wav
+    - assets/dms_hybridnet.tflite
 
   # To add assets to your application, add an assets section, like this:
   # assets:
