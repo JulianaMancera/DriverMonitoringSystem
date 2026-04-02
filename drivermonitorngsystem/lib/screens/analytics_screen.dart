@@ -519,7 +519,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
       spots: spots, isCurved: spots.length > 2, curveSmoothness: 0.3,
       color: color, barWidth: 3, isStrokeCapRound: true,
       dotData: FlDotData(show: true,
-        getDotPainter: (_, __, ___, ____) => FlDotCirclePainter(
+        getDotPainter: (_, _, _, _) => FlDotCirclePainter(
           radius: 4, color: color, strokeWidth: 2, strokeColor: const Color(0xFF0f172a))),
       belowBarData: BarAreaData(show: false),
     );
@@ -658,13 +658,17 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
   List<Map<String, dynamic>> _previewHourDist(List<Map<String, dynamic>> hourlyDist) {
     const previewHours = [6, 9, 12, 15, 18, 21];
     final map = <int, int>{};
-    for (final r in hourlyDist) map[r['hour'] as int] = r['count'] as int;
+    for (final r in hourlyDist) {
+      map[r['hour'] as int] = r['count'] as int;
+    }
     return previewHours.map((h) => {'hour': h, 'count': map[h] ?? 0}).toList();
   }
 
   List<Map<String, dynamic>> _fullHourDist(List<Map<String, dynamic>> hourlyDist) {
     final map = <int, int>{};
-    for (final r in hourlyDist) map[r['hour'] as int] = r['count'] as int;
+    for (final r in hourlyDist) {
+      map[r['hour'] as int] = r['count'] as int;
+    }
     final result = <Map<String, dynamic>>[];
     for (int h = 0; h < 24; h++) {
       final c = map[h] ?? 0;
@@ -692,7 +696,9 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
 
     if (!showAllHours) {
       final map = <int, int>{};
-      for (final r in hourlyDist) map[r['hour'] as int] = r['count'] as int;
+      for (final r in hourlyDist) {
+        map[r['hour'] as int] = r['count'] as int;
+      }
       labels    = previewLabels;
       barGroups = List.generate(previewHours.length, (i) =>
           _buildBarGroup(context, i, (map[previewHours[i]] ?? 0).toDouble()));
@@ -717,7 +723,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
           getTooltipColor: (_) => const Color(0xFF1e293b),
           tooltipBorderRadius: BorderRadius.circular(10),
           tooltipPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          getTooltipItem: (group, _, rod, __) => BarTooltipItem(
+          getTooltipItem: (group, _, rod, _) => BarTooltipItem(
             '${rod.toY.toInt()} alert${rod.toY.toInt() == 1 ? '' : 's'}\n${labels[group.x]}',
             TextStyle(color: const Color(0xFF22d3ee), fontWeight: FontWeight.bold, fontSize: labelFontSize)),
         ),
