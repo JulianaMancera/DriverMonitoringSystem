@@ -406,12 +406,18 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
         title:    'Drowsiness vs Distraction',
         subtitle: 'Swipe chart sideways  •  Tap a point to see value',
         chartBuilder: (availableHeight) {
-          const reservedForExtras = 152.0;
-          final chartH = (availableHeight - reservedForExtras).clamp(160.0, double.infinity);
-          final screenW = MediaQuery.of(context).size.width - 32;
-          final chartW  = (parsed.xLabels.length * 64.0).clamp(screenW, double.infinity);
+          // chartH and chartW are now computed inside LayoutBuilder below
+          return LayoutBuilder(
+  builder: (context, constraints) {
+    // Measure remaining height after fixed widgets:
+    const fixedH = 122.0;
+    final chartH2  = (constraints.maxHeight - fixedH).clamp(80.0, double.infinity);
+    final chartW2  = (parsed.xLabels.length * 64.0)
+        .clamp(constraints.maxWidth, double.infinity);
 
-          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             Row(children: [
               _buildLegendItem(context, 'Drowsiness', const Color(0xFFef4444)),
               const SizedBox(width: 16),
@@ -419,11 +425,13 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
             ]),
             const SizedBox(height: 12),
             SizedBox(
-              height: chartH,
+              height: chartH2,
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 physics: const BouncingScrollPhysics(),
-                child: SizedBox(width: chartW, height: chartH,
+                child: SizedBox(
+                  width: chartW2,
+                  height: chartH2,
                   child: _buildLineChartWidget(
                     drowsySpots:     parsed.drowsySpots,
                     distractedSpots: parsed.distractedSpots,
@@ -441,12 +449,16 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
               child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                 const Icon(Icons.swipe_rounded, color: Color(0xFF475569), size: 13),
                 const SizedBox(width: 4),
-                const Text('Swipe to see all dates', style: TextStyle(color: Color(0xFF475569), fontSize: 10)),
+                const Text('Swipe to see all dates',
+                    style: TextStyle(color: Color(0xFF475569), fontSize: 10)),
               ]),
             ),
             const SizedBox(height: 12),
             if (dailyTrends.isNotEmpty) _buildLineSummaryRow(parsed),
-          ]);
+          ],
+        );
+      },
+    );
         },
       ),
     );
@@ -818,8 +830,13 @@ class _ChartModal extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sheetHeight  = MediaQuery.of(context).size.height * 0.85;
-    const headerHeight = 136.0;
+    final isLandscape  =
+    MediaQuery.of(context).orientation == Orientation.landscape;
+    // In landscape, screen height is smaller so use more of it
+    // and reduce the header to give chart more room
+    final sheetHeight  = MediaQuery.of(context).size.height *
+        (isLandscape ? 0.95 : 0.85);
+    final headerHeight = isLandscape ? 100.0 : 136.0;
     final chartArea    = sheetHeight - headerHeight;
 
     return Container(
@@ -845,8 +862,15 @@ class _ChartModal extends StatelessWidget {
               child: const Icon(Icons.close_rounded, color: Color(0xFF94A3B8), size: 18))),
         ])),
         Divider(color: const Color(0xFF1E2D45).withValues(alpha: 0.6), height: 20),
-        Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: chartBuilder(chartArea)),
+          Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: SizedBox(
+              height: chartArea,
+              child: chartBuilder(chartArea),
+            ),
+          ),
+        ),
       ]),
     );
   }
