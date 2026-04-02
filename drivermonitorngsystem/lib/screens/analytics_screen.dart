@@ -177,7 +177,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
                   ? _buildMobileChartsLayout(context, dailyTrends, hourlyDist)
                   : _buildDesktopChartsLayout(context, dailyTrends, hourlyDist),
             ),
-            SizedBox(height: isMobile ? 96 : 32),
+            SizedBox(height: isMobile ? 16 : 32),
           ],
         ),
       ),
@@ -564,7 +564,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     return GestureDetector(
       onTap: () => _openBarChartModal(context, hourlyDist),
       child: Container(
-        height: Responsive.responsiveHeight(context, mobile: 300, tablet: 320, desktop: 340),
+       height: 220,
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: const Color(0xFF0f172a),

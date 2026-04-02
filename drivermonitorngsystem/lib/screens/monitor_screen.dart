@@ -474,7 +474,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             _buildCameraWithOverlay(height: 280, isLandscape: false),
             const SizedBox(height: 12),
             _buildMetricsSidebar(isLandscape: false),
-            const SizedBox(height: 96),
+            const SizedBox(height: 16),
           ],
         ),
       ),
@@ -1139,7 +1139,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             icon: Icons.visibility),
         const SizedBox(height: 20),
         SizedBox(
-            height: isLandscape ? 260.0 : 320.0,
+            height: isLandscape ? 260.0 : 200.0,
             child: _buildSystemLog()),
       ],
     );
