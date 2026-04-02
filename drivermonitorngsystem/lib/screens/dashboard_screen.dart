@@ -130,11 +130,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
             _buildAlertnessChart(context, snapshots),
 
-            SizedBox(
-              height: isMobile
-                  ? 96
-                  : Responsive.responsiveSpacing(context, mobile: 32, desktop: 32),
-            ),
+            SizedBox(height: isMobile ? 16 : 32),
           ],
         ),
       ),
@@ -312,7 +308,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     }
 
     return Container(
-      height: Responsive.responsiveHeight(context, mobile: 280, tablet: 300, desktop: 320),
+      height: 220,
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.circular(

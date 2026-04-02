@@ -57,7 +57,29 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     );
   }
 
-  //  HEADER 
+
+  double _summaryCardAspectRatio(BuildContext context) {
+    final isLandscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
+
+    if (!isLandscape) {
+      // Portrait
+      return Responsive.responsiveValue(context,
+          mobile: 0.95, tablet: 1.2, desktop: 1.5);
+    }
+
+    final screenW   = MediaQuery.of(context).size.width;
+    const sidebarW  = 201.0; 
+    const padding   = 40.0; 
+    const spacing   = 36.0;  
+    final contentW  = screenW - sidebarW - padding - spacing;
+    final cardW     = contentW / 4;
+
+    // Target card height = 115px (icon row + number + label + breathing room)
+    return (cardW / 115).clamp(1.2, 3.0);
+  }
+
+  // HEADER 
 
   Widget _buildHeader(int? selectedDays) {
     return Padding(
@@ -116,7 +138,8 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     );
   }
 
-  // CONTENT 
+  // CONTENT
+
   Widget _buildContent(
     BuildContext context,
     Map<String, dynamic> data,
@@ -154,14 +177,14 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
                   ? _buildMobileChartsLayout(context, dailyTrends, hourlyDist)
                   : _buildDesktopChartsLayout(context, dailyTrends, hourlyDist),
             ),
-            SizedBox(height: isMobile ? 96 : 32),
+            SizedBox(height: isMobile ? 16 : 32),
           ],
         ),
       ),
     );
   }
 
-  // SUMMARY CARDS 
+  // SUMMARY CARDS
   Widget _buildSummaryCards(
     BuildContext context, {
     required bool isMobile,
@@ -179,30 +202,27 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
         crossAxisCount:   isMobile ? 2 : 4,
         mainAxisSpacing:  Responsive.responsiveSpacing(context, mobile: 12, tablet: 14, desktop: 16),
         crossAxisSpacing: Responsive.responsiveSpacing(context, mobile: 12, tablet: 14, desktop: 16),
-        childAspectRatio: Responsive.responsiveValue(context, mobile: 0.95, tablet: 1.2, desktop: 1.5),
+        // FIX: use dynamic aspect ratio that accounts for sidebar width in landscape
+        childAspectRatio: _summaryCardAspectRatio(context),
         children: [
-          // Sessions: always green — using the app is good
           _HoverableSummaryCard(
             icon: Icons.timer_outlined,
             label: 'Total Sessions',
             value: '$totalSessions',
             isPositive: true,
           ),
-          // Alerts: green if 0, yellow if any alerts
           _HoverableSummaryCard(
             icon: Icons.warning_amber_outlined,
             label: 'Total Alerts',
             value: '$totalAlerts',
             isPositive: totalAlerts == 0,
           ),
-          // Drowsiness: green if 0, yellow if any events
           _HoverableSummaryCard(
             icon: Icons.bedtime_outlined,
             label: 'Drowsiness Events',
             value: '$drowsinessEvents',
             isPositive: drowsinessEvents == 0,
           ),
-          // Distraction: green if 0, yellow if any events
           _HoverableSummaryCard(
             icon: Icons.visibility_off_outlined,
             label: 'Distraction Events',
@@ -337,7 +357,6 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // FIX: title on its own row to prevent overflow
             Text('Drowsiness vs Distraction Trends',
               style: TextStyle(
                 fontSize:   Responsive.responsiveFont(context, mobile: 14, tablet: 15, desktop: 16),
@@ -348,7 +367,6 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
               overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: 8),
-            // Legend + expand badge on second row
             Row(children: [
               _buildLegendItem(context, 'Drowsiness', const Color(0xFFef4444)),
               const SizedBox(width: 10),
@@ -388,12 +406,18 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
         title:    'Drowsiness vs Distraction',
         subtitle: 'Swipe chart sideways  •  Tap a point to see value',
         chartBuilder: (availableHeight) {
-          const reservedForExtras = 152.0;
-          final chartH = (availableHeight - reservedForExtras).clamp(160.0, double.infinity);
-          final screenW = MediaQuery.of(context).size.width - 32;
-          final chartW  = (parsed.xLabels.length * 64.0).clamp(screenW, double.infinity);
+          // chartH and chartW are now computed inside LayoutBuilder below
+          return LayoutBuilder(
+  builder: (context, constraints) {
+    // Measure remaining height after fixed widgets:
+    const fixedH = 122.0;
+    final chartH2  = (constraints.maxHeight - fixedH).clamp(80.0, double.infinity);
+    final chartW2  = (parsed.xLabels.length * 64.0)
+        .clamp(constraints.maxWidth, double.infinity);
 
-          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             Row(children: [
               _buildLegendItem(context, 'Drowsiness', const Color(0xFFef4444)),
               const SizedBox(width: 16),
@@ -401,11 +425,13 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
             ]),
             const SizedBox(height: 12),
             SizedBox(
-              height: chartH,
+              height: chartH2,
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 physics: const BouncingScrollPhysics(),
-                child: SizedBox(width: chartW, height: chartH,
+                child: SizedBox(
+                  width: chartW2,
+                  height: chartH2,
                   child: _buildLineChartWidget(
                     drowsySpots:     parsed.drowsySpots,
                     distractedSpots: parsed.distractedSpots,
@@ -423,12 +449,16 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
               child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                 const Icon(Icons.swipe_rounded, color: Color(0xFF475569), size: 13),
                 const SizedBox(width: 4),
-                const Text('Swipe to see all dates', style: TextStyle(color: Color(0xFF475569), fontSize: 10)),
+                const Text('Swipe to see all dates',
+                    style: TextStyle(color: Color(0xFF475569), fontSize: 10)),
               ]),
             ),
             const SizedBox(height: 12),
             if (dailyTrends.isNotEmpty) _buildLineSummaryRow(parsed),
-          ]);
+          ],
+        );
+      },
+    );
         },
       ),
     );
@@ -525,7 +555,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     );
   }
 
-  // BAR CHART CARD 
+  // BAR CHART CARD
 
   Widget _buildAlertTimelineChart(
     BuildContext context,
@@ -534,7 +564,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     return GestureDetector(
       onTap: () => _openBarChartModal(context, hourlyDist),
       child: Container(
-        height: Responsive.responsiveHeight(context, mobile: 300, tablet: 320, desktop: 340),
+       height: 220,
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: const Color(0xFF0f172a),
@@ -630,11 +660,11 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     final ampm = peakHour >= 12 ? 'PM' : 'AM';
     final h12  = peakHour > 12 ? peakHour - 12 : (peakHour == 0 ? 12 : peakHour);
     return Row(children: [
-      _summaryPill('Total Alerts', '$total',         const Color(0xFF22d3ee)),
+      _summaryPill('Total Alerts', '$total',        const Color(0xFF22d3ee)),
       const SizedBox(width: 8),
-      _summaryPill('Peak Hour',    '$h12:00 $ampm',  const Color(0xFFfbbf24)),
+      _summaryPill('Peak Hour',    '$h12:00 $ampm', const Color(0xFFfbbf24)),
       const SizedBox(width: 8),
-      _summaryPill('Peak Count',   '$peakCount',     const Color(0xFFef4444)),
+      _summaryPill('Peak Count',   '$peakCount',    const Color(0xFFef4444)),
     ]);
   }
 
@@ -653,18 +683,22 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     ));
   }
 
-  //  BAR CHART HELPERS 
+  // BAR CHART HELPERS
 
   List<Map<String, dynamic>> _previewHourDist(List<Map<String, dynamic>> hourlyDist) {
     const previewHours = [6, 9, 12, 15, 18, 21];
     final map = <int, int>{};
-    for (final r in hourlyDist) map[r['hour'] as int] = r['count'] as int;
+    for (final r in hourlyDist) {
+      map[r['hour'] as int] = r['count'] as int;
+    }
     return previewHours.map((h) => {'hour': h, 'count': map[h] ?? 0}).toList();
   }
 
   List<Map<String, dynamic>> _fullHourDist(List<Map<String, dynamic>> hourlyDist) {
     final map = <int, int>{};
-    for (final r in hourlyDist) map[r['hour'] as int] = r['count'] as int;
+    for (final r in hourlyDist) {
+      map[r['hour'] as int] = r['count'] as int;
+    }
     final result = <Map<String, dynamic>>[];
     for (int h = 0; h < 24; h++) {
       final c = map[h] ?? 0;
@@ -692,7 +726,9 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
 
     if (!showAllHours) {
       final map = <int, int>{};
-      for (final r in hourlyDist) map[r['hour'] as int] = r['count'] as int;
+      for (final r in hourlyDist) {
+        map[r['hour'] as int] = r['count'] as int;
+      }
       labels    = previewLabels;
       barGroups = List.generate(previewHours.length, (i) =>
           _buildBarGroup(context, i, (map[previewHours[i]] ?? 0).toDouble()));
@@ -794,8 +830,13 @@ class _ChartModal extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sheetHeight  = MediaQuery.of(context).size.height * 0.85;
-    const headerHeight = 136.0;
+    final isLandscape  =
+    MediaQuery.of(context).orientation == Orientation.landscape;
+    // In landscape, screen height is smaller so use more of it
+    // and reduce the header to give chart more room
+    final sheetHeight  = MediaQuery.of(context).size.height *
+        (isLandscape ? 0.95 : 0.85);
+    final headerHeight = isLandscape ? 100.0 : 136.0;
     final chartArea    = sheetHeight - headerHeight;
 
     return Container(
@@ -821,16 +862,21 @@ class _ChartModal extends StatelessWidget {
               child: const Icon(Icons.close_rounded, color: Color(0xFF94A3B8), size: 18))),
         ])),
         Divider(color: const Color(0xFF1E2D45).withValues(alpha: 0.6), height: 20),
-        Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: chartBuilder(chartArea)),
+          Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: SizedBox(
+              height: chartArea,
+              child: chartBuilder(chartArea),
+            ),
+          ),
+        ),
       ]),
     );
   }
 }
 
 // HOVERABLE SUMMARY CARD
-// Status light: green dot = good (0 events / sessions exist)
-//               yellow dot = needs attention (events detected)
 class _HoverableSummaryCard extends StatefulWidget {
   final IconData icon;
   final String label, value;
@@ -851,99 +897,153 @@ class _HoverableSummaryCardState extends State<_HoverableSummaryCard> {
   bool isHovered = false;
 
   @override
-  Widget build(BuildContext context) {
-    // Green = good/safe, Yellow = needs attention
-    final dotColor = widget.isPositive
-        ? const Color(0xFF10b981)   // green
-        : const Color(0xFFfbbf24);  // yellow
+Widget build(BuildContext context) {
+  final dotColor = widget.isPositive
+      ? const Color(0xFF10b981)
+      : const Color(0xFFfbbf24);
+  final isLandscape =
+      MediaQuery.of(context).orientation == Orientation.landscape;
 
-    return MouseRegion(
-      onEnter: (_) => setState(() => isHovered = true),
-      onExit:  (_) => setState(() => isHovered = false),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeInOut,
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          color: const Color(0xFF0f172a),
-          borderRadius: BorderRadius.circular(
-            Responsive.responsiveBorderRadius(context, mobile: 16, tablet: 18, desktop: 20),
-          ),
-          boxShadow: isHovered
-              ? [
-                  BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.8), offset: const Offset(-3, -3), blurRadius: 6),
-                  BoxShadow(color: const Color(0xFF1e293b).withValues(alpha: 0.8), offset: const Offset(3, 3),   blurRadius: 6),
-                ]
-              : const [
-                  BoxShadow(color: Color(0xFF0b1120), offset: Offset(6, 6),   blurRadius: 12),
-                  BoxShadow(color: Color(0xFF1e293b), offset: Offset(-6, -6), blurRadius: 12),
-                ],
+  // Landscape: compact layout to fit smaller card height
+  // Portrait:  original layout unchanged
+  return MouseRegion(
+    onEnter: (_) => setState(() => isHovered = true),
+    onExit:  (_) => setState(() => isHovered = false),
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeInOut,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: const Color(0xFF0f172a),
+        borderRadius: BorderRadius.circular(
+          Responsive.responsiveBorderRadius(context, mobile: 16, tablet: 18, desktop: 20),
         ),
-        padding: EdgeInsets.all(
-          Responsive.responsivePadding(context, mobile: 12, tablet: 16, desktop: 20),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                // Icon box
-                Container(
-                  padding: EdgeInsets.all(
-                    Responsive.responsivePadding(context, mobile: 8, tablet: 9, desktop: 10),
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1e293b),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(widget.icon,
-                    size:  Responsive.responsiveIconSize(context, mobile: 18, tablet: 20, desktop: 24),
-                    color: const Color(0xFF22d3ee)),
-                ),
-                // Status light dot with glow
-                Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    color: dotColor,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: dotColor.withValues(alpha: 0.6),
-                        blurRadius: 8,
-                        spreadRadius: 2,
+        boxShadow: isHovered
+            ? [
+                BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.8), offset: const Offset(-3, -3), blurRadius: 6),
+                BoxShadow(color: const Color(0xFF1e293b).withValues(alpha: 0.8), offset: const Offset(3, 3),   blurRadius: 6),
+              ]
+            : const [
+                BoxShadow(color: Color(0xFF0b1120), offset: Offset(6, 6),   blurRadius: 12),
+                BoxShadow(color: Color(0xFF1e293b), offset: Offset(-6, -6), blurRadius: 12),
+              ],
+      ),
+      padding: isLandscape
+          ? const EdgeInsets.all(10)   // compact in landscape
+          : EdgeInsets.all(            // original in portrait
+              Responsive.responsivePadding(context, mobile: 12, tablet: 16, desktop: 20),
+            ),
+      child: isLandscape
+          // ── LANDSCAPE: compact ──────────────────────────────────────
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                mainAxisSize: MainAxisSize.max,
+                children: [
+                  // Icon + dot row — stays at top
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1e293b),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(widget.icon, size: 14, color: const Color(0xFF22d3ee)),
+                      ),
+                      Container(
+                        width: 8, height: 8,
+                        decoration: BoxDecoration(
+                          color: dotColor,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: dotColor.withValues(alpha: 0.6),
+                              blurRadius: 6, spreadRadius: 1,
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
-                ),
-              ],
-            ),
-            Column(
+                  // Value + label — pinned to bottom
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(widget.value,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFFe2e8f0),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(widget.label,
+                        style: const TextStyle(fontSize: 9, color: Color(0xFF64748b)),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ],
+              )
+          //PORTRAIT
+          : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(widget.value,
-                  style: TextStyle(
-                    fontSize:   Responsive.responsiveFont(context, mobile: 24, tablet: 28, desktop: 32),
-                    fontWeight: FontWeight.bold,
-                    color:      const Color(0xFFe2e8f0),
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Container(
+                      padding: EdgeInsets.all(
+                        Responsive.responsivePadding(context, mobile: 8, tablet: 9, desktop: 10),
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1e293b),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(widget.icon,
+                        size:  Responsive.responsiveIconSize(context, mobile: 18, tablet: 20, desktop: 24),
+                        color: const Color(0xFF22d3ee)),
+                    ),
+                    Container(
+                      width: 10, height: 10,
+                      decoration: BoxDecoration(
+                        color: dotColor,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(color: dotColor.withValues(alpha: 0.6), blurRadius: 8, spreadRadius: 2),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                SizedBox(height: Responsive.responsiveSpacing(context, mobile: 4, tablet: 5, desktop: 6)),
-                Text(widget.label,
-                  style: TextStyle(
-                    fontSize: Responsive.responsiveFont(context, mobile: 10, tablet: 11, desktop: 13),
-                    color:    const Color(0xFF64748b),
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(widget.value,
+                      style: TextStyle(
+                        fontSize:   Responsive.responsiveFont(context, mobile: 24, tablet: 28, desktop: 32),
+                        fontWeight: FontWeight.bold,
+                        color:      const Color(0xFFe2e8f0),
+                      ),
+                    ),
+                    SizedBox(height: Responsive.responsiveSpacing(context, mobile: 4, tablet: 5, desktop: 6)),
+                    Text(widget.label,
+                      style: TextStyle(
+                        fontSize: Responsive.responsiveFont(context, mobile: 10, tablet: 11, desktop: 13),
+                        color:    const Color(0xFF64748b),
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
               ],
             ),
-          ],
         ),
-      ),
-    );
+      );
+    }
   }
-}

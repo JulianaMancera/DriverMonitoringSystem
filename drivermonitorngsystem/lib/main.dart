@@ -7,11 +7,11 @@ import 'screens/dashboard_screen.dart';
 import 'screens/monitor_screen.dart';
 import 'screens/analytics_screen.dart';
 import 'screens/settings_screen.dart';
-import 'screens/history_screen.dart';        
+import 'screens/history_screen.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Allows portrait and landscape orientations
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -19,20 +19,14 @@ void main() async {
     DeviceOrientation.landscapeRight,
   ]);
 
-  // Set system UI overlay style
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.light,
   ));
 
-  // Initialize database
   await DatabaseHelper.instance.database;
 
-  runApp(
-    const ProviderScope(
-      child: BantayDriveApp(),
-    ),
-  );
+  runApp(const ProviderScope(child: BantayDriveApp()));
 }
 
 class BantayDriveApp extends StatelessWidget {
@@ -59,52 +53,99 @@ class BantayDriveApp extends StatelessWidget {
   }
 }
 
-// MAIN SHELL 
-final navIndexProvider = StateProvider<int>((ref) => 0);
+// PROVIDERS
+final navIndexProvider    = StateProvider<int>((ref) => 0);
+final sidebarOpenProvider = StateProvider<bool>((ref) => false);
 
+// MAIN SHELL
 class MainShell extends ConsumerWidget {
   const MainShell({super.key});
+
+  static const List<String> _titles = [
+    'Dashboard', 'Monitor', 'Analytics', 'History', 'Settings',
+  ];
 
   static final List<Widget> _screens = [
     const DashboardScreen(),
     const MonitorScreen(),
     const AnalyticsScreen(),
-    const HistoryScreen(),            
-    const SettingsScreen(),            
+    const HistoryScreen(),
+    const SettingsScreen(),
+  ];
+
+  static const List<_NavData> _navItems = [
+    _NavData(icon: Icons.home_rounded,      label: 'Home'),
+    _NavData(icon: Icons.videocam_rounded,  label: 'Monitor'),
+    _NavData(icon: Icons.bar_chart_rounded, label: 'Analytics'),
+    _NavData(icon: Icons.history_rounded,   label: 'History'),
+    _NavData(icon: Icons.settings_rounded,  label: 'Settings'),
   ];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final currentIndex = ref.watch(navIndexProvider);
-    // Green + glow when recording, grey + no glow when idle
     final isRecording  = ref.watch(isRecordingProvider);
+    final sidebarOpen  = ref.watch(sidebarOpenProvider);
+    final isLandscape  =
+        MediaQuery.of(context).orientation == Orientation.landscape;
+
+    final isMonitor     = currentIndex == 1;
+    final isTransparent = isLandscape && isMonitor;
 
     return Scaffold(
       backgroundColor: const Color(0xFF080E1A),
+      extendBodyBehindAppBar: isTransparent,
+
       appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(60),
+        preferredSize: Size.fromHeight(isLandscape ? 46 : 60),
         child: AppBar(
-          backgroundColor: const Color(0xFF0D1627),
+          backgroundColor: isTransparent
+              ? const Color(0xFF0D1627).withOpacity(0.55)
+              : const Color(0xFF0D1627),
           elevation: 0,
           centerTitle: false,
+
+          leading: isLandscape
+              ? IconButton(
+                  icon: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 250),
+                    transitionBuilder: (child, anim) => RotationTransition(
+                      turns: Tween(begin: 0.875, end: 1.0).animate(anim),
+                      child: FadeTransition(opacity: anim, child: child),
+                    ),
+                    child: Icon(
+                      sidebarOpen
+                          ? Icons.close_rounded
+                          : Icons.menu_rounded,
+                      key: ValueKey(sidebarOpen),
+                      color: Colors.white,
+                      size: 26,
+                    ),
+                  ),
+                  // Hamburger/X toggles sidebar open/closed
+                  onPressed: () => ref
+                      .read(sidebarOpenProvider.notifier)
+                      .state = !sidebarOpen,
+                )
+              : null,
+
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                ['Dashboard', 'Monitor', 'Analytics', 'History', 'Settings']
-                    [currentIndex],
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 26,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.5,
-                ),
+                Text(
+              _titles[currentIndex],
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: isLandscape ? 18 : 26,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.5,
               ),
+            ),
               RichText(
-                text: const TextSpan(
+                text: TextSpan(
                   text: 'Connected: ',
-                  style: TextStyle(color: Colors.white54, fontSize: 13),
+                  style: TextStyle(color: Colors.white54, fontSize: isLandscape ? 10 : 13),
                   children: [
                     TextSpan(
                       text: 'USER',
@@ -118,6 +159,7 @@ class MainShell extends ConsumerWidget {
               ),
             ],
           ),
+
           actions: [
             Padding(
               padding: const EdgeInsets.only(right: 20),
@@ -128,8 +170,8 @@ class MainShell extends ConsumerWidget {
                 height: 10,
                 decoration: BoxDecoration(
                   color: isRecording
-                      ? const Color(0xFF00FF88)   // green when recording
-                      : const Color(0xFF3A4A5C),  // grey when idle
+                      ? const Color(0xFF00FF88)
+                      : const Color(0xFF3A4A5C),
                   shape: BoxShape.circle,
                   boxShadow: isRecording
                       ? [
@@ -139,36 +181,240 @@ class MainShell extends ConsumerWidget {
                             spreadRadius: 1,
                           ),
                         ]
-                      : [],                        // no glow when idle
+                      : [],
                 ),
               ),
             ),
           ],
-          bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(1),
-            child: Container(
-              height: 1,
-              color: Colors.white.withOpacity(0.05),
-            ),
-          ),
+
+          bottom: isTransparent
+              ? null
+              : PreferredSize(
+                  preferredSize: const Size.fromHeight(1),
+                  child: Container(
+                    height: 1,
+                    color: Colors.white.withOpacity(0.05),
+                  ),
+                ),
         ),
       ),
+
       body: SafeArea(
-        child: IndexedStack(
-          index: currentIndex,
-          children: _screens,
-        ),
+        // Don't add top safe area for transparent monitor — camera goes behind appbar
+        top: !isTransparent,
+        child: isLandscape
+            ? _LandscapeSidebarLayout(
+                sidebarOpen:  sidebarOpen,
+                currentIndex: currentIndex,
+                navItems:     _navItems,
+                screens:      _screens,
+                // FIX: Only navigate — do NOT close sidebar on nav tap
+                onNavTap: (i) {
+                  ref.read(navIndexProvider.notifier).state = i;
+                  // Sidebar stays open — user closes it manually with X button
+                },
+              )
+            : IndexedStack(
+                index: currentIndex,
+                children: _screens,
+              ),
       ),
-      bottomNavigationBar: _BottomNav(
-        currentIndex: currentIndex,
-        onTap: (index) =>
-            ref.read(navIndexProvider.notifier).state = index,
-      ),
+
+      bottomNavigationBar: isLandscape
+          ? null
+          : _BottomNav(
+              currentIndex: currentIndex,
+              onTap: (i) => ref.read(navIndexProvider.notifier).state = i,
+            ),
     );
   }
 }
 
-// BOTTOM NAV 
+// LANDSCAPE SIDEBAR PUSH LAYOUT
+class _LandscapeSidebarLayout extends StatelessWidget {
+  final bool sidebarOpen;
+  final int currentIndex;
+  final List<_NavData> navItems;
+  final List<Widget> screens;
+  final ValueChanged<int> onNavTap;
+
+  static const double _sidebarWidth = 200.0;
+
+  const _LandscapeSidebarLayout({
+    required this.sidebarOpen,
+    required this.currentIndex,
+    required this.navItems,
+    required this.screens,
+    required this.onNavTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        // Animated sidebar panel
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 280),
+          curve: Curves.easeInOutCubic,
+          width: sidebarOpen ? _sidebarWidth : 0,
+          child: ClipRect(
+            child: OverflowBox(
+              maxWidth: _sidebarWidth,
+              alignment: Alignment.centerLeft,
+              child: SizedBox(
+                width: _sidebarWidth,
+                child: _LandscapeSidebar(
+                  currentIndex: currentIndex,
+                  navItems:     navItems,
+                  onNavTap:     onNavTap,
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // Thin divider
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 280),
+          curve: Curves.easeInOutCubic,
+          width: sidebarOpen ? 1 : 0,
+          color: Colors.white.withOpacity(0.05),
+        ),
+
+        // Main content
+        Expanded(
+          child: IndexedStack(
+            index: currentIndex,
+            children: screens,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// LANDSCAPE SIDEBAR CONTENT
+class _LandscapeSidebar extends StatelessWidget {
+  final int currentIndex;
+  final List<_NavData> navItems;
+  final ValueChanged<int> onNavTap;
+
+  const _LandscapeSidebar({
+    required this.currentIndex,
+    required this.navItems,
+    required this.onNavTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isMonitor = currentIndex == 1;
+    final appBarH   = isMonitor ? 89.0 : 8.0;
+    final screenH    = MediaQuery.of(context).size.height;
+    final available  = screenH - appBarH - 16; // 16 = bottom padding
+    final needsScroll = available < 240;
+
+    return Container(
+      color: const Color(0xFF0D1627),
+      padding: EdgeInsets.only(
+        top:    appBarH,
+        bottom: 16,
+        left:   12,
+        right:  12,
+      ),
+      child: SingleChildScrollView(
+        physics: needsScroll
+            ? const ClampingScrollPhysics()
+            : const NeverScrollableScrollPhysics(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Section label
+            Padding(
+              padding: const EdgeInsets.only(left: 8, bottom: 12),
+              child: Text(
+                'NAVIGATION',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.3),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.4,
+                ),
+              ),
+            ),
+
+            // Nav items
+            ...navItems.asMap().entries.map((entry) {
+              final i      = entry.key;
+              final item   = entry.value;
+              final active = i == currentIndex;
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: GestureDetector(
+                  onTap: () => onNavTap(i),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeInOut,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: active
+                          ? const Color(0xFF00D4FF).withOpacity(0.12)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: active
+                            ? const Color(0xFF00D4FF).withOpacity(0.25)
+                            : Colors.transparent,
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          item.icon,
+                          size: 20,
+                          color: active
+                              ? const Color(0xFF00D4FF)
+                              : Colors.white38,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            item.label,
+                            style: TextStyle(
+                              color: active
+                                  ? const Color(0xFF00D4FF)
+                                  : Colors.white54,
+                              fontSize: 14,
+                              fontWeight: active
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
+                            ),
+                          ),
+                        ),
+                        if (active)
+                          Container(
+                            width: 4,
+                            height: 4,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF00D4FF),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+}
+// PORTRAIT BOTTOM NAV 
 class _BottomNav extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
@@ -189,7 +435,8 @@ class _BottomNav extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF0D1627),
         border: Border(
-          top: BorderSide(color: Colors.white.withOpacity(0.05), width: 1),
+          top: BorderSide(
+              color: Colors.white.withOpacity(0.05), width: 1),
         ),
         boxShadow: [
           BoxShadow(
@@ -208,13 +455,13 @@ class _BottomNav extends StatelessWidget {
               final itemWidth  = totalWidth / _items.length;
               const pillWidth  = 48.0;
               const pillHeight = 40.0;
-              final pillLeft   = currentIndex * itemWidth + (itemWidth - pillWidth) / 2;
+              final pillLeft   =
+                  currentIndex * itemWidth + (itemWidth - pillWidth) / 2;
 
               return Stack(
                 alignment: Alignment.center,
                 children: [
-
-                  // SLIDING PILL 
+                  // Sliding pill
                   AnimatedPositioned(
                     duration: const Duration(milliseconds: 280),
                     curve: Curves.easeInOutCubic,
@@ -224,11 +471,13 @@ class _BottomNav extends StatelessWidget {
                       width: pillWidth,
                       height: pillHeight,
                       decoration: BoxDecoration(
-                        color: const Color(0xFF00D4FF).withOpacity(0.13),
+                        color:
+                            const Color(0xFF00D4FF).withOpacity(0.13),
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF00D4FF).withOpacity(0.15),
+                            color: const Color(0xFF00D4FF)
+                                .withOpacity(0.15),
                             blurRadius: 10,
                             spreadRadius: 1,
                           ),
@@ -237,7 +486,7 @@ class _BottomNav extends StatelessWidget {
                     ),
                   ),
 
-                  // ICONS 
+                  // Icons
                   Row(
                     children: _items.asMap().entries.map((entry) {
                       final i      = entry.key;
@@ -252,9 +501,11 @@ class _BottomNav extends StatelessWidget {
                           height: 56,
                           child: Center(
                             child: AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 200),
+                              duration:
+                                  const Duration(milliseconds: 200),
                               transitionBuilder: (child, anim) =>
-                                  ScaleTransition(scale: anim, child: child),
+                                  ScaleTransition(
+                                      scale: anim, child: child),
                               child: Icon(
                                 item.icon,
                                 key: ValueKey('nav_${i}_$active'),
@@ -279,6 +530,7 @@ class _BottomNav extends StatelessWidget {
   }
 }
 
+// SHARED
 class _NavData {
   final IconData icon;
   final String label;
