@@ -79,6 +79,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // MODEL STATUS
   bool _modelLoaded = false;
 
+  DateTime _lastInferenceTime = DateTime.fromMillisecondsSinceEpoch(0);
+
   // LIFECYCLE
   @override
   void initState() {
@@ -168,7 +170,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
       _cameraController = CameraController(
         selectedCamera,
-        ResolutionPreset.medium,
+        ResolutionPreset.low,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.yuv420,
       );
@@ -204,14 +206,22 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _sessionStartTime = DateTime.now();
 
     if (_cameraInitialized) {
-      if (_modelLoaded) {
-        // ✅ Synchronous inference — no async/await blocking
-        _cameraController!.startImageStream((CameraImage frame) {
-          final result = TfliteService.instance.runInferenceSync(frame);
+       if (_modelLoaded) {
+        await _cameraController!.startImageStream((CameraImage frame) async {
+          // Time gate: enforce minimum 100ms between inference calls
+          // This works together with TfliteService's internal frame-skip.
+          // If the phone is slow, this prevents a growing backlog.
+          final now = DateTime.now();
+          if (now.difference(_lastInferenceTime).inMilliseconds < 100) return;
+          _lastInferenceTime = now;
+ 
+          final result = await TfliteService.instance.runInference(frame);
+ 
+          // Only call onModelOutput if result is meaningful AND widget is alive
           if (result != null && mounted && ref.read(isRecordingProvider)) {
             onModelOutput(
               state:          result.state,
-              alertnessPct:   result.neutralPct,
+              alertnessPct:   result.alertnessPct,
               drowsinessPct:  result.drowsyPct,
               distractionPct: result.distractedPct,
             );
