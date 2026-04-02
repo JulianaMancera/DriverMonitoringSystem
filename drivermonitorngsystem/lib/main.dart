@@ -97,7 +97,7 @@ class MainShell extends ConsumerWidget {
       extendBodyBehindAppBar: isTransparent,
 
       appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(60),
+        preferredSize: Size.fromHeight(isLandscape ? 46 : 60),
         child: AppBar(
           backgroundColor: isTransparent
               ? const Color(0xFF0D1627).withOpacity(0.55)
@@ -133,19 +133,19 @@ class MainShell extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                _titles[currentIndex],
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 26,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.5,
-                ),
+                Text(
+              _titles[currentIndex],
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: isLandscape ? 18 : 26,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.5,
               ),
+            ),
               RichText(
-                text: const TextSpan(
+                text: TextSpan(
                   text: 'Connected: ',
-                  style: TextStyle(color: Colors.white54, fontSize: 13),
+                  style: TextStyle(color: Colors.white54, fontSize: isLandscape ? 10 : 13),
                   children: [
                     TextSpan(
                       text: 'USER',
@@ -307,109 +307,113 @@ class _LandscapeSidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // AppBar height = 60, status bar height from MediaQuery
-    // Together these define where content should start
-    final topPadding = MediaQuery.of(context).padding.top + 60 + 12;
+    final isMonitor = currentIndex == 1;
+    final appBarH   = isMonitor ? 89.0 : 8.0;
+    final screenH    = MediaQuery.of(context).size.height;
+    final available  = screenH - appBarH - 16; // 16 = bottom padding
+    final needsScroll = available < 240;
 
     return Container(
       color: const Color(0xFF0D1627),
-      child: ListView(
-        // FIX: top padding accounts for AppBar height so items
-        // are never hidden behind the header
-        padding: EdgeInsets.only(
-          top:    topPadding,
-          bottom: 16,
-          left:   12,
-          right:  12,
-        ),
-        physics: const NeverScrollableScrollPhysics(),
-        children: [
-          // Section label
-          Padding(
-            padding: const EdgeInsets.only(left: 8, bottom: 12),
-            child: Text(
-              'NAVIGATION',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.3),
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 1.4,
-              ),
-            ),
-          ),
-
-          // Nav items
-          ...navItems.asMap().entries.map((entry) {
-            final i      = entry.key;
-            final item   = entry.value;
-            final active = i == currentIndex;
-
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: GestureDetector(
-                onTap: () => onNavTap(i),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeInOut,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: active
-                        ? const Color(0xFF00D4FF).withOpacity(0.12)
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: active
-                          ? const Color(0xFF00D4FF).withOpacity(0.25)
-                          : Colors.transparent,
-                      width: 1,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        item.icon,
-                        size: 20,
-                        color: active
-                            ? const Color(0xFF00D4FF)
-                            : Colors.white38,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          item.label,
-                          style: TextStyle(
-                            color: active
-                                ? const Color(0xFF00D4FF)
-                                : Colors.white54,
-                            fontSize: 14,
-                            fontWeight: active
-                                ? FontWeight.w600
-                                : FontWeight.w400,
-                          ),
-                        ),
-                      ),
-                      if (active)
-                        Container(
-                          width: 4,
-                          height: 4,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF00D4FF),
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                    ],
-                  ),
+      padding: EdgeInsets.only(
+        top:    appBarH,
+        bottom: 16,
+        left:   12,
+        right:  12,
+      ),
+      child: SingleChildScrollView(
+        physics: needsScroll
+            ? const ClampingScrollPhysics()
+            : const NeverScrollableScrollPhysics(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Section label
+            Padding(
+              padding: const EdgeInsets.only(left: 8, bottom: 12),
+              child: Text(
+                'NAVIGATION',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.3),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.4,
                 ),
               ),
-            );
-          }),
-        ],
+            ),
+
+            // Nav items
+            ...navItems.asMap().entries.map((entry) {
+              final i      = entry.key;
+              final item   = entry.value;
+              final active = i == currentIndex;
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: GestureDetector(
+                  onTap: () => onNavTap(i),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeInOut,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: active
+                          ? const Color(0xFF00D4FF).withOpacity(0.12)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: active
+                            ? const Color(0xFF00D4FF).withOpacity(0.25)
+                            : Colors.transparent,
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          item.icon,
+                          size: 20,
+                          color: active
+                              ? const Color(0xFF00D4FF)
+                              : Colors.white38,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            item.label,
+                            style: TextStyle(
+                              color: active
+                                  ? const Color(0xFF00D4FF)
+                                  : Colors.white54,
+                              fontSize: 14,
+                              fontWeight: active
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
+                            ),
+                          ),
+                        ),
+                        if (active)
+                          Container(
+                            width: 4,
+                            height: 4,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF00D4FF),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ],
+        ),
       ),
     );
   }
 }
-
 // PORTRAIT BOTTOM NAV 
 class _BottomNav extends StatelessWidget {
   final int currentIndex;

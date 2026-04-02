@@ -305,8 +305,6 @@ Float32List? _preprocessInIsolate(_PreprocessArgs args) {
       return null; // JPEG not handled in isolate (needs dart:ui which isn't available)
     }
 
-    if (rgbBytes == null) return null;
-
     // Resize (nearest-neighbour) + gamma + normalize in single pass
     final out    = Float32List(inputW * inputH * 3);
     final xScale = args.width  / inputW;
