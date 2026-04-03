@@ -296,7 +296,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     late final List<FlSpot>  spots;
     late final List<String>  timeLabels;
 
-    if (snapshots.isEmpty) {
+    if (snapshots.length < 2) {
       spots      = const [FlSpot(0,95), FlSpot(1,92), FlSpot(2,88), FlSpot(3,94), FlSpot(4,85), FlSpot(5,78), FlSpot(6,82)];
       timeLabels = const ['10:00', '10:10', '10:20', '10:30', '10:40', '10:50', '11:00'];
     } else {
@@ -389,7 +389,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 ),
                 borderData: FlBorderData(show: false),
                 minX: 0,
-                maxX: (spots.length - 1).toDouble(),
+                maxX: (spots.length - 1).toDouble().clamp(1.0, double.infinity),
                 minY: 50,
                 maxY: 100,
                 lineBarsData: [

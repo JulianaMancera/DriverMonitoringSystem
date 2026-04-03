@@ -549,7 +549,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
       spots: spots, isCurved: spots.length > 2, curveSmoothness: 0.3,
       color: color, barWidth: 3, isStrokeCapRound: true,
       dotData: FlDotData(show: true,
-        getDotPainter: (_, __, ___, ____) => FlDotCirclePainter(
+        getDotPainter: (_, _, _, _) => FlDotCirclePainter(
           radius: 4, color: color, strokeWidth: 2, strokeColor: const Color(0xFF0f172a))),
       belowBarData: BarAreaData(show: false),
     );
@@ -753,7 +753,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
           getTooltipColor: (_) => const Color(0xFF1e293b),
           tooltipBorderRadius: BorderRadius.circular(10),
           tooltipPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          getTooltipItem: (group, _, rod, __) => BarTooltipItem(
+          getTooltipItem: (group, _, rod, _) => BarTooltipItem(
             '${rod.toY.toInt()} alert${rod.toY.toInt() == 1 ? '' : 's'}\n${labels[group.x]}',
             TextStyle(color: const Color(0xFF22d3ee), fontWeight: FontWeight.bold, fontSize: labelFontSize)),
         ),
