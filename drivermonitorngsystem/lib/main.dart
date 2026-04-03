@@ -1,7 +1,9 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'core/database/database_helper.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/monitor_screen.dart';
@@ -57,6 +59,33 @@ class BantayDriveApp extends StatelessWidget {
 final navIndexProvider    = StateProvider<int>((ref) => 0);
 final sidebarOpenProvider = StateProvider<bool>((ref) => false);
 
+/// Fetches the device model name once on startup.
+/// Shows phone's model name (e.g. "Samsung Galaxy A54", "Acer Aspire")
+/// Falls back to "USER" if unavailable.
+final deviceNameProvider = FutureProvider<String>((ref) async {
+  try {
+    if (Platform.isAndroid) {
+      // 1st: Try user-set device name via hostname
+      final hostname = Platform.localHostname;
+      if (hostname.isNotEmpty && 
+          hostname != 'localhost' && 
+          hostname != 'android') {
+        return hostname;
+      }
+
+      final android = await DeviceInfoPlugin().androidInfo;
+
+      // 3rd: Fallback to brand + model (e.g. "Xiaomi 22111317PG")
+      return '${android.brand} ${android.model}'.trim();
+
+    } else if (Platform.isIOS) {
+      final ios = await DeviceInfoPlugin().iosInfo;
+      return ios.name;
+    }
+  } catch (_) {}
+  return 'USER';
+});
+
 // MAIN SHELL
 class MainShell extends ConsumerWidget {
   const MainShell({super.key});
@@ -89,6 +118,13 @@ class MainShell extends ConsumerWidget {
     final isLandscape  =
         MediaQuery.of(context).orientation == Orientation.landscape;
 
+    // Device name — shows phone model, falls back to 'USER' while loading
+    final deviceName = ref.watch(deviceNameProvider).when(
+      data:    (name) => name,
+      loading: () => 'USER',
+      error:   (_, __) => 'USER',
+    );
+
     final isMonitor     = currentIndex == 1;
     final isTransparent = isLandscape && isMonitor;
 
@@ -105,6 +141,7 @@ class MainShell extends ConsumerWidget {
           elevation: 0,
           centerTitle: false,
 
+          // Hamburger in landscape
           leading: isLandscape
               ? IconButton(
                   icon: AnimatedSwitcher(
@@ -122,7 +159,6 @@ class MainShell extends ConsumerWidget {
                       size: 26,
                     ),
                   ),
-                  // Hamburger/X toggles sidebar open/closed
                   onPressed: () => ref
                       .read(sidebarOpenProvider.notifier)
                       .state = !sidebarOpen,
@@ -133,23 +169,27 @@ class MainShell extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-                Text(
-              _titles[currentIndex],
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: isLandscape ? 18 : 26,
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.5,
+              Text(
+                _titles[currentIndex],
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: isLandscape ? 18 : 26,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.5,
+                ),
               ),
-            ),
               RichText(
                 text: TextSpan(
                   text: 'Connected: ',
-                  style: TextStyle(color: Colors.white54, fontSize: isLandscape ? 10 : 13),
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: isLandscape ? 10 : 13,
+                  ),
                   children: [
                     TextSpan(
-                      text: 'USER',
-                      style: TextStyle(
+                      // Shows real device name instead of hardcoded 'USER'
+                      text: deviceName,
+                      style: const TextStyle(
                         color: Color(0xFF00D4FF),
                         fontWeight: FontWeight.w600,
                       ),
@@ -200,7 +240,6 @@ class MainShell extends ConsumerWidget {
       ),
 
       body: SafeArea(
-        // Don't add top safe area for transparent monitor — camera goes behind appbar
         top: !isTransparent,
         child: isLandscape
             ? _LandscapeSidebarLayout(
@@ -208,10 +247,8 @@ class MainShell extends ConsumerWidget {
                 currentIndex: currentIndex,
                 navItems:     _navItems,
                 screens:      _screens,
-                // FIX: Only navigate — do NOT close sidebar on nav tap
                 onNavTap: (i) {
                   ref.read(navIndexProvider.notifier).state = i;
-                  // Sidebar stays open — user closes it manually with X button
                 },
               )
             : IndexedStack(
@@ -307,10 +344,10 @@ class _LandscapeSidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isMonitor = currentIndex == 1;
-    final appBarH   = isMonitor ? 89.0 : 8.0;
+    final isMonitor  = currentIndex == 1;
+    final appBarH    = isMonitor ? 89.0 : 8.0;
     final screenH    = MediaQuery.of(context).size.height;
-    final available  = screenH - appBarH - 16; // 16 = bottom padding
+    final available  = screenH - appBarH - 16;
     final needsScroll = available < 240;
 
     return Container(
@@ -414,7 +451,8 @@ class _LandscapeSidebar extends StatelessWidget {
     );
   }
 }
-// PORTRAIT BOTTOM NAV 
+
+// PORTRAIT BOTTOM NAV
 class _BottomNav extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
@@ -471,13 +509,11 @@ class _BottomNav extends StatelessWidget {
                       width: pillWidth,
                       height: pillHeight,
                       decoration: BoxDecoration(
-                        color:
-                            const Color(0xFF00D4FF).withOpacity(0.13),
+                        color: const Color(0xFF00D4FF).withOpacity(0.13),
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF00D4FF)
-                                .withOpacity(0.15),
+                            color: const Color(0xFF00D4FF).withOpacity(0.15),
                             blurRadius: 10,
                             spreadRadius: 1,
                           ),
@@ -501,11 +537,9 @@ class _BottomNav extends StatelessWidget {
                           height: 56,
                           child: Center(
                             child: AnimatedSwitcher(
-                              duration:
-                                  const Duration(milliseconds: 200),
+                              duration: const Duration(milliseconds: 200),
                               transitionBuilder: (child, anim) =>
-                                  ScaleTransition(
-                                      scale: anim, child: child),
+                                  ScaleTransition(scale: anim, child: child),
                               child: Icon(
                                 item.icon,
                                 key: ValueKey('nav_${i}_$active'),
