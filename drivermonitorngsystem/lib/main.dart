@@ -29,12 +29,11 @@ void main() async {
 
   await DatabaseHelper.instance.database;
 
-  runApp(const ProviderScope(child: BantayDriveApp()));
+  // FIX: initialize BEFORE runApp so isReady = true by the time
+  // the user can interact with the app and tap Record
+  await BantayDriveService.initialize();
 
-  // Initialize notifications AFTER runApp so it doesn't block the UI
-  WidgetsBinding.instance.addPostFrameCallback((_) async {
-    await BantayDriveService.initialize();
-  });
+  runApp(const ProviderScope(child: BantayDriveApp()));
 }
 
 class BantayDriveApp extends StatelessWidget {
@@ -56,7 +55,7 @@ class BantayDriveApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const MainShell(), 
+      home: const MainShell(),
     );
   }
 }
@@ -448,11 +447,13 @@ class _BottomNav extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF0D1627),
         border: Border(
-            top: BorderSide(color: Colors.white.withOpacity(0.05), width: 1)),
+            top: BorderSide(
+                color: Colors.white.withOpacity(0.05), width: 1)),
         boxShadow: [
           BoxShadow(
               color: Colors.black.withOpacity(0.4),
-              blurRadius: 20, offset: const Offset(0, -4)),
+              blurRadius: 20,
+              offset: const Offset(0, -4)),
         ],
       ),
       child: SafeArea(
@@ -476,14 +477,17 @@ class _BottomNav extends StatelessWidget {
                     left: pillLeft,
                     top: (56 - pillHeight) / 2,
                     child: Container(
-                      width: pillWidth, height: pillHeight,
+                      width: pillWidth,
+                      height: pillHeight,
                       decoration: BoxDecoration(
                         color: const Color(0xFF00D4FF).withOpacity(0.13),
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                              color: const Color(0xFF00D4FF).withOpacity(0.15),
-                              blurRadius: 10, spreadRadius: 1),
+                              color:
+                                  const Color(0xFF00D4FF).withOpacity(0.15),
+                              blurRadius: 10,
+                              spreadRadius: 1),
                         ],
                       ),
                     ),
@@ -497,12 +501,14 @@ class _BottomNav extends StatelessWidget {
                         onTap: () => onTap(i),
                         behavior: HitTestBehavior.opaque,
                         child: SizedBox(
-                          width: itemWidth, height: 56,
+                          width: itemWidth,
+                          height: 56,
                           child: Center(
                             child: AnimatedSwitcher(
                               duration: const Duration(milliseconds: 200),
                               transitionBuilder: (child, anim) =>
-                                  ScaleTransition(scale: anim, child: child),
+                                  ScaleTransition(
+                                      scale: anim, child: child),
                               child: Icon(
                                 item.icon,
                                 key: ValueKey('nav_${i}_$active'),

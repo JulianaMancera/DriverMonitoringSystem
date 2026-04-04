@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:camera/camera.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -31,13 +32,16 @@ class MonitorScreen extends ConsumerStatefulWidget {
 }
 
 class _MonitorScreenState extends ConsumerState<MonitorScreen>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
 
   // CAMERA
   CameraController? _cameraController;
   List<CameraDescription> _cameras = [];
   bool _cameraInitialized = false;
   String? _cameraError;
+
+  // Track whether we paused the stream on background
+  bool _streamPausedForBackground = false;
 
   // SESSION
   int? _currentSessionId;
@@ -77,11 +81,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   bool     _modelLoaded       = false;
   DateTime _lastInferenceTime = DateTime.fromMillisecondsSinceEpoch(0);
 
-  // LIFECYCLE
+  // ─── LIFECYCLE ────────────────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
     _warningController = AnimationController(
       duration: const Duration(milliseconds: 1000),
@@ -112,6 +117,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _snapshotTimer?.cancel();
     _warningController.dispose();
     _notifController?.dispose();
@@ -122,7 +128,90 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     super.dispose();
   }
 
-  // INIT
+  // Called by Android when app goes background/foreground
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) async {
+    final isRecording = ref.read(isRecordingProvider);
+
+    switch (state) {
+
+      // App going to background — MUST stop camera stream before Android kills it
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.paused:
+        if (isRecording) {
+          // Show persistent notification so user sees app is still monitoring
+          final currentDriverState = ref.read(driverStateProvider);
+          await BantayDriveService.startService(state: currentDriverState);
+        }
+        // Safely stop camera stream to prevent the fatal crash
+        await _pauseCameraStream();
+        break;
+
+      // App coming back to foreground — restart camera stream
+      case AppLifecycleState.resumed:
+        await _resumeCameraStream();
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  // Safely stop the image stream when going to background
+  Future<void> _pauseCameraStream() async {
+    if (_cameraController == null || !_cameraInitialized) return;
+    try {
+      if (_cameraController!.value.isStreamingImages) {
+        await _cameraController!.stopImageStream();
+        _streamPausedForBackground = true;
+      }
+    } catch (e) {
+      // Ignore — camera may already be closing
+    }
+  }
+
+  // Restart the image stream when coming back to foreground
+  Future<void> _resumeCameraStream() async {
+    if (_cameraController == null || !_cameraInitialized) return;
+    if (!_streamPausedForBackground) return;
+
+    try {
+      // Small delay to let Android fully restore the camera
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      // Check if controller is still usable
+      if (!_cameraController!.value.isInitialized) {
+        // Camera was fully released — need full re-init
+        await _initCamera();
+        return;
+      }
+
+      // Restart stream only if still recording
+      if (ref.read(isRecordingProvider)) {
+        await _cameraController!.startImageStream((CameraImage frame) async {
+          final now = DateTime.now();
+          if (now.difference(_lastInferenceTime).inMilliseconds < 100) return;
+          _lastInferenceTime = now;
+          final result = await TfliteService.instance.runInference(frame);
+          if (result != null && mounted && ref.read(isRecordingProvider)) {
+            onModelOutput(
+              state:          result.state,
+              alertnessPct:   result.alertnessPct,
+              drowsinessPct:  result.drowsyPct,
+              distractionPct: result.distractedPct,
+            );
+          }
+        });
+      }
+      _streamPausedForBackground = false;
+    } catch (e) {
+      _streamPausedForBackground = false;
+      // If restart fails, do a full camera re-init
+      await _initCamera();
+    }
+  }
+
+  // ─── INIT ─────────────────────────────────────────────────────────────────
 
   Future<void> _loadPreferencesAndInit() async {
     final prefs = PreferencesHelper.instance;
@@ -145,6 +234,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         (c) => c.lensDirection == CameraLensDirection.front,
         orElse: () => _cameras.first,
       );
+
+      // Dispose old controller before creating new one
+      await _cameraController?.dispose();
+
       _cameraController = CameraController(
         selectedCamera,
         ResolutionPreset.low,
@@ -153,7 +246,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       );
       await _cameraController!.initialize();
       if (mounted) {
-        setState(() => _cameraInitialized = true);
+        setState(() {
+          _cameraInitialized = true;
+          _cameraError = null;
+        });
         if (_prefAutoStart) {
           await Future.delayed(const Duration(milliseconds: 500));
           await _startRecording();
@@ -172,7 +268,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     return isLandscape ? Size(ps.width, ps.height) : Size(ps.height, ps.width);
   }
 
-  // SESSION
+  // ─── SESSION ──────────────────────────────────────────────────────────────
 
   Future<void> _startRecording() async {
     _currentSessionId = await DatabaseHelper.instance.insertSession();
@@ -203,12 +299,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(isRecordingProvider.notifier).state = true;
     ref.read(driverStateProvider.notifier).state = 'neutral';
 
-    // Start background notification — non-blocking, retry until ready
     _startNotificationWithRetry();
 
     _addLogSync('System Initialized', 'INFO');
     _addLogSync(
-      _modelLoaded ? 'AI Model Active' : 'Demo Mode — No Model',
+      _modelLoaded ? 'AI Model Active' : 'Demo Mode - No Model',
       _modelLoaded ? 'SUCCESS' : 'WARNING',
     );
     _addLogSync('Monitoring Started', 'INFO');
@@ -224,7 +319,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(dbChangeCounterProvider.notifier).state++;
   }
 
-  /// Retries startService up to 5 times with 1s delay if not ready yet
   Future<void> _startNotificationWithRetry() async {
     for (int i = 0; i < 5; i++) {
       if (BantayDriveService.isReady) {
@@ -233,7 +327,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       }
       await Future.delayed(const Duration(seconds: 1));
     }
-    // Last attempt regardless
     await BantayDriveService.startService(state: 'neutral');
   }
 
@@ -264,7 +357,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
 
     _addLogSync('Session Ended', 'INFO');
-
     BantayDriveService.stopService();
 
     ref.read(isRecordingProvider.notifier).state     = false;
@@ -280,7 +372,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(dbChangeCounterProvider.notifier).state++;
   }
 
-  // MODEL OUTPUT
+  // ─── MODEL OUTPUT ─────────────────────────────────────────────────────────
+
   void onModelOutput({
     required String state,
     required double alertnessPct,
@@ -312,11 +405,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       _checkAndTriggerAlert('DISTRACTED', _consecutiveDistracted);
       BantayDriveService.updateState('distracted');
     } else {
-      // NEUTRAL — reset counters but DO NOT dismiss banner
-      // Banner stays until user manually taps it
       _consecutiveDrowsy     = 0;
       _consecutiveDistracted = 0;
-      // Only reset alert level if no banner is currently showing
       if (!ref.read(showAlertBannerProvider)) {
         _alertLevel = 0;
       }
@@ -325,7 +415,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // ALERT SYSTEM
+  // ─── ALERT SYSTEM ─────────────────────────────────────────────────────────
 
   Future<void> _checkAndTriggerAlert(String type, int consecutive) async {
     final thresholds =
@@ -336,7 +426,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (consecutive >= thresholds[2])      newLevel = 3;
     else if (consecutive >= thresholds[1]) newLevel = 2;
 
-    // Don't re-trigger if already at this level or higher
     if (newLevel <= _alertLevel) return;
     _alertLevel = newLevel;
 
@@ -387,7 +476,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // HELPERS
+  // ─── HELPERS ──────────────────────────────────────────────────────────────
+
   void _addLogSync(String message, String type) {
     if (!mounted) return;
     final now = DateTime.now();
@@ -407,8 +497,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // FIX: Clamp alertness to chart's minY (50) before saving to DB
-  // This prevents the chart line from going below the visible area
   Future<void> _saveAlertnessSnapshot() async {
     if (_currentSessionId == null) return;
     final alertness = ref.read(alertnessPctProvider);
@@ -419,7 +507,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // BUILD
+  // ─── BUILD ────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final isDesktop   = Responsive.isDesktop(context);
@@ -455,7 +544,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // PORTRAIT LAYOUT
+  // ─── PORTRAIT LAYOUT ──────────────────────────────────────────────────────
 
   Widget _buildPortraitLayout() {
     return SingleChildScrollView(
@@ -477,12 +566,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // LANDSCAPE LAYOUT
   Widget _buildLandscapeLayout() {
     return _buildCameraWithOverlay(isLandscape: true, fullscreen: true);
   }
 
-  // DESKTOP LAYOUT
   Widget _buildDesktopLayout() {
     return Column(
       children: [
@@ -509,7 +596,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // CAMERA WITH OVERLAID BUTTONS
+  // ─── CAMERA WITH OVERLAID BUTTONS ─────────────────────────────────────────
+
   Widget _buildCameraWithOverlay({
     double? height,
     required bool isLandscape,
@@ -681,7 +769,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           children: [
             CircularProgressIndicator(color: Color(0xFF22d3ee)),
             SizedBox(height: 12),
-            Text('Initializing camera…',
+            Text('Initializing camera...',
                 style: TextStyle(color: Color(0xFF64748b), fontSize: 13)),
           ],
         ),
@@ -734,7 +822,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ALERT BANNER (L1 & L2) — stays until user taps
+  // ─── ALERT BANNER (L1 & L2) ───────────────────────────────────────────────
+
   Widget _buildAlertBanner(String type) {
     final isDrowsy  = type == 'DROWSY';
     final slideAnim = _notifSlide ?? AlwaysStoppedAnimation(Offset.zero);
@@ -772,7 +861,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                         blurRadius: 28, offset: const Offset(0, 8)),
                     BoxShadow(
                         color: Colors.red.withValues(alpha: 0.12 + 0.18 * pulse),
-                        blurRadius: 20, spreadRadius: 1, offset: const Offset(0, 2)),
+                        blurRadius: 20, spreadRadius: 1,
+                        offset: const Offset(0, 2)),
                   ],
                 ),
                 child: ClipRRect(
@@ -780,7 +870,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   child: BackdropFilter(
                     filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 12),
                       child: Row(
                         children: [
                           AnimatedBuilder(
@@ -794,7 +885,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                                   borderRadius: BorderRadius.circular(12),
                                   boxShadow: [
                                     BoxShadow(
-                                        color: Colors.red.withValues(alpha: 0.3 + 0.4 * p),
+                                        color: Colors.red
+                                            .withValues(alpha: 0.3 + 0.4 * p),
                                         blurRadius: 14, spreadRadius: 1),
                                   ],
                                 ),
@@ -810,33 +902,42 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
                                   children: [
                                     Text('BANTAY DRIVE',
                                         style: TextStyle(
-                                            color: Colors.white.withValues(alpha: 0.45),
-                                            fontSize: 10, fontWeight: FontWeight.w600,
+                                            color: Colors.white
+                                                .withValues(alpha: 0.45),
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
                                             letterSpacing: 0.8)),
                                     Text('now',
                                         style: TextStyle(
-                                            color: Colors.white.withValues(alpha: 0.35),
+                                            color: Colors.white
+                                                .withValues(alpha: 0.35),
                                             fontSize: 11)),
                                   ],
                                 ),
                                 const SizedBox(height: 3),
                                 Text(
-                                  isDrowsy ? 'Drowsiness Detected' : 'Distraction Detected',
+                                  isDrowsy
+                                      ? 'Drowsiness Detected'
+                                      : 'Distraction Detected',
                                   style: const TextStyle(
-                                      color: Colors.white, fontSize: 15,
-                                      fontWeight: FontWeight.w700, letterSpacing: 0.2),
+                                      color: Colors.white,
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.2),
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
                                   isDrowsy
-                                      ? 'Stay alert — tap to dismiss'
-                                      : 'Focus on the road — tap to dismiss',
+                                      ? 'Stay alert - tap to dismiss'
+                                      : 'Focus on the road - tap to dismiss',
                                   style: TextStyle(
-                                      color: Colors.white.withValues(alpha: 0.5),
+                                      color:
+                                          Colors.white.withValues(alpha: 0.5),
                                       fontSize: 12),
                                 ),
                               ],
@@ -849,7 +950,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                                 color: Colors.white.withValues(alpha: 0.1),
                                 shape: BoxShape.circle),
                             child: Icon(Icons.close_rounded,
-                                color: Colors.white.withValues(alpha: 0.4), size: 14),
+                                color: Colors.white.withValues(alpha: 0.4),
+                                size: 14),
                           ),
                         ],
                       ),
@@ -864,7 +966,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // WARNING OVERLAY (L3) — stays until user taps
+  // ─── WARNING OVERLAY (L3) ─────────────────────────────────────────────────
+
   Widget _buildWarningOverlay(String type) {
     final isDrowsy = type == 'DROWSY';
     return GestureDetector(
@@ -880,7 +983,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               children: [
                 BackdropFilter(
                   filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                  child: Container(color: Colors.red.withValues(alpha: 0.15)),
+                  child: Container(
+                      color: Colors.red.withValues(alpha: 0.15)),
                 ),
                 Container(
                   decoration: BoxDecoration(
@@ -888,7 +992,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                         color: Colors.red.withValues(alpha: 0.3 + 0.5 * p),
                         width: 5),
                     gradient: RadialGradient(
-                      center: Alignment.center, radius: 1.2,
+                      center: Alignment.center,
+                      radius: 1.2,
                       colors: [
                         Colors.transparent,
                         Colors.red.withValues(alpha: 0.06 + 0.10 * p),
@@ -906,12 +1011,15 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                           color: Colors.red.shade900.withValues(alpha: 0.85),
                           shape: BoxShape.circle,
                           border: Border.all(
-                              color: Colors.red.shade400.withValues(alpha: 0.6),
+                              color:
+                                  Colors.red.shade400.withValues(alpha: 0.6),
                               width: 2),
                           boxShadow: [
                             BoxShadow(
-                                color: Colors.red.withValues(alpha: 0.2 + 0.2 * p),
-                                blurRadius: 30, spreadRadius: 4)
+                                color: Colors.red
+                                    .withValues(alpha: 0.2 + 0.2 * p),
+                                blurRadius: 30,
+                                spreadRadius: 4)
                           ],
                         ),
                         child: Icon(Icons.warning_amber_rounded,
@@ -921,14 +1029,18 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       Text(
                         isDrowsy ? 'DROWSINESS' : 'DISTRACTION',
                         style: TextStyle(
-                            fontSize: 28, fontWeight: FontWeight.w900,
-                            color: Colors.red.shade300, letterSpacing: 4),
+                            fontSize: 28,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.red.shade300,
+                            letterSpacing: 4),
                       ),
                       Text(
                         'DETECTED',
                         style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.w700,
-                            color: Colors.red.shade400.withValues(alpha: 0.8),
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color:
+                                Colors.red.shade400.withValues(alpha: 0.8),
                             letterSpacing: 6),
                       ),
                       const SizedBox(height: 28),
@@ -951,7 +1063,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                             Text('Tap anywhere to dismiss',
                                 style: TextStyle(
                                     fontSize: 13,
-                                    color: Colors.white.withValues(alpha: 0.6),
+                                    color:
+                                        Colors.white.withValues(alpha: 0.6),
                                     fontWeight: FontWeight.w500,
                                     letterSpacing: 0.3)),
                           ],
@@ -963,7 +1076,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 Positioned(
                   top: 12, right: 12,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
                       color: Colors.red.shade800.withValues(alpha: 0.9),
                       borderRadius: BorderRadius.circular(20),
@@ -979,13 +1093,16 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                         Container(
                           width: 7, height: 7,
                           decoration: BoxDecoration(
-                              color: Colors.red.shade200, shape: BoxShape.circle),
+                              color: Colors.red.shade200,
+                              shape: BoxShape.circle),
                         ),
                         const SizedBox(width: 6),
                         Text('ALARM ACTIVE',
                             style: TextStyle(
-                                color: Colors.red.shade100, fontSize: 10,
-                                fontWeight: FontWeight.bold, letterSpacing: 1.0)),
+                                color: Colors.red.shade100,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1.0)),
                       ],
                     ),
                   ),
@@ -998,7 +1115,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // METRICS SIDEBAR
+  // ─── METRICS SIDEBAR ──────────────────────────────────────────────────────
+
   Widget _buildMetricsSidebar({required bool isLandscape}) {
     final alertness   = ref.watch(alertnessPctProvider);
     final drowsiness  = ref.watch(drowsinessPctProvider);
@@ -1023,7 +1141,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // SYSTEM LOG
+  // ─── SYSTEM LOG ───────────────────────────────────────────────────────────
+
   Widget _buildSystemLog() {
     return Container(
       width: double.infinity,
@@ -1031,8 +1150,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
-          BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.5), offset: const Offset(4, 4),   blurRadius: 8),
-          BoxShadow(color: const Color(0xFF1e293b).withValues(alpha: 0.5), offset: const Offset(-4, -4), blurRadius: 8),
+          BoxShadow(
+              color: const Color(0xFF0b1120).withValues(alpha: 0.5),
+              offset: const Offset(4, 4),
+              blurRadius: 8),
+          BoxShadow(
+              color: const Color(0xFF1e293b).withValues(alpha: 0.5),
+              offset: const Offset(-4, -4),
+              blurRadius: 8),
         ],
       ),
       padding: const EdgeInsets.all(14),
@@ -1041,8 +1166,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         mainAxisSize: MainAxisSize.min,
         children: [
           const Text('SYSTEM LOG',
-              style: TextStyle(color: Color(0xFF94a3b8), fontSize: 11,
-                  fontWeight: FontWeight.w600, letterSpacing: 1.5)),
+              style: TextStyle(
+                  color: Color(0xFF94a3b8),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.5)),
           const SizedBox(height: 10),
           if (_systemLogs.isEmpty)
             const Align(
@@ -1056,14 +1184,20 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               height: 120,
               child: ListView.builder(
                 physics: const BouncingScrollPhysics(),
-                itemCount: _systemLogs.length > 20 ? 20 : _systemLogs.length,
+                itemCount:
+                    _systemLogs.length > 20 ? 20 : _systemLogs.length,
                 itemBuilder: (context, index) {
                   final log = _systemLogs.reversed.toList()[index];
                   Color textColor;
                   switch (log['type']) {
-                    case 'SUCCESS': textColor = const Color(0xFF10b981); break;
-                    case 'WARNING': textColor = const Color(0xFFfbbf24); break;
-                    default:        textColor = const Color(0xFF94a3b8);
+                    case 'SUCCESS':
+                      textColor = const Color(0xFF10b981);
+                      break;
+                    case 'WARNING':
+                      textColor = const Color(0xFFfbbf24);
+                      break;
+                    default:
+                      textColor = const Color(0xFF94a3b8);
                   }
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 6),
@@ -1071,11 +1205,17 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('[${log['time']}]',
-                            style: const TextStyle(color: Color(0xFF475569), fontSize: 10, fontFamily: 'monospace')),
+                            style: const TextStyle(
+                                color: Color(0xFF475569),
+                                fontSize: 10,
+                                fontFamily: 'monospace')),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(log['message'],
-                              style: TextStyle(color: textColor, fontSize: 10, fontFamily: 'monospace')),
+                              style: TextStyle(
+                                  color: textColor,
+                                  fontSize: 10,
+                                  fontFamily: 'monospace')),
                         ),
                       ],
                     ),
@@ -1089,7 +1229,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 }
 
-// METRIC GAUGE WIDGET
+// ─── METRIC GAUGE WIDGET ──────────────────────────────────────────────────────
 
 class _MetricGauge extends StatelessWidget {
   final String   label;
@@ -1098,8 +1238,10 @@ class _MetricGauge extends StatelessWidget {
   final IconData icon;
 
   const _MetricGauge({
-    required this.label, required this.value,
-    required this.color, required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.icon,
   });
 
   @override
@@ -1113,12 +1255,24 @@ class _MetricGauge extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         boxShadow: isMaxed
             ? [
-                BoxShadow(color: color.withValues(alpha: 0.30), blurRadius: 16, spreadRadius: 2),
-                const BoxShadow(color: Color(0xFF0b1120), offset: Offset(4, 4), blurRadius: 8),
+                BoxShadow(
+                    color: color.withValues(alpha: 0.30),
+                    blurRadius: 16,
+                    spreadRadius: 2),
+                const BoxShadow(
+                    color: Color(0xFF0b1120),
+                    offset: Offset(4, 4),
+                    blurRadius: 8),
               ]
             : const [
-                BoxShadow(color: Color(0xFF0b1120), offset: Offset(6, 6),   blurRadius: 12),
-                BoxShadow(color: Color(0xFF1e293b), offset: Offset(-6, -6), blurRadius: 12),
+                BoxShadow(
+                    color: Color(0xFF0b1120),
+                    offset: Offset(6, 6),
+                    blurRadius: 12),
+                BoxShadow(
+                    color: Color(0xFF1e293b),
+                    offset: Offset(-6, -6),
+                    blurRadius: 12),
               ],
       ),
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
@@ -1130,7 +1284,11 @@ class _MetricGauge extends StatelessWidget {
             children: [
               Icon(icon, size: 13, color: color),
               const SizedBox(width: 4),
-              Text(label, style: const TextStyle(color: Color(0xFF94a3b8), fontSize: 11, fontWeight: FontWeight.w500)),
+              Text(label,
+                  style: const TextStyle(
+                      color: Color(0xFF94a3b8),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500)),
             ],
           ),
           const SizedBox(height: 12),
@@ -1145,7 +1303,8 @@ class _MetricGauge extends StatelessWidget {
                     value: 1.0,
                     strokeWidth: 5,
                     backgroundColor: Colors.transparent,
-                    valueColor: AlwaysStoppedAnimation<Color>(color.withValues(alpha: 0.18)),
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                        color.withValues(alpha: 0.18)),
                     strokeCap: StrokeCap.round,
                   ),
                 ),
@@ -1157,10 +1316,16 @@ class _MetricGauge extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text('${v.toInt()}',
-                          style: TextStyle(color: color, fontSize: 22,
-                              fontWeight: FontWeight.bold, fontFamily: 'monospace')),
-                      Text('%', style: TextStyle(color: color.withValues(alpha: 0.7),
-                          fontSize: 10, fontWeight: FontWeight.w500)),
+                          style: TextStyle(
+                              color: color,
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              fontFamily: 'monospace')),
+                      Text('%',
+                          style: TextStyle(
+                              color: color.withValues(alpha: 0.7),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w500)),
                     ],
                   ),
                 ),
@@ -1173,18 +1338,21 @@ class _MetricGauge extends StatelessWidget {
   }
 }
 
-// CAMERA OVERLAY BUTTON
+// ─── CAMERA OVERLAY BUTTON ────────────────────────────────────────────────────
 
 class _CameraOverlayButton extends StatelessWidget {
   final IconData icon;
-  final String label;
-  final bool isActive;
-  final Color activeColor;
+  final String   label;
+  final bool     isActive;
+  final Color    activeColor;
   final VoidCallback onTap;
 
   const _CameraOverlayButton({
-    required this.icon, required this.label,
-    required this.isActive, required this.activeColor, required this.onTap,
+    required this.icon,
+    required this.label,
+    required this.isActive,
+    required this.activeColor,
+    required this.onTap,
   });
 
   @override
@@ -1195,18 +1363,25 @@ class _CameraOverlayButton extends StatelessWidget {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: isActive ? activeColor.withValues(alpha: 0.18) : Colors.transparent,
+          color: isActive
+              ? activeColor.withValues(alpha: 0.18)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(22),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 18, color: isActive ? activeColor : Colors.white60),
+            Icon(icon,
+                size: 18,
+                color: isActive ? activeColor : Colors.white60),
             const SizedBox(width: 6),
-            Text(label, style: TextStyle(
-                color: isActive ? activeColor : Colors.white60,
-                fontSize: 12,
-                fontWeight: isActive ? FontWeight.w600 : FontWeight.w400)),
+            Text(label,
+                style: TextStyle(
+                    color: isActive ? activeColor : Colors.white60,
+                    fontSize: 12,
+                    fontWeight: isActive
+                        ? FontWeight.w600
+                        : FontWeight.w400)),
           ],
         ),
       ),
