@@ -180,33 +180,32 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _sessionStartTime = DateTime.now();
 
     if (_cameraInitialized && _modelLoaded) {
-        try {
-          await _cameraController!.startImageStream((CameraImage frame) async {
-            final now = DateTime.now();
-            if (now.difference(_lastInferenceTime).inMilliseconds < 100) return;
-            _lastInferenceTime = now;
-            final result = await TfliteService.instance.runInference(frame);
-            if (result != null && mounted && ref.read(isRecordingProvider)) {
-              onModelOutput(
-                state:          result.state,
-                alertnessPct:   result.alertnessPct,
-                drowsinessPct:  result.drowsyPct,
-                distractionPct: result.distractedPct,
-              );
-            }
-          });
-        } catch (e) {
-          _addLogSync('Inference stream error: $e', 'WARNING');
-        }
+      try {
+        await _cameraController!.startImageStream((CameraImage frame) async {
+          final now = DateTime.now();
+          if (now.difference(_lastInferenceTime).inMilliseconds < 100) return;
+          _lastInferenceTime = now;
+          final result = await TfliteService.instance.runInference(frame);
+          if (result != null && mounted && ref.read(isRecordingProvider)) {
+            onModelOutput(
+              state:          result.state,
+              alertnessPct:   result.alertnessPct,
+              drowsinessPct:  result.drowsyPct,
+              distractionPct: result.distractedPct,
+            );
+          }
+        });
+      } catch (e) {
+        _addLogSync('Inference stream error: $e', 'WARNING');
+      }
     }
 
     ref.read(isRecordingProvider.notifier).state = true;
     ref.read(driverStateProvider.notifier).state = 'neutral';
 
-    // Start background notification — non-blocking
-    BantayDriveService.startService(state: 'neutral');
+    // Start background notification — non-blocking, retry until ready
+    _startNotificationWithRetry();
 
-    // Add logs immediately
     _addLogSync('System Initialized', 'INFO');
     _addLogSync(
       _modelLoaded ? 'AI Model Active' : 'Demo Mode — No Model',
@@ -225,6 +224,19 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(dbChangeCounterProvider.notifier).state++;
   }
 
+  /// Retries startService up to 5 times with 1s delay if not ready yet
+  Future<void> _startNotificationWithRetry() async {
+    for (int i = 0; i < 5; i++) {
+      if (BantayDriveService.isReady) {
+        await BantayDriveService.startService(state: 'neutral');
+        return;
+      }
+      await Future.delayed(const Duration(seconds: 1));
+    }
+    // Last attempt regardless
+    await BantayDriveService.startService(state: 'neutral');
+  }
+
   Future<void> _stopRecording() async {
     if (_currentSessionId == null) return;
 
@@ -234,13 +246,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _consecutiveDrowsy     = 0;
     _consecutiveDistracted = 0;
 
-    // Stop image stream first
     if (_cameraInitialized && _cameraController!.value.isStreamingImages) {
       try {
         await _cameraController!.stopImageStream();
       } catch (_) {}
     }
-
 
     final durationSec = _sessionStartTime != null
         ? DateTime.now().difference(_sessionStartTime!).inSeconds : 0;
@@ -255,7 +265,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     _addLogSync('Session Ended', 'INFO');
 
-    // Stop background notification
     BantayDriveService.stopService();
 
     ref.read(isRecordingProvider.notifier).state     = false;
@@ -272,7 +281,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   // MODEL OUTPUT
-
   void onModelOutput({
     required String state,
     required double alertnessPct,
@@ -304,10 +312,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       _checkAndTriggerAlert('DISTRACTED', _consecutiveDistracted);
       BantayDriveService.updateState('distracted');
     } else {
+      // NEUTRAL — reset counters but DO NOT dismiss banner
+      // Banner stays until user manually taps it
       _consecutiveDrowsy     = 0;
       _consecutiveDistracted = 0;
-      _alertLevel            = 0;
-      ref.read(showAlertBannerProvider.notifier).state = false;
+      // Only reset alert level if no banner is currently showing
+      if (!ref.read(showAlertBannerProvider)) {
+        _alertLevel = 0;
+      }
       _alarmPlayer.stop();
       BantayDriveService.updateState('neutral');
     }
@@ -324,7 +336,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (consecutive >= thresholds[2])      newLevel = 3;
     else if (consecutive >= thresholds[1]) newLevel = 2;
 
-    if (newLevel <= _alertLevel && _alertLevel == 3) return;
+    // Don't re-trigger if already at this level or higher
+    if (newLevel <= _alertLevel) return;
     _alertLevel = newLevel;
 
     ref.read(showAlertBannerProvider.notifier).state = true;
@@ -375,7 +388,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   // HELPERS
-
   void _addLogSync(String message, String type) {
     if (!mounted) return;
     final now = DateTime.now();
@@ -395,17 +407,19 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
+  // FIX: Clamp alertness to chart's minY (50) before saving to DB
+  // This prevents the chart line from going below the visible area
   Future<void> _saveAlertnessSnapshot() async {
     if (_currentSessionId == null) return;
     final alertness = ref.read(alertnessPctProvider);
+    final clamped = alertness.clamp(50.0, 100.0);
     await DatabaseHelper.instance.insertAlertnesSnapshot(
       sessionId:    _currentSessionId!,
-      alertnessPct: alertness,
+      alertnessPct: clamped,
     );
   }
 
   // BUILD
-
   @override
   Widget build(BuildContext context) {
     final isDesktop   = Responsive.isDesktop(context);
@@ -496,7 +510,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   // CAMERA WITH OVERLAID BUTTONS
-
   Widget _buildCameraWithOverlay({
     double? height,
     required bool isLandscape,
@@ -528,7 +541,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           _buildGradientOverlay(),
           if (isRecording) _buildRecBadge(),
 
-          // AI ON / DEMO badge
           Positioned(
             top: 12, left: 12,
             child: Container(
@@ -560,7 +572,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             ),
           ),
 
-          // Overlaid buttons
           Positioned(
             bottom: fullscreen ? 20 : 14,
             left: 0, right: 0,
@@ -723,8 +734,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ALERT BANNER (L1 & L2)
-
+  // ALERT BANNER (L1 & L2) — stays until user taps
   Widget _buildAlertBanner(String type) {
     final isDrowsy  = type == 'DROWSY';
     final slideAnim = _notifSlide ?? AlwaysStoppedAnimation(Offset.zero);
@@ -854,8 +864,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // WARNING OVERLAY (L3)
-
+  // WARNING OVERLAY (L3) — stays until user taps
   Widget _buildWarningOverlay(String type) {
     final isDrowsy = type == 'DROWSY';
     return GestureDetector(
@@ -954,8 +963,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 Positioned(
                   top: 12, right: 12,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 5),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
                       color: Colors.red.shade800.withValues(alpha: 0.9),
                       borderRadius: BorderRadius.circular(20),
@@ -991,7 +999,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   // METRICS SIDEBAR
-
   Widget _buildMetricsSidebar({required bool isLandscape}) {
     final alertness   = ref.watch(alertnessPctProvider);
     final drowsiness  = ref.watch(drowsinessPctProvider);
@@ -1002,32 +1009,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         IntrinsicHeight(
           child: Row(
             children: [
-              Expanded(
-                child: _MetricGauge(
-                  label: 'Alertness',
-                  value: alertness,
-                  color: const Color(0xFF22d3ee),
-                  icon: Icons.bolt,
-                ),
-              ),
+              Expanded(child: _MetricGauge(label: 'Alertness',   value: alertness,   color: const Color(0xFF22d3ee), icon: Icons.bolt)),
               const SizedBox(width: 12),
-              Expanded(
-                child: _MetricGauge(
-                  label: 'Drowsiness',
-                  value: drowsiness,
-                  color: const Color(0xFFef4444),
-                  icon: Icons.visibility_off,
-                ),
-              ),
+              Expanded(child: _MetricGauge(label: 'Drowsiness',  value: drowsiness,  color: const Color(0xFFef4444), icon: Icons.visibility_off)),
               const SizedBox(width: 12),
-              Expanded(
-                child: _MetricGauge(
-                  label: 'Distraction',
-                  value: distraction,
-                  color: const Color(0xFFfbbf24),
-                  icon: Icons.visibility,
-                ),
-              ),
+              Expanded(child: _MetricGauge(label: 'Distraction', value: distraction, color: const Color(0xFFfbbf24), icon: Icons.visibility)),
             ],
           ),
         ),
@@ -1038,7 +1024,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   // SYSTEM LOG
-
   Widget _buildSystemLog() {
     return Container(
       width: double.infinity,
@@ -1046,12 +1031,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
-          BoxShadow(
-              color: const Color(0xFF0b1120).withValues(alpha: 0.5),
-              offset: const Offset(4, 4), blurRadius: 8),
-          BoxShadow(
-              color: const Color(0xFF1e293b).withValues(alpha: 0.5),
-              offset: const Offset(-4, -4), blurRadius: 8),
+          BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.5), offset: const Offset(4, 4),   blurRadius: 8),
+          BoxShadow(color: const Color(0xFF1e293b).withValues(alpha: 0.5), offset: const Offset(-4, -4), blurRadius: 8),
         ],
       ),
       padding: const EdgeInsets.all(14),
@@ -1060,18 +1041,15 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         mainAxisSize: MainAxisSize.min,
         children: [
           const Text('SYSTEM LOG',
-              style: TextStyle(
-                  color: Color(0xFF94a3b8), fontSize: 11,
+              style: TextStyle(color: Color(0xFF94a3b8), fontSize: 11,
                   fontWeight: FontWeight.w600, letterSpacing: 1.5)),
           const SizedBox(height: 10),
           if (_systemLogs.isEmpty)
             const Align(
               alignment: Alignment.topCenter,
-              child: Text(
-                'No logs yet. Start recording to begin.',
-                style: TextStyle(color: Colors.white24, fontSize: 12),
-                textAlign: TextAlign.center,
-              ),
+              child: Text('No logs yet. Start recording to begin.',
+                  style: TextStyle(color: Colors.white24, fontSize: 12),
+                  textAlign: TextAlign.center),
             )
           else
             SizedBox(
@@ -1093,15 +1071,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('[${log['time']}]',
-                            style: const TextStyle(
-                                color: Color(0xFF475569), fontSize: 10,
-                                fontFamily: 'monospace')),
+                            style: const TextStyle(color: Color(0xFF475569), fontSize: 10, fontFamily: 'monospace')),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(log['message'],
-                              style: TextStyle(
-                                  color: textColor, fontSize: 10,
-                                  fontFamily: 'monospace')),
+                              style: TextStyle(color: textColor, fontSize: 10, fontFamily: 'monospace')),
                         ),
                       ],
                     ),
@@ -1124,10 +1098,8 @@ class _MetricGauge extends StatelessWidget {
   final IconData icon;
 
   const _MetricGauge({
-    required this.label,
-    required this.value,
-    required this.color,
-    required this.icon,
+    required this.label, required this.value,
+    required this.color, required this.icon,
   });
 
   @override
@@ -1141,18 +1113,12 @@ class _MetricGauge extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         boxShadow: isMaxed
             ? [
-                BoxShadow(
-                    color: color.withValues(alpha: 0.30),
-                    blurRadius: 16, spreadRadius: 2),
-                const BoxShadow(
-                    color: Color(0xFF0b1120),
-                    offset: Offset(4, 4), blurRadius: 8),
+                BoxShadow(color: color.withValues(alpha: 0.30), blurRadius: 16, spreadRadius: 2),
+                const BoxShadow(color: Color(0xFF0b1120), offset: Offset(4, 4), blurRadius: 8),
               ]
             : const [
-                BoxShadow(color: Color(0xFF0b1120),
-                    offset: Offset(6, 6), blurRadius: 12),
-                BoxShadow(color: Color(0xFF1e293b),
-                    offset: Offset(-6, -6), blurRadius: 12),
+                BoxShadow(color: Color(0xFF0b1120), offset: Offset(6, 6),   blurRadius: 12),
+                BoxShadow(color: Color(0xFF1e293b), offset: Offset(-6, -6), blurRadius: 12),
               ],
       ),
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
@@ -1164,10 +1130,7 @@ class _MetricGauge extends StatelessWidget {
             children: [
               Icon(icon, size: 13, color: color),
               const SizedBox(width: 4),
-              Text(label,
-                  style: const TextStyle(
-                      color: Color(0xFF94a3b8),
-                      fontSize: 11, fontWeight: FontWeight.w500)),
+              Text(label, style: const TextStyle(color: Color(0xFF94a3b8), fontSize: 11, fontWeight: FontWeight.w500)),
             ],
           ),
           const SizedBox(height: 12),
@@ -1182,9 +1145,7 @@ class _MetricGauge extends StatelessWidget {
                     value: 1.0,
                     strokeWidth: 5,
                     backgroundColor: Colors.transparent,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      color.withValues(alpha: 0.18),
-                    ),
+                    valueColor: AlwaysStoppedAnimation<Color>(color.withValues(alpha: 0.18)),
                     strokeCap: StrokeCap.round,
                   ),
                 ),
@@ -1195,23 +1156,11 @@ class _MetricGauge extends StatelessWidget {
                   builder: (_, v, __) => Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        '${v.toInt()}',
-                        style: TextStyle(
-                          color: color,
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                      Text(
-                        '%',
-                        style: TextStyle(
-                          color: color.withValues(alpha: 0.7),
-                          fontSize: 10,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
+                      Text('${v.toInt()}',
+                          style: TextStyle(color: color, fontSize: 22,
+                              fontWeight: FontWeight.bold, fontFamily: 'monospace')),
+                      Text('%', style: TextStyle(color: color.withValues(alpha: 0.7),
+                          fontSize: 10, fontWeight: FontWeight.w500)),
                     ],
                   ),
                 ),
@@ -1234,11 +1183,8 @@ class _CameraOverlayButton extends StatelessWidget {
   final VoidCallback onTap;
 
   const _CameraOverlayButton({
-    required this.icon,
-    required this.label,
-    required this.isActive,
-    required this.activeColor,
-    required this.onTap,
+    required this.icon, required this.label,
+    required this.isActive, required this.activeColor, required this.onTap,
   });
 
   @override
@@ -1249,24 +1195,18 @@ class _CameraOverlayButton extends StatelessWidget {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: isActive
-              ? activeColor.withValues(alpha: 0.18)
-              : Colors.transparent,
+          color: isActive ? activeColor.withValues(alpha: 0.18) : Colors.transparent,
           borderRadius: BorderRadius.circular(22),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 18,
-                color: isActive ? activeColor : Colors.white60),
+            Icon(icon, size: 18, color: isActive ? activeColor : Colors.white60),
             const SizedBox(width: 6),
-            Text(label,
-                style: TextStyle(
-                    color: isActive ? activeColor : Colors.white60,
-                    fontSize: 12,
-                    fontWeight: isActive
-                        ? FontWeight.w600
-                        : FontWeight.w400)),
+            Text(label, style: TextStyle(
+                color: isActive ? activeColor : Colors.white60,
+                fontSize: 12,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.w400)),
           ],
         ),
       ),

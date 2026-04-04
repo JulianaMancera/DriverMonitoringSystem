@@ -5,7 +5,10 @@ class BantayDriveService {
   static const  _channelId = 'bantay_drive_monitoring';
   static bool   _ready     = false;
 
-  // ── INIT — call in main() before runApp(), no await needed ───────────────
+  /// Public getter so monitor_screen can check before calling
+  static bool get isReady => _ready;
+
+  // INIT — call in main() before runApp(), no await needed 
 
   static Future<void> initialize() async {
     try {
@@ -13,7 +16,6 @@ class BantayDriveService {
       const settings = InitializationSettings(android: android);
       await _notif.initialize(settings: settings);
 
-      // Request notification permission (Android 13+)
       final androidPlugin = _notif
           .resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>();
@@ -27,8 +29,7 @@ class BantayDriveService {
     }
   }
 
-  // ── START — call when recording begins ───────────────────────────────────
-
+  //  START — call when recording begins 
   static Future<void> startService({String state = 'neutral'}) async {
     if (!_ready) return;
     try {
@@ -41,8 +42,7 @@ class BantayDriveService {
     } catch (_) {}
   }
 
-  // ── STOP — call when recording ends ──────────────────────────────────────
-
+  // STOP — call when recording ends 
   static Future<void> stopService() async {
     if (!_ready) return;
     try {
@@ -51,7 +51,7 @@ class BantayDriveService {
     } catch (_) {}
   }
 
-  // ── UPDATE STATE — call when driver state changes ─────────────────────────
+  // uPDATE STATE — call when driver state changes 
 
   static Future<void> updateState(String state) async {
     if (!_ready) return;
@@ -65,7 +65,7 @@ class BantayDriveService {
     } catch (_) {}
   }
 
-  // ── ALERT NOTIFICATION — shows when alert triggers ───────────────────────
+  // ALERT NOTIFICATION — shows on L1/L2/L3 
 
   static Future<void> showAlertNotification(String type) async {
     if (!_ready) return;
@@ -86,8 +86,7 @@ class BantayDriveService {
     } catch (_) {}
   }
 
-  // ── HELPERS ───────────────────────────────────────────────────────────────
-
+  // HELPERS 
   static String _notifText(String state) {
     switch (state) {
       case 'drowsy':     return '😴 Drowsiness detected — stay alert!';
@@ -102,12 +101,12 @@ class BantayDriveService {
         _channelId,
         'Bantay Drive Monitoring',
         channelDescription: 'Shows when Bantay Drive is actively monitoring.',
-        importance:    important ? Importance.high : Importance.defaultImportance,
-        priority:      important ? Priority.high   : Priority.defaultPriority,
-        ongoing:       !important,
-        onlyAlertOnce: true,
-        autoCancel:    important,
-        playSound:     important,
+        importance:      important ? Importance.high : Importance.defaultImportance,
+        priority:        important ? Priority.high   : Priority.defaultPriority,
+        ongoing:         !important,
+        onlyAlertOnce:   true,
+        autoCancel:      important,
+        playSound:       important,
         enableVibration: important,
       ),
     );
