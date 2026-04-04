@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class BantayDriveService {
@@ -12,18 +13,21 @@ class BantayDriveService {
   // ─── INIT ─────────────────────────────────────────────────────────────────
   static Future<void> initialize() async {
     try {
+      debugPrint('>>> [BantayDrive] initialize() called');
+
       const android  = AndroidInitializationSettings('@mipmap/ic_launcher');
       const settings = InitializationSettings(android: android);
 
-      // v21: initialize() uses named parameter 'settings'
       await _notif.initialize(settings: settings);
+      debugPrint('>>> [BantayDrive] _notif.initialize done');
 
       final androidPlugin = _notif
           .resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>();
 
       if (androidPlugin != null) {
-        await androidPlugin.requestNotificationsPermission();
+        final permResult = await androidPlugin.requestNotificationsPermission();
+        debugPrint('>>> [BantayDrive] permission granted: $permResult');
 
         // Channel 1 — Persistent monitoring (silent, ongoing, cannot be swiped)
         await androidPlugin.createNotificationChannel(
@@ -38,6 +42,7 @@ class BantayDriveService {
             showBadge:       false,
           ),
         );
+        debugPrint('>>> [BantayDrive] monitoring channel created');
 
         // Channel 2 — Alert notifications (heads-up, sound, vibration)
         await androidPlugin.createNotificationChannel(
@@ -52,36 +57,49 @@ class BantayDriveService {
             showBadge:       true,
           ),
         );
+        debugPrint('>>> [BantayDrive] alerts channel created');
+      } else {
+        debugPrint('>>> [BantayDrive] WARNING: androidPlugin is null!');
       }
 
       _ready = true;
-    } catch (_) {
+      debugPrint('>>> [BantayDrive] READY = true');
+
+    } catch (e, stack) {
+      debugPrint('>>> [BantayDrive] initialize() FAILED: $e');
+      debugPrint('>>> [BantayDrive] $stack');
       _ready = false;
     }
   }
 
   // ─── START ────────────────────────────────────────────────────────────────
   static Future<void> startService({String state = 'neutral'}) async {
+    debugPrint('>>> [BantayDrive] startService() isReady=$_ready state=$state');
     if (!_ready) return;
     try {
-      // v21: show() uses all named parameters
       await _notif.show(
         id:                  1001,
         title:               'Bantay Drive',
         body:                _monitoringText(state),
         notificationDetails: _monitoringDetails(),
       );
-    } catch (_) {}
+      debugPrint('>>> [BantayDrive] startService() notification shown OK');
+    } catch (e) {
+      debugPrint('>>> [BantayDrive] startService() FAILED: $e');
+    }
   }
 
   // ─── STOP ─────────────────────────────────────────────────────────────────
   static Future<void> stopService() async {
+    debugPrint('>>> [BantayDrive] stopService() called');
     if (!_ready) return;
     try {
-      // v21: cancel() uses named parameter 'id'
       await _notif.cancel(id: 1001);
       await _notif.cancel(id: 1002);
-    } catch (_) {}
+      debugPrint('>>> [BantayDrive] notifications cancelled');
+    } catch (e) {
+      debugPrint('>>> [BantayDrive] stopService() FAILED: $e');
+    }
   }
 
   // ─── UPDATE STATE ─────────────────────────────────────────────────────────
@@ -94,7 +112,9 @@ class BantayDriveService {
         body:                _monitoringText(state),
         notificationDetails: _monitoringDetails(),
       );
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('>>> [BantayDrive] updateState() FAILED: $e');
+    }
   }
 
   // ─── ALERT NOTIFICATION ───────────────────────────────────────────────────
@@ -115,7 +135,9 @@ class BantayDriveService {
           await _notif.cancel(id: 1002);
         } catch (_) {}
       });
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('>>> [BantayDrive] showAlertNotification() FAILED: $e');
+    }
   }
 
   // ─── PRIVATE HELPERS ──────────────────────────────────────────────────────
@@ -140,9 +162,9 @@ class BantayDriveService {
             'Persistent notification shown while Bantay Drive is actively monitoring.',
         importance:      Importance.low,
         priority:        Priority.low,
-        ongoing:         true,   // ← cannot be swiped away (like Waze)
-        onlyAlertOnce:   true,   // ← silent re-updates
-        autoCancel:      false,  // ← stays even if tapped
+        ongoing:         true,
+        onlyAlertOnce:   true,
+        autoCancel:      false,
         playSound:       false,
         enableVibration: false,
         showWhen:        false,
