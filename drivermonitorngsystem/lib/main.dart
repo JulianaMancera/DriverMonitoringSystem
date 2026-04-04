@@ -4,9 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:device_info_plus/device_info_plus.dart';
-import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'core/database/database_helper.dart';
-import 'core/services/foreground_service.dart';
+import 'core/services/notifications.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/monitor_screen.dart';
 import 'screens/analytics_screen.dart';
@@ -30,10 +29,12 @@ void main() async {
 
   await DatabaseHelper.instance.database;
 
-  // Initialize foreground service (must be before runApp)
-  BantayDriveService.initialize();
-
   runApp(const ProviderScope(child: BantayDriveApp()));
+
+  // Initialize notifications AFTER runApp so it doesn't block the UI
+  WidgetsBinding.instance.addPostFrameCallback((_) async {
+    await BantayDriveService.initialize();
+  });
 }
 
 class BantayDriveApp extends StatelessWidget {
@@ -55,16 +56,12 @@ class BantayDriveApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      // WithForegroundTask wraps the app to handle foreground service lifecycle
-      home: WithForegroundTask(child: const MainShell()),
+      home: const MainShell(), 
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // PROVIDERS
-// ─────────────────────────────────────────────────────────────────────────────
-
 final navIndexProvider    = StateProvider<int>((ref) => 0);
 final sidebarOpenProvider = StateProvider<bool>((ref) => false);
 
@@ -87,10 +84,7 @@ final deviceNameProvider = FutureProvider<String>((ref) async {
   return 'USER';
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
 // MAIN SHELL
-// ─────────────────────────────────────────────────────────────────────────────
-
 class MainShell extends ConsumerWidget {
   const MainShell({super.key});
 
@@ -266,10 +260,7 @@ class MainShell extends ConsumerWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // LANDSCAPE SIDEBAR PUSH LAYOUT
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _LandscapeSidebarLayout extends StatelessWidget {
   final bool sidebarOpen;
   final int currentIndex;
@@ -327,10 +318,7 @@ class _LandscapeSidebarLayout extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // LANDSCAPE SIDEBAR CONTENT
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _LandscapeSidebar extends StatelessWidget {
   final int currentIndex;
   final List<_NavData> navItems;
@@ -439,10 +427,7 @@ class _LandscapeSidebar extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // PORTRAIT BOTTOM NAV
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _BottomNav extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
@@ -542,10 +527,7 @@ class _BottomNav extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // SHARED
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _NavData {
   final IconData icon;
   final String label;

@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/legacy.dart';
 import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
 import '../core/inference/tflite_service.dart';
+import '../core/services/notifications.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import '../utils/responsive.dart';
 
@@ -76,7 +77,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   bool     _modelLoaded       = false;
   DateTime _lastInferenceTime = DateTime.fromMillisecondsSinceEpoch(0);
 
-  // LIFECYCLE 
+  // LIFECYCLE
 
   @override
   void initState() {
@@ -121,7 +122,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     super.dispose();
   }
 
-  // ── INIT ───────────────────────────────────────────────────────────────────
+  // INIT
 
   Future<void> _loadPreferencesAndInit() async {
     final prefs = PreferencesHelper.instance;
@@ -171,48 +172,55 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     return isLandscape ? Size(ps.width, ps.height) : Size(ps.height, ps.width);
   }
 
-  //  SESSION 
+  // SESSION
+
   Future<void> _startRecording() async {
     _currentSessionId = await DatabaseHelper.instance.insertSession();
     await DatabaseHelper.instance.insertStateCount(_currentSessionId!);
     _sessionStartTime = DateTime.now();
 
     if (_cameraInitialized && _modelLoaded) {
-      await _cameraController!.startImageStream((CameraImage frame) async {
-        final now = DateTime.now();
-        if (now.difference(_lastInferenceTime).inMilliseconds < 100) return;
-        _lastInferenceTime = now;
-        final result = await TfliteService.instance.runInference(frame);
-        if (result != null && mounted && ref.read(isRecordingProvider)) {
-          onModelOutput(
-            state:          result.state,
-            alertnessPct:   result.alertnessPct,
-            drowsinessPct:  result.drowsyPct,
-            distractionPct: result.distractedPct,
-          );
+        try {
+          await _cameraController!.startImageStream((CameraImage frame) async {
+            final now = DateTime.now();
+            if (now.difference(_lastInferenceTime).inMilliseconds < 100) return;
+            _lastInferenceTime = now;
+            final result = await TfliteService.instance.runInference(frame);
+            if (result != null && mounted && ref.read(isRecordingProvider)) {
+              onModelOutput(
+                state:          result.state,
+                alertnessPct:   result.alertnessPct,
+                drowsinessPct:  result.drowsyPct,
+                distractionPct: result.distractedPct,
+              );
+            }
+          });
+        } catch (e) {
+          _addLogSync('Inference stream error: $e', 'WARNING');
         }
-      });
     }
 
     ref.read(isRecordingProvider.notifier).state = true;
     ref.read(driverStateProvider.notifier).state = 'neutral';
 
-    await _addLog('System Initialized', 'INFO');
-    await Future.delayed(const Duration(milliseconds: 500));
-    await _addLog(
-        _modelLoaded ? 'AI Model Active' : 'Demo Mode — No Model',
-        _modelLoaded ? 'SUCCESS' : 'WARNING');
-    await Future.delayed(const Duration(milliseconds: 400));
-    await _addLog('Monitoring Started', 'INFO');
+    // Start background notification — non-blocking
+    BantayDriveService.startService(state: 'neutral');
+
+    // Add logs immediately
+    _addLogSync('System Initialized', 'INFO');
+    _addLogSync(
+      _modelLoaded ? 'AI Model Active' : 'Demo Mode — No Model',
+      _modelLoaded ? 'SUCCESS' : 'WARNING',
+    );
+    _addLogSync('Monitoring Started', 'INFO');
+
+    if (ref.read(clearGlassesProvider)) {
+      _addLogSync('Clear Glasses Mode Active', 'INFO');
+    }
 
     _snapshotTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       _saveAlertnessSnapshot();
     });
-
-    if (ref.read(clearGlassesProvider)) {
-      await Future.delayed(const Duration(milliseconds: 300));
-      await _addLog('Clear Glasses Mode Active', 'INFO');
-    }
 
     ref.read(dbChangeCounterProvider.notifier).state++;
   }
@@ -226,9 +234,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _consecutiveDrowsy     = 0;
     _consecutiveDistracted = 0;
 
+    // Stop image stream first
     if (_cameraInitialized && _cameraController!.value.isStreamingImages) {
-      await _cameraController!.stopImageStream();
+      try {
+        await _cameraController!.stopImageStream();
+      } catch (_) {}
     }
+
 
     final durationSec = _sessionStartTime != null
         ? DateTime.now().difference(_sessionStartTime!).inSeconds : 0;
@@ -241,7 +253,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       safetyScore:  alertness.clamp(0.0, 100.0),
     );
 
-    await _addLog('Session Ended', 'INFO');
+    _addLogSync('Session Ended', 'INFO');
+
+    // Stop background notification
+    BantayDriveService.stopService();
 
     ref.read(isRecordingProvider.notifier).state     = false;
     ref.read(driverStateProvider.notifier).state     = 'neutral';
@@ -256,7 +271,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(dbChangeCounterProvider.notifier).state++;
   }
 
-  // MODEL OUTPUT 
+  // MODEL OUTPUT
 
   void onModelOutput({
     required String state,
@@ -282,16 +297,19 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       _consecutiveDrowsy++;
       _consecutiveDistracted = 0;
       _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy);
+      BantayDriveService.updateState('drowsy');
     } else if (state == 'distracted') {
       _consecutiveDistracted++;
       _consecutiveDrowsy = 0;
       _checkAndTriggerAlert('DISTRACTED', _consecutiveDistracted);
+      BantayDriveService.updateState('distracted');
     } else {
       _consecutiveDrowsy     = 0;
       _consecutiveDistracted = 0;
       _alertLevel            = 0;
       ref.read(showAlertBannerProvider.notifier).state = false;
       _alarmPlayer.stop();
+      BantayDriveService.updateState('neutral');
     }
   }
 
@@ -312,9 +330,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(showAlertBannerProvider.notifier).state = true;
     ref.read(alertBannerTypeProvider.notifier).state = type;
 
-    // FIX: L1/L2 — show banner, NO auto-dismiss timer
-    // User must manually tap or swipe to dismiss
     if (newLevel < 3) _notifController?.forward(from: 0.0);
+
+    BantayDriveService.showAlertNotification(type);
 
     if (_currentSessionId != null) {
       await DatabaseHelper.instance.insertAlertEvent(
@@ -322,14 +340,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         alertType:  type,
         alertLevel: newLevel,
       );
-      await _addLog(
-          type == 'DROWSY' ? 'Microsleep detected' : 'Distraction detected',
-          'WARNING');
+      _addLogSync(
+        type == 'DROWSY' ? 'Microsleep detected' : 'Distraction detected',
+        'WARNING',
+      );
       ref.read(dbChangeCounterProvider.notifier).state++;
     }
 
     await _playAlertSound(newLevel);
-    // ⚠️ NO auto-dismiss timer here — banner stays until user taps it
   }
 
   Future<void> _playAlertSound(int level) async {
@@ -356,9 +374,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // HELPERS 
+  // HELPERS
 
-  Future<void> _addLog(String message, String type) async {
+  void _addLogSync(String message, String type) {
+    if (!mounted) return;
     final now = DateTime.now();
     final timeStr =
         '${now.hour.toString().padLeft(2, '0')}:'
@@ -368,7 +387,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       _systemLogs.add({'time': timeStr, 'message': message, 'type': type});
     });
     if (_currentSessionId != null) {
-      await DatabaseHelper.instance.insertSystemLog(
+      DatabaseHelper.instance.insertSystemLog(
         sessionId: _currentSessionId!,
         message:   message,
         logType:   type,
@@ -385,7 +404,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // BUILD 
+  // BUILD
+
   @override
   Widget build(BuildContext context) {
     final isDesktop   = Responsive.isDesktop(context);
@@ -448,8 +468,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     return _buildCameraWithOverlay(isLandscape: true, fullscreen: true);
   }
 
-  // DESKTOP LAYOUT 
-
+  // DESKTOP LAYOUT
   Widget _buildDesktopLayout() {
     return Column(
       children: [
@@ -476,7 +495,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // CAMERA WITH OVERLAID BUTTONS 
+  // CAMERA WITH OVERLAID BUTTONS
 
   Widget _buildCameraWithOverlay({
     double? height,
@@ -570,7 +589,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                             ref.read(clearGlassesProvider.notifier).state =
                                 !clearGlasses;
                             if (!clearGlasses && _currentSessionId != null) {
-                              _addLog('Clear Glasses Mode Active', 'SUCCESS');
+                              _addLogSync('Clear Glasses Mode Active', 'SUCCESS');
                             }
                           },
                         ),
@@ -835,7 +854,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // WARNING OVERLAY (L3) 
+  // WARNING OVERLAY (L3)
 
   Widget _buildWarningOverlay(String type) {
     final isDrowsy = type == 'DROWSY';
@@ -971,7 +990,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  //  METRICS SIDEBAR 
+  // METRICS SIDEBAR
+
   Widget _buildMetricsSidebar({required bool isLandscape}) {
     final alertness   = ref.watch(alertnessPctProvider);
     final drowsiness  = ref.watch(drowsinessPctProvider);
@@ -979,7 +999,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     return Column(
       children: [
-        // 3 circular gauges side by side
         IntrinsicHeight(
           child: Row(
             children: [
@@ -1012,16 +1031,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             ],
           ),
         ),
-
         const SizedBox(height: 16),
-
-        // System log — Flexible so it never overflows
         _buildSystemLog(),
       ],
     );
   }
 
-  //  SYSTEM LOG 
+  // SYSTEM LOG
+
   Widget _buildSystemLog() {
     return Container(
       width: double.infinity,
@@ -1040,30 +1057,30 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       padding: const EdgeInsets.all(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,   // ← shrink to content, no overflow
+        mainAxisSize: MainAxisSize.min,
         children: [
           const Text('SYSTEM LOG',
               style: TextStyle(
                   color: Color(0xFF94a3b8), fontSize: 11,
                   fontWeight: FontWeight.w600, letterSpacing: 1.5)),
           const SizedBox(height: 10),
-         if (_systemLogs.isEmpty)
-          const Align(
-            alignment: Alignment.topCenter,
-            child: Text(
-              'No logs yet. Start recording to begin.',
-              style: TextStyle(color: Colors.white24, fontSize: 12),
-              textAlign: TextAlign.center,
-            ),
-          )
-        else
-          SizedBox(
-            height: 120, // shows ~4 log lines, scrollable for more
-            child: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: _systemLogs.reversed.take(20).map((log) {
+          if (_systemLogs.isEmpty)
+            const Align(
+              alignment: Alignment.topCenter,
+              child: Text(
+                'No logs yet. Start recording to begin.',
+                style: TextStyle(color: Colors.white24, fontSize: 12),
+                textAlign: TextAlign.center,
+              ),
+            )
+          else
+            SizedBox(
+              height: 120,
+              child: ListView.builder(
+                physics: const BouncingScrollPhysics(),
+                itemCount: _systemLogs.length > 20 ? 20 : _systemLogs.length,
+                itemBuilder: (context, index) {
+                  final log = _systemLogs.reversed.toList()[index];
                   Color textColor;
                   switch (log['type']) {
                     case 'SUCCESS': textColor = const Color(0xFF10b981); break;
@@ -1089,10 +1106,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       ],
                     ),
                   );
-                }).toList(),
+                },
               ),
             ),
-          ),
         ],
       ),
     );
@@ -1100,7 +1116,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 }
 
 // METRIC GAUGE WIDGET
-// Static plain ring + animated percentage number
+
 class _MetricGauge extends StatelessWidget {
   final String   label;
   final double   value;
@@ -1116,15 +1132,14 @@ class _MetricGauge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final clamped   = value.clamp(0.0, 100.0);
-    final isMaxed   = clamped >= 100.0;
+    final clamped = value.clamp(0.0, 100.0);
+    final isMaxed = clamped >= 100.0;
 
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.circular(16),
         boxShadow: isMaxed
-            // Glow when 100% — same color, no pulse
             ? [
                 BoxShadow(
                     color: color.withValues(alpha: 0.30),
@@ -1144,7 +1159,6 @@ class _MetricGauge extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Label + icon
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -1156,30 +1170,24 @@ class _MetricGauge extends StatelessWidget {
                       fontSize: 11, fontWeight: FontWeight.w500)),
             ],
           ),
-
           const SizedBox(height: 12),
-
-          // Circular gauge
           SizedBox(
             width: 80, height: 80,
             child: Stack(
               alignment: Alignment.center,
               children: [
-                // Static outer ring
                 SizedBox(
                   width: 80, height: 80,
                   child: CircularProgressIndicator(
-                    value: 1.0,           // always full ring
+                    value: 1.0,
                     strokeWidth: 5,
                     backgroundColor: Colors.transparent,
                     valueColor: AlwaysStoppedAnimation<Color>(
-                      color.withValues(alpha: 0.18), // subtle static ring
+                      color.withValues(alpha: 0.18),
                     ),
                     strokeCap: StrokeCap.round,
                   ),
                 ),
-
-                // Animated percentage number in center
                 TweenAnimationBuilder<double>(
                   tween: Tween<double>(begin: 0, end: clamped),
                   duration: const Duration(milliseconds: 600),
@@ -1217,6 +1225,7 @@ class _MetricGauge extends StatelessWidget {
 }
 
 // CAMERA OVERLAY BUTTON
+
 class _CameraOverlayButton extends StatelessWidget {
   final IconData icon;
   final String label;
