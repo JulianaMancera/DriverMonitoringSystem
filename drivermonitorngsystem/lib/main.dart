@@ -4,7 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'core/database/database_helper.dart';
+import 'core/services/foreground_service.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/monitor_screen.dart';
 import 'screens/analytics_screen.dart';
@@ -28,6 +30,9 @@ void main() async {
 
   await DatabaseHelper.instance.database;
 
+  // Initialize foreground service (must be before runApp)
+  BantayDriveService.initialize();
+
   runApp(const ProviderScope(child: BantayDriveApp()));
 }
 
@@ -50,34 +55,30 @@ class BantayDriveApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const MainShell(),
+      // WithForegroundTask wraps the app to handle foreground service lifecycle
+      home: WithForegroundTask(child: const MainShell()),
     );
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // PROVIDERS
+// ─────────────────────────────────────────────────────────────────────────────
+
 final navIndexProvider    = StateProvider<int>((ref) => 0);
 final sidebarOpenProvider = StateProvider<bool>((ref) => false);
 
-/// Fetches the device model name once on startup.
-/// Shows phone's model name (e.g. "Samsung Galaxy A54", "Acer Aspire")
-/// Falls back to "USER" if unavailable.
 final deviceNameProvider = FutureProvider<String>((ref) async {
   try {
     if (Platform.isAndroid) {
-      // 1st: Try user-set device name via hostname
       final hostname = Platform.localHostname;
-      if (hostname.isNotEmpty && 
-          hostname != 'localhost' && 
+      if (hostname.isNotEmpty &&
+          hostname != 'localhost' &&
           hostname != 'android') {
         return hostname;
       }
-
       final android = await DeviceInfoPlugin().androidInfo;
-
-      // 3rd: Fallback to brand + model (e.g. "Xiaomi 22111317PG")
       return '${android.brand} ${android.model}'.trim();
-
     } else if (Platform.isIOS) {
       final ios = await DeviceInfoPlugin().iosInfo;
       return ios.name;
@@ -86,7 +87,10 @@ final deviceNameProvider = FutureProvider<String>((ref) async {
   return 'USER';
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
 // MAIN SHELL
+// ─────────────────────────────────────────────────────────────────────────────
+
 class MainShell extends ConsumerWidget {
   const MainShell({super.key});
 
@@ -118,7 +122,6 @@ class MainShell extends ConsumerWidget {
     final isLandscape  =
         MediaQuery.of(context).orientation == Orientation.landscape;
 
-    // Device name — shows phone model, falls back to 'USER' while loading
     final deviceName = ref.watch(deviceNameProvider).when(
       data:    (name) => name,
       loading: () => 'USER',
@@ -141,7 +144,6 @@ class MainShell extends ConsumerWidget {
           elevation: 0,
           centerTitle: false,
 
-          // Hamburger in landscape
           leading: isLandscape
               ? IconButton(
                   icon: AnimatedSwitcher(
@@ -151,9 +153,7 @@ class MainShell extends ConsumerWidget {
                       child: FadeTransition(opacity: anim, child: child),
                     ),
                     child: Icon(
-                      sidebarOpen
-                          ? Icons.close_rounded
-                          : Icons.menu_rounded,
+                      sidebarOpen ? Icons.close_rounded : Icons.menu_rounded,
                       key: ValueKey(sidebarOpen),
                       color: Colors.white,
                       size: 26,
@@ -187,7 +187,6 @@ class MainShell extends ConsumerWidget {
                   ),
                   children: [
                     TextSpan(
-                      // Shows real device name instead of hardcoded 'USER'
                       text: deviceName,
                       style: const TextStyle(
                         color: Color(0xFF00D4FF),
@@ -267,7 +266,10 @@ class MainShell extends ConsumerWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // LANDSCAPE SIDEBAR PUSH LAYOUT
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _LandscapeSidebarLayout extends StatelessWidget {
   final bool sidebarOpen;
   final int currentIndex;
@@ -289,7 +291,6 @@ class _LandscapeSidebarLayout extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        // Animated sidebar panel
         AnimatedContainer(
           duration: const Duration(milliseconds: 280),
           curve: Curves.easeInOutCubic,
@@ -309,16 +310,12 @@ class _LandscapeSidebarLayout extends StatelessWidget {
             ),
           ),
         ),
-
-        // Thin divider
         AnimatedContainer(
           duration: const Duration(milliseconds: 280),
           curve: Curves.easeInOutCubic,
           width: sidebarOpen ? 1 : 0,
           color: Colors.white.withOpacity(0.05),
         ),
-
-        // Main content
         Expanded(
           child: IndexedStack(
             index: currentIndex,
@@ -330,7 +327,10 @@ class _LandscapeSidebarLayout extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // LANDSCAPE SIDEBAR CONTENT
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _LandscapeSidebar extends StatelessWidget {
   final int currentIndex;
   final List<_NavData> navItems;
@@ -344,19 +344,16 @@ class _LandscapeSidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isMonitor  = currentIndex == 1;
-    final appBarH    = isMonitor ? 89.0 : 8.0;
-    final screenH    = MediaQuery.of(context).size.height;
-    final available  = screenH - appBarH - 16;
+    final isMonitor   = currentIndex == 1;
+    final appBarH     = isMonitor ? 89.0 : 8.0;
+    final screenH     = MediaQuery.of(context).size.height;
+    final available   = screenH - appBarH - 16;
     final needsScroll = available < 240;
 
     return Container(
       color: const Color(0xFF0D1627),
       padding: EdgeInsets.only(
-        top:    appBarH,
-        bottom: 16,
-        left:   12,
-        right:  12,
+        top: appBarH, bottom: 16, left: 12, right: 12,
       ),
       child: SingleChildScrollView(
         physics: needsScroll
@@ -365,7 +362,6 @@ class _LandscapeSidebar extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Section label
             Padding(
               padding: const EdgeInsets.only(left: 8, bottom: 12),
               child: Text(
@@ -378,8 +374,6 @@ class _LandscapeSidebar extends StatelessWidget {
                 ),
               ),
             ),
-
-            // Nav items
             ...navItems.asMap().entries.map((entry) {
               final i      = entry.key;
               final item   = entry.value;
@@ -408,36 +402,29 @@ class _LandscapeSidebar extends StatelessWidget {
                     ),
                     child: Row(
                       children: [
-                        Icon(
-                          item.icon,
-                          size: 20,
-                          color: active
-                              ? const Color(0xFF00D4FF)
-                              : Colors.white38,
-                        ),
+                        Icon(item.icon, size: 20,
+                            color: active
+                                ? const Color(0xFF00D4FF)
+                                : Colors.white38),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: Text(
-                            item.label,
-                            style: TextStyle(
-                              color: active
-                                  ? const Color(0xFF00D4FF)
-                                  : Colors.white54,
-                              fontSize: 14,
-                              fontWeight: active
-                                  ? FontWeight.w600
-                                  : FontWeight.w400,
-                            ),
-                          ),
+                          child: Text(item.label,
+                              style: TextStyle(
+                                color: active
+                                    ? const Color(0xFF00D4FF)
+                                    : Colors.white54,
+                                fontSize: 14,
+                                fontWeight: active
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
+                              )),
                         ),
                         if (active)
                           Container(
-                            width: 4,
-                            height: 4,
+                            width: 4, height: 4,
                             decoration: const BoxDecoration(
-                              color: Color(0xFF00D4FF),
-                              shape: BoxShape.circle,
-                            ),
+                                color: Color(0xFF00D4FF),
+                                shape: BoxShape.circle),
                           ),
                       ],
                     ),
@@ -452,7 +439,10 @@ class _LandscapeSidebar extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // PORTRAIT BOTTOM NAV
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _BottomNav extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
@@ -473,15 +463,11 @@ class _BottomNav extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF0D1627),
         border: Border(
-          top: BorderSide(
-              color: Colors.white.withOpacity(0.05), width: 1),
-        ),
+            top: BorderSide(color: Colors.white.withOpacity(0.05), width: 1)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.4),
-            blurRadius: 20,
-            offset: const Offset(0, -4),
-          ),
+              color: Colors.black.withOpacity(0.4),
+              blurRadius: 20, offset: const Offset(0, -4)),
         ],
       ),
       child: SafeArea(
@@ -499,42 +485,34 @@ class _BottomNav extends StatelessWidget {
               return Stack(
                 alignment: Alignment.center,
                 children: [
-                  // Sliding pill
                   AnimatedPositioned(
                     duration: const Duration(milliseconds: 280),
                     curve: Curves.easeInOutCubic,
                     left: pillLeft,
                     top: (56 - pillHeight) / 2,
                     child: Container(
-                      width: pillWidth,
-                      height: pillHeight,
+                      width: pillWidth, height: pillHeight,
                       decoration: BoxDecoration(
                         color: const Color(0xFF00D4FF).withOpacity(0.13),
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF00D4FF).withOpacity(0.15),
-                            blurRadius: 10,
-                            spreadRadius: 1,
-                          ),
+                              color: const Color(0xFF00D4FF).withOpacity(0.15),
+                              blurRadius: 10, spreadRadius: 1),
                         ],
                       ),
                     ),
                   ),
-
-                  // Icons
                   Row(
                     children: _items.asMap().entries.map((entry) {
                       final i      = entry.key;
                       final item   = entry.value;
                       final active = i == currentIndex;
-
                       return GestureDetector(
                         onTap: () => onTap(i),
                         behavior: HitTestBehavior.opaque,
                         child: SizedBox(
-                          width: itemWidth,
-                          height: 56,
+                          width: itemWidth, height: 56,
                           child: Center(
                             child: AnimatedSwitcher(
                               duration: const Duration(milliseconds: 200),
@@ -564,7 +542,10 @@ class _BottomNav extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // SHARED
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _NavData {
   final IconData icon;
   final String label;
