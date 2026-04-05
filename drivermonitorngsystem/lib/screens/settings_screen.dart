@@ -135,7 +135,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: 'Session Retention',
               subtitle: 'Auto-delete sessions older than',
               value: _retentionPeriod,
-              options: const ['7 days', '30 days', '90 days', 'Forever'],
+              options: const ['7 days', '30 days', 'Forever'], // 90 days removed
               onChanged: (v) {
                 setState(() => _retentionPeriod = v!);
                 PreferencesHelper.instance.setRetention(v!);
@@ -491,16 +491,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ));
   }
 
-  // ── CSV EXPORT — FIXED for Android 13+ ────────────────────────────────────
-  // Old approach: Permission.storage → always denied on Android 13+
-  // New approach: write to app documents dir (no permission needed),
-  //               then use share_plus to let user save/share anywhere.
+  // ── CSV EXPORT ─────────────────────────────────────────────────────────────
 
   String _pad(int n) => n.toString().padLeft(2, '0');
 
   Future<void> _exportCSV(BuildContext ctx) async {
     try {
-      // 1. Fetch all sessions
       final sessions = await DatabaseHelper.instance.getAllSessions();
       if (sessions.isEmpty) {
         if (ctx.mounted) {
@@ -509,7 +505,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return;
       }
 
-      // 2. Build CSV
       final buf = StringBuffer();
       buf.writeln(
           'Session ID,Date,Start Time,End Time,Duration (sec),'
@@ -540,8 +535,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             '$id,$date,$sTime,$eTime,$duration,$alertAvg,$safety,${alerts.length}');
       }
 
-      // 3. Save to app's internal documents directory
-      //    → no permission needed on ANY Android version
       final docsDir  = await getApplicationDocumentsDirectory();
       final now      = DateTime.now();
       final stamp    =
@@ -553,8 +546,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       if (!ctx.mounted) return;
 
-      // 4. Open native share sheet — user picks where to save
-      //    (Downloads, Google Drive, Gmail, etc.)
       await Share.shareXFiles(
         [XFile(file.path, mimeType: 'text/csv', name: fileName)],
         subject: 'Bantay Drive Session Export',
