@@ -75,13 +75,14 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
       result = result.where((s) {
         final iso        = s['started_at'] as String? ?? '';
         final d          = DateTime.tryParse(iso);
+        final local      = d?.toLocal();
         final alertCount = s['alert_count'] as int? ?? 0;
 
         // Build a searchable string from friendly formats:
         // "Mar 17, 2026", "march", "2026", "safe", "alert", "11:04 PM"
         final searchables = <String>[];
 
-        if (d != null) {
+        if (local != null) {
           const months = [
             'january','february','march','april','may','june',
             'july','august','september','october','november','december'
@@ -91,17 +92,17 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             'jul','aug','sep','oct','nov','dec'
           ];
           searchables.addAll([
-            months[d.month - 1],           // "march"
-            short[d.month - 1],             // "mar"
-            '${short[d.month - 1]} ${d.day}', // "mar 17"
-            '${d.day}',                     // "17"
-            '${d.year}',                    // "2026"
-            '${d.month}/${d.day}/${d.year}',// "3/17/2026"
+            months[local.month - 1],                    // "march"
+            short[local.month - 1],                     // "mar"
+            '${short[local.month - 1]} ${local.day}',   // "mar 17"
+            '${local.day}',                             // "17"
+            '${local.year}',                            // "2026"
+            '${local.month}/${local.day}/${local.year}',// "3/17/2026"
           ]);
-          // Time: "11:04 pm" or "am"
-          final h    = d.hour > 12 ? d.hour - 12 : (d.hour == 0 ? 12 : d.hour);
-          final m    = d.minute.toString().padLeft(2, '0');
-          final ampm = d.hour >= 12 ? 'pm' : 'am';
+          // Time: "11:04 pm" or "am" — use local time for search strings
+          final h    = local.hour == 0 ? 12 : (local.hour > 12 ? local.hour - 12 : local.hour);
+          final m    = local.minute.toString().padLeft(2, '0');
+          final ampm = local.hour >= 12 ? 'pm' : 'am';
           searchables.add('$h:$m $ampm');
           searchables.add(ampm);
         }
@@ -119,13 +120,15 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         final since = now.subtract(const Duration(days: 7));
         result = result.where((s) {
           final d = DateTime.tryParse(s['started_at'] ?? '');
-          return d != null && d.isAfter(since);
+          return d != null && d.toLocal().isAfter(since);
         }).toList();
         break;
       case 2:
         result = result.where((s) {
           final d = DateTime.tryParse(s['started_at'] ?? '');
-          return d != null && d.month == now.month && d.year == now.year;
+          if (d == null) return false;
+          final local = d.toLocal();
+          return local.month == now.month && local.year == now.year;
         }).toList();
         break;
       case 3:
@@ -171,18 +174,22 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     if (iso == null) return '—';
     final d = DateTime.tryParse(iso);
     if (d == null) return '—';
+    final local = d.toLocal();
     const mo = ['Jan','Feb','Mar','Apr','May','Jun',
                  'Jul','Aug','Sep','Oct','Nov','Dec'];
-    return '${mo[d.month - 1]} ${d.day}, ${d.year}';
+    return '${mo[local.month - 1]} ${local.day}, ${local.year}';
   }
 
+  /// Converts a UTC ISO8601 timestamp to a 12-hour local time string.
+  /// Handles midnight (00:xx → 12:xx AM) and noon (12:xx → 12:xx PM) correctly.
   String _formatTime(String? iso) {
     if (iso == null) return '—';
     final d = DateTime.tryParse(iso);
     if (d == null) return '—';
-    final h    = d.hour > 12 ? d.hour - 12 : (d.hour == 0 ? 12 : d.hour);
-    final m    = d.minute.toString().padLeft(2, '0');
-    final ampm = d.hour >= 12 ? 'PM' : 'AM';
+    final local = d.toLocal();
+    final h    = local.hour == 0 ? 12 : (local.hour > 12 ? local.hour - 12 : local.hour);
+    final m    = local.minute.toString().padLeft(2, '0');
+    final ampm = local.hour >= 12 ? 'PM' : 'AM';
     return '$h:$m $ampm';
   }
 
@@ -190,9 +197,10 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     if (iso == null) return 'UNKNOWN';
     final d = DateTime.tryParse(iso);
     if (d == null) return 'UNKNOWN';
+    final local = d.toLocal();
     final now   = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final day   = DateTime(d.year, d.month, d.day);
+    final day   = DateTime(local.year, local.month, local.day);
     if (day == today) return 'TODAY';
     if (day == today.subtract(const Duration(days: 1))) return 'YESTERDAY';
     return _formatDate(iso).toUpperCase();
@@ -636,18 +644,22 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     if (iso == null) return '—';
     final d = DateTime.tryParse(iso);
     if (d == null) return '—';
+    final local = d.toLocal();
     const mo = ['Jan','Feb','Mar','Apr','May','Jun',
                  'Jul','Aug','Sep','Oct','Nov','Dec'];
-    return '${mo[d.month - 1]} ${d.day}, ${d.year}';
+    return '${mo[local.month - 1]} ${local.day}, ${local.year}';
   }
 
+  /// Converts a UTC ISO8601 timestamp to a 12-hour local time string.
+  /// Handles midnight (00:xx → 12:xx AM) and noon (12:xx → 12:xx PM) correctly.
   String _formatTime(String? iso) {
     if (iso == null) return '—';
     final d = DateTime.tryParse(iso);
     if (d == null) return '—';
-    final h    = d.hour > 12 ? d.hour - 12 : (d.hour == 0 ? 12 : d.hour);
-    final m    = d.minute.toString().padLeft(2, '0');
-    final ampm = d.hour >= 12 ? 'PM' : 'AM';
+    final local = d.toLocal();
+    final h    = local.hour == 0 ? 12 : (local.hour > 12 ? local.hour - 12 : local.hour);
+    final m    = local.minute.toString().padLeft(2, '0');
+    final ampm = local.hour >= 12 ? 'PM' : 'AM';
     return '$h:$m $ampm';
   }
 

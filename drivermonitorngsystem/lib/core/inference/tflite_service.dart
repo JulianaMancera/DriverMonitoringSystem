@@ -290,17 +290,8 @@ Float32List? _preprocessInIsolate(_PreprocessArgs args) {
           rgbBytes[outIdx++] = ((yVal * 1024 + 1772 * uVal) >> 10).clamp(0, 255);
         }
       }
-    } else if (fmtGroup == ImageFormatGroup.bgra8888 && args.planes.isNotEmpty) {
-      final bytes = args.planes[0].bytes;
-      final total = args.width * args.height;
-      rgbBytes = Uint8List(total * 3);
-      for (int i = 0; i < total; i++) {
-        rgbBytes[i * 3    ] = bytes[i * 4 + 2];
-        rgbBytes[i * 3 + 1] = bytes[i * 4 + 1];
-        rgbBytes[i * 3 + 2] = bytes[i * 4    ];
-      }
     } else {
-      return null; // JPEG not handled in isolate (needs dart:ui which isn't available)
+      return null; // Unrecognised format on Android — skip frame
     }
 
     // Resize (nearest-neighbour) + gamma + normalize in single pass

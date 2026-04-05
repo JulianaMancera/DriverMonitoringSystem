@@ -3,12 +3,13 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart'; // StateProvider lives here in Riverpod 3.x
 import 'package:camera/camera.dart';
 import 'package:audioplayers/audioplayers.dart';
-import 'package:flutter_riverpod/legacy.dart';
 import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
 import '../core/inference/tflite_service.dart';
+import '../core/inference/face_mesh_service.dart';
 import '../core/services/notifications.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import '../utils/responsive.dart';
@@ -74,6 +75,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   int  _prefAlertSensitivity = 1;
   bool _prefAutoStart        = false;
 
+  /// Camera is NOT mirrored — shows natural orientation.
+  static const bool _mirrorCamera = false;
+
   static const Map<int, List<int>> _sensitivityThresholds = {
     0: [5, 10, 15],
     1: [3,  6,  9],
@@ -82,6 +86,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   bool     _modelLoaded       = false;
   DateTime _lastInferenceTime = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Latest face mesh result — updated every ~4 frames alongside TFLite
+  FaceContourResult? _faceResult;
+  int _sensorOrientation = 90;
 
   // ─── LIFECYCLE ──────────────────────────────────────────────────────────────
 
@@ -133,6 +141,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _audioPlayer.dispose();
     _alarmPlayer.dispose();
     TfliteService.instance.dispose();
+    FaceMeshService.instance.dispose();
     super.dispose();
   }
 
@@ -222,8 +231,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final prefs = PreferencesHelper.instance;
     _prefAlertSensitivity = await prefs.getAlertSensitivity();
     _prefAutoStart        = await prefs.getAutoStart();
-    final success = await TfliteService.instance.initialize();
-    if (mounted) setState(() => _modelLoaded = success);
+    // Initialize both services in parallel
+    final results = await Future.wait([
+      TfliteService.instance.initialize(),
+      Future(() { FaceMeshService.instance.initialize(); return true; }),
+    ]);
+    if (mounted) setState(() => _modelLoaded = results[0]);
     await _initCamera();
   }
 
@@ -248,8 +261,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       await _cameraController!.initialize();
       if (mounted) {
         setState(() {
-          _cameraInitialized = true;
-          _cameraError = null;
+          _cameraInitialized  = true;
+          _cameraError        = null;
+          // Store sensor orientation for ML Kit InputImage rotation mapping
+          _sensorOrientation  = cam.sensorOrientation;
         });
         if (_prefAutoStart) {
           await Future.delayed(const Duration(milliseconds: 500));
@@ -359,20 +374,39 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(dbChangeCounterProvider.notifier).state++;
   }
 
-  // ─── CAMERA FRAME CALLBACK (shared) ─────────────────────────────────────────
+  // ─── CAMERA FRAME CALLBACK ───────────────────────────────────────────────
+  // TFLite and face mesh run independently — TFLite on its own timer (100ms),
+  // face mesh on a slower separate timer (300ms = ~3 FPS).
+  // They never fire together so CPU load is spread across frames.
+
+  DateTime _lastFaceMeshTime = DateTime.fromMillisecondsSinceEpoch(0);
 
   Future<void> _onCameraFrame(CameraImage frame) async {
     final now = DateTime.now();
-    if (now.difference(_lastInferenceTime).inMilliseconds < 100) return;
-    _lastInferenceTime = now;
-    final result = await TfliteService.instance.runInference(frame);
-    if (result != null && mounted && ref.read(isRecordingProvider)) {
-      onModelOutput(
-        state:          result.state,
-        alertnessPct:   result.alertnessPct,
-        drowsinessPct:  result.drowsyPct,
-        distractionPct: result.distractedPct,
-      );
+
+    // ── TFLite inference — every 100ms ──────────────────────────────────────
+    if (now.difference(_lastInferenceTime).inMilliseconds >= 100) {
+      _lastInferenceTime = now;
+      final result = await TfliteService.instance.runInference(frame);
+      if (result != null && mounted && ref.read(isRecordingProvider)) {
+        onModelOutput(
+          state:          result.state,
+          alertnessPct:   result.alertnessPct,
+          drowsinessPct:  result.drowsyPct,
+          distractionPct: result.distractedPct,
+        );
+      }
+    }
+
+    // ── Face mesh — every 300ms (~3 FPS) ────────────────────────────────────
+    // Runs independently so it never delays TFLite inference.
+    if (now.difference(_lastFaceMeshTime).inMilliseconds >= 300) {
+      _lastFaceMeshTime = now;
+      final faceResult = await FaceMeshService.instance
+          .processFrame(frame, _sensorOrientation);
+      if (faceResult != null && mounted) {
+        setState(() => _faceResult = faceResult);
+      }
     }
   }
 
@@ -408,7 +442,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     } else {
       _consecutiveDrowsy     = 0;
       _consecutiveDistracted = 0;
-      if (!ref.read(showAlertBannerProvider)) _alertLevel = 0;
+      // Always reset alert level on genuine neutral recovery so re-escalation
+      // works from scratch — consistent with what manual _dismissAlert() does.
+      _alertLevel = 0;
       _alarmPlayer.stop();
       BantayDriveService.updateState('neutral');
     }
@@ -422,14 +458,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (consecutive < thresholds[0]) return;
 
     int newLevel = 1;
-    if (consecutive >= thresholds[2])      newLevel = 3;
-    else if (consecutive >= thresholds[1]) newLevel = 2;
+    if (consecutive >= thresholds[2])      { newLevel = 3; }
+    else if (consecutive >= thresholds[1]) { newLevel = 2; }
     if (newLevel <= _alertLevel) return;
     _alertLevel = newLevel;
 
     ref.read(showAlertBannerProvider.notifier).state = true;
     ref.read(alertBannerTypeProvider.notifier).state = type;
-    if (newLevel < 3) _notifController?.forward(from: 0.0);
+    if (newLevel < 3) { _notifController?.forward(from: 0.0); }
     BantayDriveService.showAlertNotification(type);
 
     if (_currentSessionId != null) {
@@ -474,7 +510,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final now = DateTime.now();
     final t =
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
-    setState(() => _systemLogs.add({'time': t, 'message': message, 'type': type}));
+    setState(() {
+      _systemLogs.add({'time': t, 'message': message, 'type': type});
+      // Cap in-memory log list to prevent unbounded growth on long drives
+      if (_systemLogs.length > 100) _systemLogs.removeAt(0);
+    });
     if (_currentSessionId != null) {
       DatabaseHelper.instance.insertSystemLog(
           sessionId: _currentSessionId!, message: message, logType: type);
@@ -483,9 +523,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   Future<void> _saveAlertnessSnapshot() async {
     if (_currentSessionId == null) return;
-    await DatabaseHelper.instance.insertAlertnesSnapshot(
+    await DatabaseHelper.instance.insertAlertnessSnapshot(
         sessionId:    _currentSessionId!,
-        alertnessPct: ref.read(alertnessPctProvider).clamp(50.0, 100.0));
+        alertnessPct: ref.read(alertnessPctProvider).clamp(0.0, 100.0));
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -547,7 +587,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final showAlert   = ref.watch(showAlertBannerProvider);
     final alertType   = ref.watch(alertBannerTypeProvider);
     final isLevel3    = _alertLevel == 3;
-    final previewSize = _getPreviewSize(false);
+    // Detect orientation so PiP camera fills correctly in both modes
+    final isLandscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
+    final previewSize = _getPreviewSize(isLandscape);
 
     // State badge color + label
     late Color stateColor;
@@ -583,7 +626,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   child: SizedBox(
                     width:  previewSize.width,
                     height: previewSize.height,
-                    child:  CameraPreview(_cameraController!),
+                    child: Transform(
+                      alignment: Alignment.center,
+                      transform: Matrix4.diagonal3Values(
+                          _mirrorCamera ? -1.0 : 1.0, 1.0, 1.0),
+                      child: CameraPreview(_cameraController!),
+                    ),
                   ),
                 ),
               )
@@ -598,7 +646,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             if (isLevel3)
               AnimatedBuilder(
                 animation: _warningAnimation,
-                builder: (_, __) {
+                builder: (context, child) {
                   final p = (_warningAnimation.value - 0.8) / 0.2;
                   return GestureDetector(
                     onTap: _dismissAlert,
@@ -783,6 +831,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }) {
     final isRecording  = ref.watch(isRecordingProvider);
     final clearGlasses = ref.watch(clearGlassesProvider);
+    final driverState  = ref.watch(driverStateProvider);
     final previewSize  = _getPreviewSize(isLandscape);
 
     final cameraWidget = ClipRect(
@@ -791,9 +840,16 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         child: SizedBox(
           width:  previewSize.width,
           height: previewSize.height,
-          child: _cameraInitialized
-              ? CameraPreview(_cameraController!)
-              : _buildCameraFallback(),
+          // Mirror horizontally for right-side dashcam mount so the
+          // preview reads naturally (driver appears on the left of frame).
+          child: Transform(
+            alignment: Alignment.center,
+            transform: Matrix4.diagonal3Values(
+                _mirrorCamera ? -1.0 : 1.0, 1.0, 1.0),
+            child: _cameraInitialized
+                ? CameraPreview(_cameraController!)
+                : _buildCameraFallback(),
+          ),
         ),
       ),
     );
@@ -805,6 +861,16 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         fit: StackFit.expand,
         children: [
           cameraWidget,
+          // Face mesh overlay — isolated in RepaintBoundary so it only
+          // repaints when _faceResult changes, not on every camera frame.
+          if (isRecording && _cameraInitialized)
+            Positioned.fill(
+              child: RepaintBoundary(
+                child: CustomPaint(
+                  painter: _FaceSegmentPainter(faceResult: _faceResult),
+                ),
+              ),
+            ),
           _buildGradientOverlay(),
           if (isRecording) _buildRecBadge(),
 
@@ -1085,7 +1151,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                         children: [
                           AnimatedBuilder(
                             animation: _warningAnimation,
-                            builder: (_, __) {
+                            builder: (context, child) {
                               final p = (_warningAnimation.value - 0.8) / 0.2;
                               return Container(
                                 width: 44, height: 44,
@@ -1672,4 +1738,89 @@ class _CameraOverlayButton extends StatelessWidget {
       ),
     );
   }
+}
+// ════════════════════════════════════════════════════════════════════════════
+// FACE SEGMENTATION PAINTER — contour-based (lightweight)
+//
+// Uses pre-built contour Path from FaceMeshService.
+// Painter does zero computation — just canvas.scale + drawPath.
+// RepaintBoundary ensures it only repaints when new contour data arrives.
+// ════════════════════════════════════════════════════════════════════════════
+
+class _FaceSegmentPainter extends CustomPainter {
+  final FaceContourResult? faceResult;
+
+  static const _cyan = Color(0xFF00D4FF);
+
+  const _FaceSegmentPainter({required this.faceResult});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (faceResult == null || faceResult!.contourPath.getBounds().isEmpty) {
+      _drawPlaceholder(canvas, size);
+      return;
+    }
+
+    // ── Contour lines ────────────────────────────────────────────────────────
+    final linePaint = Paint()
+      ..color       = _cyan.withOpacity(0.75)
+      ..strokeWidth = 1.5
+      ..style       = PaintingStyle.stroke
+      ..strokeCap   = StrokeCap.round
+      ..strokeJoin  = StrokeJoin.round;
+
+    // Scale the pre-built 0–1 path to canvas size — single matrix op
+    canvas.save();
+    canvas.scale(size.width, size.height);
+    canvas.drawPath(faceResult!.contourPath, linePaint);
+    canvas.restore();
+
+    // ── Landmark dots ────────────────────────────────────────────────────────
+    final dotPaint = Paint()
+      ..color = _cyan.withOpacity(0.9)
+      ..style = PaintingStyle.fill;
+
+    for (final entry in faceResult!.landmarks.entries) {
+      final p = entry.value;
+      canvas.drawCircle(
+        Offset(p.dx * size.width, p.dy * size.height),
+        3.0,
+        dotPaint,
+      );
+    }
+
+    // ── Contour dots on key points ───────────────────────────────────────────
+    final smallDot = Paint()
+      ..color = _cyan.withOpacity(0.55)
+      ..style = PaintingStyle.fill;
+
+    // Draw a small dot at every 3rd contour point to show the mesh structure
+    for (final pts in faceResult!.contours.values) {
+      for (int i = 0; i < pts.length; i += 3) {
+        canvas.drawCircle(
+          Offset(pts[i].dx * size.width, pts[i].dy * size.height),
+          1.5,
+          smallDot,
+        );
+      }
+    }
+  }
+
+  void _drawPlaceholder(Canvas canvas, Size size) {
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(size.width / 2, size.height * 0.44),
+        width:  size.width  * 0.44,
+        height: size.height * 0.56,
+      ),
+      Paint()
+        ..color       = _cyan.withOpacity(0.15)
+        ..strokeWidth = 1.2
+        ..style       = PaintingStyle.stroke,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_FaceSegmentPainter old) =>
+      !identical(old.faceResult, faceResult);
 }
