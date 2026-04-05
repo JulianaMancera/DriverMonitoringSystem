@@ -38,10 +38,6 @@ dependencies:
   # ML inference (BiLSTM + Attention — Android)
   tflite_flutter: ^0.12.1
   image: ^4.1.7
-  # Face detection — 7 landmarks + contours (lightweight, fast)
-  google_mlkit_face_detection: ^0.13.2
-  # Pose detection (Android)
-  google_mlkit_pose_detection: ^0.14.1
   # Notifications / Background 
   flutter_local_notifications: ^21.0.0
   flutter_foreground_task: ^9.0.1

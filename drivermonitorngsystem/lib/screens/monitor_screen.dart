@@ -9,7 +9,6 @@ import 'package:audioplayers/audioplayers.dart';
 import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
 import '../core/inference/tflite_service.dart';
-import '../core/inference/face_mesh_service.dart';
 import '../core/services/notifications.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import '../utils/responsive.dart';
@@ -87,9 +86,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   bool     _modelLoaded       = false;
   DateTime _lastInferenceTime = DateTime.fromMillisecondsSinceEpoch(0);
 
-  /// Latest face mesh result — updated every ~4 frames alongside TFLite
-  FaceContourResult? _faceResult;
-  int _sensorOrientation = 90;
 
   // ─── LIFECYCLE ──────────────────────────────────────────────────────────────
 
@@ -141,7 +137,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _audioPlayer.dispose();
     _alarmPlayer.dispose();
     TfliteService.instance.dispose();
-    FaceMeshService.instance.dispose();
     super.dispose();
   }
 
@@ -232,11 +227,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _prefAlertSensitivity = await prefs.getAlertSensitivity();
     _prefAutoStart        = await prefs.getAutoStart();
     // Initialize both services in parallel
-    final results = await Future.wait([
-      TfliteService.instance.initialize(),
-      Future(() { FaceMeshService.instance.initialize(); return true; }),
-    ]);
-    if (mounted) setState(() => _modelLoaded = results[0]);
+    final success = await TfliteService.instance.initialize();
+    if (mounted) setState(() => _modelLoaded = success);
     await _initCamera();
   }
 
@@ -261,10 +253,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       await _cameraController!.initialize();
       if (mounted) {
         setState(() {
-          _cameraInitialized  = true;
-          _cameraError        = null;
-          // Store sensor orientation for ML Kit InputImage rotation mapping
-          _sensorOrientation  = cam.sensorOrientation;
+          _cameraInitialized = true;
+          _cameraError       = null;
         });
         if (_prefAutoStart) {
           await Future.delayed(const Duration(milliseconds: 500));
@@ -374,39 +364,20 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(dbChangeCounterProvider.notifier).state++;
   }
 
-  // ─── CAMERA FRAME CALLBACK ───────────────────────────────────────────────
-  // TFLite and face mesh run independently — TFLite on its own timer (100ms),
-  // face mesh on a slower separate timer (300ms = ~3 FPS).
-  // They never fire together so CPU load is spread across frames.
-
-  DateTime _lastFaceMeshTime = DateTime.fromMillisecondsSinceEpoch(0);
+  // ─── CAMERA FRAME CALLBACK ─────────────────────────────────────────────────
 
   Future<void> _onCameraFrame(CameraImage frame) async {
     final now = DateTime.now();
-
-    // ── TFLite inference — every 100ms ──────────────────────────────────────
-    if (now.difference(_lastInferenceTime).inMilliseconds >= 100) {
-      _lastInferenceTime = now;
-      final result = await TfliteService.instance.runInference(frame);
-      if (result != null && mounted && ref.read(isRecordingProvider)) {
-        onModelOutput(
-          state:          result.state,
-          alertnessPct:   result.alertnessPct,
-          drowsinessPct:  result.drowsyPct,
-          distractionPct: result.distractedPct,
-        );
-      }
-    }
-
-    // ── Face mesh — every 300ms (~3 FPS) ────────────────────────────────────
-    // Runs independently so it never delays TFLite inference.
-    if (now.difference(_lastFaceMeshTime).inMilliseconds >= 300) {
-      _lastFaceMeshTime = now;
-      final faceResult = await FaceMeshService.instance
-          .processFrame(frame, _sensorOrientation);
-      if (faceResult != null && mounted) {
-        setState(() => _faceResult = faceResult);
-      }
+    if (now.difference(_lastInferenceTime).inMilliseconds < 100) return;
+    _lastInferenceTime = now;
+    final result = await TfliteService.instance.runInference(frame);
+    if (result != null && mounted && ref.read(isRecordingProvider)) {
+      onModelOutput(
+        state:          result.state,
+        alertnessPct:   result.alertnessPct,
+        drowsinessPct:  result.drowsyPct,
+        distractionPct: result.distractedPct,
+      );
     }
   }
 
@@ -861,16 +832,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         fit: StackFit.expand,
         children: [
           cameraWidget,
-          // Face mesh overlay — isolated in RepaintBoundary so it only
-          // repaints when _faceResult changes, not on every camera frame.
-          if (isRecording && _cameraInitialized)
-            Positioned.fill(
-              child: RepaintBoundary(
-                child: CustomPaint(
-                  painter: _FaceSegmentPainter(faceResult: _faceResult),
-                ),
-              ),
-            ),
           _buildGradientOverlay(),
           if (isRecording) _buildRecBadge(),
 
@@ -1738,89 +1699,4 @@ class _CameraOverlayButton extends StatelessWidget {
       ),
     );
   }
-}
-// ════════════════════════════════════════════════════════════════════════════
-// FACE SEGMENTATION PAINTER — contour-based (lightweight)
-//
-// Uses pre-built contour Path from FaceMeshService.
-// Painter does zero computation — just canvas.scale + drawPath.
-// RepaintBoundary ensures it only repaints when new contour data arrives.
-// ════════════════════════════════════════════════════════════════════════════
-
-class _FaceSegmentPainter extends CustomPainter {
-  final FaceContourResult? faceResult;
-
-  static const _cyan = Color(0xFF00D4FF);
-
-  const _FaceSegmentPainter({required this.faceResult});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (faceResult == null || faceResult!.contourPath.getBounds().isEmpty) {
-      _drawPlaceholder(canvas, size);
-      return;
-    }
-
-    // ── Contour lines ────────────────────────────────────────────────────────
-    final linePaint = Paint()
-      ..color       = _cyan.withOpacity(0.75)
-      ..strokeWidth = 1.5
-      ..style       = PaintingStyle.stroke
-      ..strokeCap   = StrokeCap.round
-      ..strokeJoin  = StrokeJoin.round;
-
-    // Scale the pre-built 0–1 path to canvas size — single matrix op
-    canvas.save();
-    canvas.scale(size.width, size.height);
-    canvas.drawPath(faceResult!.contourPath, linePaint);
-    canvas.restore();
-
-    // ── Landmark dots ────────────────────────────────────────────────────────
-    final dotPaint = Paint()
-      ..color = _cyan.withOpacity(0.9)
-      ..style = PaintingStyle.fill;
-
-    for (final entry in faceResult!.landmarks.entries) {
-      final p = entry.value;
-      canvas.drawCircle(
-        Offset(p.dx * size.width, p.dy * size.height),
-        3.0,
-        dotPaint,
-      );
-    }
-
-    // ── Contour dots on key points ───────────────────────────────────────────
-    final smallDot = Paint()
-      ..color = _cyan.withOpacity(0.55)
-      ..style = PaintingStyle.fill;
-
-    // Draw a small dot at every 3rd contour point to show the mesh structure
-    for (final pts in faceResult!.contours.values) {
-      for (int i = 0; i < pts.length; i += 3) {
-        canvas.drawCircle(
-          Offset(pts[i].dx * size.width, pts[i].dy * size.height),
-          1.5,
-          smallDot,
-        );
-      }
-    }
-  }
-
-  void _drawPlaceholder(Canvas canvas, Size size) {
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(size.width / 2, size.height * 0.44),
-        width:  size.width  * 0.44,
-        height: size.height * 0.56,
-      ),
-      Paint()
-        ..color       = _cyan.withOpacity(0.15)
-        ..strokeWidth = 1.2
-        ..style       = PaintingStyle.stroke,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_FaceSegmentPainter old) =>
-      !identical(old.faceResult, faceResult);
 }
