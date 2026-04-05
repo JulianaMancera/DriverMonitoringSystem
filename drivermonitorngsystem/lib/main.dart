@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'core/database/database_helper.dart';
 import 'core/services/notifications.dart';
 import 'screens/dashboard_screen.dart';
@@ -23,44 +25,54 @@ void main() async {
   ]);
 
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.light,
+    statusBarColor:           Colors.transparent,
+    statusBarIconBrightness:  Brightness.light,
   ));
 
   await DatabaseHelper.instance.database;
 
-  // FIX: initialize BEFORE runApp so isReady = true by the time
-  // the user can interact with the app and tap Record
+  if (Platform.isAndroid) {
+    final plugin = FlutterLocalNotificationsPlugin()
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    await plugin?.requestNotificationsPermission();
+  }
+
   await BantayDriveService.initialize();
 
   runApp(const ProviderScope(child: BantayDriveApp()));
 }
+
+// ─── APP ──────────────────────────────────────────────────────────────────────
 
 class BantayDriveApp extends StatelessWidget {
   const BantayDriveApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Bantay Drive',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF080E1A),
-        fontFamily: 'SF Pro Display',
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF00D4FF),
-          secondary: Color(0xFF00D4FF),
-          surface: Color(0xFF0D1627),
+    return WithForegroundTask(
+      child: MaterialApp(
+        title:                    'Bantay Drive',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          brightness:              Brightness.dark,
+          scaffoldBackgroundColor: const Color(0xFF080E1A),
+          fontFamily:              'SF Pro Display',
+          colorScheme: const ColorScheme.dark(
+            primary:   Color(0xFF00D4FF),
+            secondary: Color(0xFF00D4FF),
+            surface:   Color(0xFF0D1627),
+          ),
+          useMaterial3: true,
         ),
-        useMaterial3: true,
+        home: const MainShell(),
       ),
-      home: const MainShell(),
     );
   }
 }
 
-// PROVIDERS
+// ─── PROVIDERS ────────────────────────────────────────────────────────────────
+
 final navIndexProvider    = StateProvider<int>((ref) => 0);
 final sidebarOpenProvider = StateProvider<bool>((ref) => false);
 
@@ -83,7 +95,8 @@ final deviceNameProvider = FutureProvider<String>((ref) async {
   return 'USER';
 });
 
-// MAIN SHELL
+// ─── MAIN SHELL ───────────────────────────────────────────────────────────────
+
 class MainShell extends ConsumerWidget {
   const MainShell({super.key});
 
@@ -112,6 +125,7 @@ class MainShell extends ConsumerWidget {
     final currentIndex = ref.watch(navIndexProvider);
     final isRecording  = ref.watch(isRecordingProvider);
     final sidebarOpen  = ref.watch(sidebarOpenProvider);
+    final isInPip      = ref.watch(isInPipProvider);
     final isLandscape  =
         MediaQuery.of(context).orientation == Orientation.landscape;
 
@@ -124,115 +138,136 @@ class MainShell extends ConsumerWidget {
     final isMonitor     = currentIndex == 1;
     final isTransparent = isLandscape && isMonitor;
 
+    // ── CRITICAL: NEVER swap out the widget tree when entering/leaving PIP.
+    // Replacing with a new Scaffold remounts MonitorScreen and kills all state
+    // (session ID, recording, logs, camera stream). Instead, keep the SAME
+    // Scaffold always mounted and just collapse the AppBar + BottomNav to
+    // zero height/size while in PIP. MonitorScreen stays alive the whole time.
+    //
+    // AppBar → PreferredSize(height: 0) hides it without remounting children.
+    // BottomNav → SizedBox.shrink() collapses it to nothing.
+    // extendBodyBehindAppBar: true ensures the body fills the screen in PIP.
+
     return Scaffold(
-      backgroundColor: const Color(0xFF080E1A),
-      extendBodyBehindAppBar: isTransparent,
+      backgroundColor:        const Color(0xFF080E1A),
+      extendBodyBehindAppBar: isTransparent || isInPip,
 
-      appBar: PreferredSize(
-        preferredSize: Size.fromHeight(isLandscape ? 46 : 60),
-        child: AppBar(
-          backgroundColor: isTransparent
-              ? const Color(0xFF0D1627).withOpacity(0.55)
-              : const Color(0xFF0D1627),
-          elevation: 0,
-          centerTitle: false,
+      // ── AppBar: hidden in PIP, normal otherwise ──────────────────────────
+      appBar: isInPip
+          ? PreferredSize(
+              // Zero-height placeholder — hides the bar but keeps the
+              // Scaffold structure intact so the body doesn't remount.
+              preferredSize: Size.zero,
+              child:         const SizedBox.shrink(),
+            )
+          : PreferredSize(
+              preferredSize: Size.fromHeight(isLandscape ? 46 : 60),
+              child: AppBar(
+                backgroundColor: isTransparent
+                    ? const Color(0xFF0D1627).withOpacity(0.55)
+                    : const Color(0xFF0D1627),
+                elevation:   0,
+                centerTitle: false,
 
-          leading: isLandscape
-              ? IconButton(
-                  icon: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 250),
-                    transitionBuilder: (child, anim) => RotationTransition(
-                      turns: Tween(begin: 0.875, end: 1.0).animate(anim),
-                      child: FadeTransition(opacity: anim, child: child),
-                    ),
-                    child: Icon(
-                      sidebarOpen ? Icons.close_rounded : Icons.menu_rounded,
-                      key: ValueKey(sidebarOpen),
-                      color: Colors.white,
-                      size: 26,
-                    ),
-                  ),
-                  onPressed: () => ref
-                      .read(sidebarOpenProvider.notifier)
-                      .state = !sidebarOpen,
-                )
-              : null,
+                leading: isLandscape
+                    ? IconButton(
+                        icon: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 250),
+                          transitionBuilder: (child, anim) => RotationTransition(
+                            turns: Tween(begin: 0.875, end: 1.0).animate(anim),
+                            child: FadeTransition(opacity: anim, child: child),
+                          ),
+                          child: Icon(
+                            sidebarOpen
+                                ? Icons.close_rounded
+                                : Icons.menu_rounded,
+                            key:   ValueKey(sidebarOpen),
+                            color: Colors.white,
+                            size:  26,
+                          ),
+                        ),
+                        onPressed: () => ref
+                            .read(sidebarOpenProvider.notifier)
+                            .state = !sidebarOpen,
+                      )
+                    : null,
 
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                _titles[currentIndex],
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: isLandscape ? 18 : 26,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.5,
-                ),
-              ),
-              RichText(
-                text: TextSpan(
-                  text: 'Connected: ',
-                  style: TextStyle(
-                    color: Colors.white54,
-                    fontSize: isLandscape ? 10 : 13,
-                  ),
+                title: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment:  MainAxisAlignment.center,
                   children: [
-                    TextSpan(
-                      text: deviceName,
-                      style: const TextStyle(
-                        color: Color(0xFF00D4FF),
-                        fontWeight: FontWeight.w600,
+                    Text(
+                      _titles[currentIndex],
+                      style: TextStyle(
+                        color:         Colors.white,
+                        fontSize:      isLandscape ? 18 : 26,
+                        fontWeight:    FontWeight.w700,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                    RichText(
+                      text: TextSpan(
+                        text:  'Connected: ',
+                        style: TextStyle(
+                          color:    Colors.white54,
+                          fontSize: isLandscape ? 10 : 13,
+                        ),
+                        children: [
+                          TextSpan(
+                            text:  deviceName,
+                            style: const TextStyle(
+                              color:      Color(0xFF00D4FF),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ),
-              ),
-            ],
-          ),
 
-          actions: [
-            Padding(
-              padding: const EdgeInsets.only(right: 20),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 400),
-                curve: Curves.easeInOut,
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  color: isRecording
-                      ? const Color(0xFF00FF88)
-                      : const Color(0xFF3A4A5C),
-                  shape: BoxShape.circle,
-                  boxShadow: isRecording
-                      ? [
-                          BoxShadow(
-                            color: const Color(0xFF00FF88).withOpacity(0.6),
-                            blurRadius: 8,
-                            spreadRadius: 1,
-                          ),
-                        ]
-                      : [],
-                ),
+                actions: [
+                  Padding(
+                    padding: const EdgeInsets.only(right: 20),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 400),
+                      curve:    Curves.easeInOut,
+                      width:    10,
+                      height:   10,
+                      decoration: BoxDecoration(
+                        color: isRecording
+                            ? const Color(0xFF00FF88)
+                            : const Color(0xFF3A4A5C),
+                        shape: BoxShape.circle,
+                        boxShadow: isRecording
+                            ? [
+                                BoxShadow(
+                                  color:       const Color(0xFF00FF88).withOpacity(0.6),
+                                  blurRadius:  8,
+                                  spreadRadius: 1,
+                                ),
+                              ]
+                            : [],
+                      ),
+                    ),
+                  ),
+                ],
+
+                bottom: isTransparent
+                    ? null
+                    : PreferredSize(
+                        preferredSize: const Size.fromHeight(1),
+                        child: Container(
+                          height: 1,
+                          color:  Colors.white.withOpacity(0.05),
+                        ),
+                      ),
               ),
             ),
-          ],
-
-          bottom: isTransparent
-              ? null
-              : PreferredSize(
-                  preferredSize: const Size.fromHeight(1),
-                  child: Container(
-                    height: 1,
-                    color: Colors.white.withOpacity(0.05),
-                  ),
-                ),
-        ),
-      ),
 
       body: SafeArea(
-        top: !isTransparent,
+        // In PIP the AppBar is gone so we need top safe-area inset removed too
+        top: !isTransparent && !isInPip,
         child: isLandscape
             ? _LandscapeSidebarLayout(
                 sidebarOpen:  sidebarOpen,
@@ -244,28 +279,33 @@ class MainShell extends ConsumerWidget {
                 },
               )
             : IndexedStack(
-                index: currentIndex,
+                index:    currentIndex,
                 children: _screens,
               ),
       ),
 
-      bottomNavigationBar: isLandscape
-          ? null
-          : _BottomNav(
-              currentIndex: currentIndex,
-              onTap: (i) => ref.read(navIndexProvider.notifier).state = i,
-            ),
+      // ── BottomNav: collapsed to nothing in PIP ───────────────────────────
+      bottomNavigationBar: isInPip
+          ? const SizedBox.shrink()   // collapsed — NOT null, which would
+                                      // remove it and could shift layout
+          : isLandscape
+              ? null
+              : _BottomNav(
+                  currentIndex: currentIndex,
+                  onTap: (i) => ref.read(navIndexProvider.notifier).state = i,
+                ),
     );
   }
 }
 
-// LANDSCAPE SIDEBAR PUSH LAYOUT
+// ─── LANDSCAPE SIDEBAR PUSH LAYOUT ───────────────────────────────────────────
+
 class _LandscapeSidebarLayout extends StatelessWidget {
-  final bool sidebarOpen;
-  final int currentIndex;
-  final List<_NavData> navItems;
-  final List<Widget> screens;
-  final ValueChanged<int> onNavTap;
+  final bool               sidebarOpen;
+  final int                currentIndex;
+  final List<_NavData>     navItems;
+  final List<Widget>       screens;
+  final ValueChanged<int>  onNavTap;
 
   static const double _sidebarWidth = 200.0;
 
@@ -283,11 +323,11 @@ class _LandscapeSidebarLayout extends StatelessWidget {
       children: [
         AnimatedContainer(
           duration: const Duration(milliseconds: 280),
-          curve: Curves.easeInOutCubic,
-          width: sidebarOpen ? _sidebarWidth : 0,
+          curve:    Curves.easeInOutCubic,
+          width:    sidebarOpen ? _sidebarWidth : 0,
           child: ClipRect(
             child: OverflowBox(
-              maxWidth: _sidebarWidth,
+              maxWidth:  _sidebarWidth,
               alignment: Alignment.centerLeft,
               child: SizedBox(
                 width: _sidebarWidth,
@@ -302,13 +342,13 @@ class _LandscapeSidebarLayout extends StatelessWidget {
         ),
         AnimatedContainer(
           duration: const Duration(milliseconds: 280),
-          curve: Curves.easeInOutCubic,
-          width: sidebarOpen ? 1 : 0,
-          color: Colors.white.withOpacity(0.05),
+          curve:    Curves.easeInOutCubic,
+          width:    sidebarOpen ? 1 : 0,
+          color:    Colors.white.withOpacity(0.05),
         ),
         Expanded(
           child: IndexedStack(
-            index: currentIndex,
+            index:    currentIndex,
             children: screens,
           ),
         ),
@@ -317,10 +357,11 @@ class _LandscapeSidebarLayout extends StatelessWidget {
   }
 }
 
-// LANDSCAPE SIDEBAR CONTENT
+// ─── LANDSCAPE SIDEBAR CONTENT ────────────────────────────────────────────────
+
 class _LandscapeSidebar extends StatelessWidget {
-  final int currentIndex;
-  final List<_NavData> navItems;
+  final int               currentIndex;
+  final List<_NavData>    navItems;
   final ValueChanged<int> onNavTap;
 
   const _LandscapeSidebar({
@@ -340,8 +381,7 @@ class _LandscapeSidebar extends StatelessWidget {
     return Container(
       color: const Color(0xFF0D1627),
       padding: EdgeInsets.only(
-        top: appBarH, bottom: 16, left: 12, right: 12,
-      ),
+          top: appBarH, bottom: 16, left: 12, right: 12),
       child: SingleChildScrollView(
         physics: needsScroll
             ? const ClampingScrollPhysics()
@@ -354,9 +394,9 @@ class _LandscapeSidebar extends StatelessWidget {
               child: Text(
                 'NAVIGATION',
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.3),
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
+                  color:         Colors.white.withOpacity(0.3),
+                  fontSize:      10,
+                  fontWeight:    FontWeight.w600,
                   letterSpacing: 1.4,
                 ),
               ),
@@ -372,7 +412,7 @@ class _LandscapeSidebar extends StatelessWidget {
                   onTap: () => onNavTap(i),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
-                    curve: Curves.easeInOut,
+                    curve:    Curves.easeInOut,
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
@@ -389,26 +429,30 @@ class _LandscapeSidebar extends StatelessWidget {
                     ),
                     child: Row(
                       children: [
-                        Icon(item.icon, size: 20,
+                        Icon(item.icon,
+                            size:  20,
                             color: active
                                 ? const Color(0xFF00D4FF)
                                 : Colors.white38),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: Text(item.label,
-                              style: TextStyle(
-                                color: active
-                                    ? const Color(0xFF00D4FF)
-                                    : Colors.white54,
-                                fontSize: 14,
-                                fontWeight: active
-                                    ? FontWeight.w600
-                                    : FontWeight.w400,
-                              )),
+                          child: Text(
+                            item.label,
+                            style: TextStyle(
+                              color: active
+                                  ? const Color(0xFF00D4FF)
+                                  : Colors.white54,
+                              fontSize:   14,
+                              fontWeight: active
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
+                            ),
+                          ),
                         ),
                         if (active)
                           Container(
-                            width: 4, height: 4,
+                            width:  4,
+                            height: 4,
                             decoration: const BoxDecoration(
                                 color: Color(0xFF00D4FF),
                                 shape: BoxShape.circle),
@@ -426,9 +470,10 @@ class _LandscapeSidebar extends StatelessWidget {
   }
 }
 
-// PORTRAIT BOTTOM NAV
+// ─── PORTRAIT BOTTOM NAV ──────────────────────────────────────────────────────
+
 class _BottomNav extends StatelessWidget {
-  final int currentIndex;
+  final int               currentIndex;
   final ValueChanged<int> onTap;
 
   const _BottomNav({required this.currentIndex, required this.onTap});
@@ -451,9 +496,9 @@ class _BottomNav extends StatelessWidget {
                 color: Colors.white.withOpacity(0.05), width: 1)),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.4),
+              color:      Colors.black.withOpacity(0.4),
               blurRadius: 20,
-              offset: const Offset(0, -4)),
+              offset:     const Offset(0, -4)),
         ],
       ),
       child: SafeArea(
@@ -473,20 +518,19 @@ class _BottomNav extends StatelessWidget {
                 children: [
                   AnimatedPositioned(
                     duration: const Duration(milliseconds: 280),
-                    curve: Curves.easeInOutCubic,
-                    left: pillLeft,
-                    top: (56 - pillHeight) / 2,
+                    curve:    Curves.easeInOutCubic,
+                    left:     pillLeft,
+                    top:      (56 - pillHeight) / 2,
                     child: Container(
-                      width: pillWidth,
+                      width:  pillWidth,
                       height: pillHeight,
                       decoration: BoxDecoration(
-                        color: const Color(0xFF00D4FF).withOpacity(0.13),
+                        color:        const Color(0xFF00D4FF).withOpacity(0.13),
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                              color:
-                                  const Color(0xFF00D4FF).withOpacity(0.15),
-                              blurRadius: 10,
+                              color:       const Color(0xFF00D4FF).withOpacity(0.15),
+                              blurRadius:  10,
                               spreadRadius: 1),
                         ],
                       ),
@@ -498,10 +542,10 @@ class _BottomNav extends StatelessWidget {
                       final item   = entry.value;
                       final active = i == currentIndex;
                       return GestureDetector(
-                        onTap: () => onTap(i),
-                        behavior: HitTestBehavior.opaque,
+                        onTap:     () => onTap(i),
+                        behavior:  HitTestBehavior.opaque,
                         child: SizedBox(
-                          width: itemWidth,
+                          width:  itemWidth,
                           height: 56,
                           child: Center(
                             child: AnimatedSwitcher(
@@ -511,8 +555,8 @@ class _BottomNav extends StatelessWidget {
                                       scale: anim, child: child),
                               child: Icon(
                                 item.icon,
-                                key: ValueKey('nav_${i}_$active'),
-                                size: active ? 25 : 23,
+                                key:   ValueKey('nav_${i}_$active'),
+                                size:  active ? 25 : 23,
                                 color: active
                                     ? const Color(0xFF00D4FF)
                                     : Colors.white38,
@@ -533,9 +577,10 @@ class _BottomNav extends StatelessWidget {
   }
 }
 
-// SHARED
+// ─── SHARED ───────────────────────────────────────────────────────────────────
+
 class _NavData {
   final IconData icon;
-  final String label;
+  final String   label;
   const _NavData({required this.icon, required this.label});
 }
