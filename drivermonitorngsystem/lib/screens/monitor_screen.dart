@@ -22,6 +22,7 @@ final isRecordingProvider     = StateProvider<bool>((ref) => false);
 final showAlertBannerProvider = StateProvider<bool>((ref) => false);
 final alertBannerTypeProvider = StateProvider<String>((ref) => 'DROWSY');
 final clearGlassesProvider    = StateProvider<bool>((ref) => false);
+final isInPipProvider         = StateProvider<bool>((ref) => false);
 
 // MONITOR SCREEN
 class MonitorScreen extends ConsumerStatefulWidget {
@@ -34,13 +35,14 @@ class MonitorScreen extends ConsumerStatefulWidget {
 class _MonitorScreenState extends ConsumerState<MonitorScreen>
     with TickerProviderStateMixin, WidgetsBindingObserver {
 
+  // PiP method channel — talks to MainActivity.kt
+  static const _pipChannel = MethodChannel('com.bantaydrive/pip');
+
   // CAMERA
   CameraController? _cameraController;
   List<CameraDescription> _cameras = [];
   bool _cameraInitialized = false;
   String? _cameraError;
-
-  // Track whether we paused the stream on background
   bool _streamPausedForBackground = false;
 
   // SESSION
@@ -88,6 +90,16 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
+    // Listen for PiP mode changes from native side
+    _pipChannel.setMethodCallHandler((call) async {
+      if (call.method == 'onPipChanged') {
+        final isInPip = call.arguments['isInPip'] as bool? ?? false;
+        if (mounted) {
+          ref.read(isInPipProvider.notifier).state = isInPip;
+        }
+      }
+    });
+
     _warningController = AnimationController(
       duration: const Duration(milliseconds: 1000),
       vsync: this,
@@ -128,27 +140,28 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     super.dispose();
   }
 
-  // Called by Android when app goes background/foreground
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) async {
     final isRecording = ref.read(isRecordingProvider);
 
     switch (state) {
-
-      // App going to background — MUST stop camera stream before Android kills it
       case AppLifecycleState.inactive:
-      case AppLifecycleState.paused:
+        // User pressed Home or switching apps — enter PiP if recording
         if (isRecording) {
-          // Show persistent notification so user sees app is still monitoring
-          final currentDriverState = ref.read(driverStateProvider);
-          await BantayDriveService.startService(state: currentDriverState);
+          await _enterPip();
+          await BantayDriveService.startService(
+              state: ref.read(driverStateProvider));
         }
-        // Safely stop camera stream to prevent the fatal crash
+        break;
+
+      case AppLifecycleState.paused:
+        // App fully in background — pause camera stream safely
         await _pauseCameraStream();
         break;
 
-      // App coming back to foreground — restart camera stream
       case AppLifecycleState.resumed:
+        // App came back — exit PiP UI and restart camera
+        ref.read(isInPipProvider.notifier).state = false;
         await _resumeCameraStream();
         break;
 
@@ -157,7 +170,29 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // Safely stop the image stream when going to background
+  // ─── PiP HELPERS ──────────────────────────────────────────────────────────
+
+  // Tell native Android to enter PiP mode
+  Future<void> _enterPip() async {
+    try {
+      await _pipChannel.invokeMethod('enterPip');
+    } catch (e) {
+      debugPrint('PiP enter failed: $e');
+    }
+  }
+
+  // Tell native Android to sync recording state
+  Future<void> _syncRecordingState(bool isRecording) async {
+    try {
+      await _pipChannel.invokeMethod(
+          'setRecording', {'isRecording': isRecording});
+    } catch (e) {
+      debugPrint('PiP sync failed: $e');
+    }
+  }
+
+  // ─── CAMERA PAUSE / RESUME ────────────────────────────────────────────────
+
   Future<void> _pauseCameraStream() async {
     if (_cameraController == null || !_cameraInitialized) return;
     try {
@@ -165,28 +200,18 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         await _cameraController!.stopImageStream();
         _streamPausedForBackground = true;
       }
-    } catch (e) {
-      // Ignore — camera may already be closing
-    }
+    } catch (_) {}
   }
 
-  // Restart the image stream when coming back to foreground
   Future<void> _resumeCameraStream() async {
     if (_cameraController == null || !_cameraInitialized) return;
     if (!_streamPausedForBackground) return;
-
     try {
-      // Small delay to let Android fully restore the camera
       await Future.delayed(const Duration(milliseconds: 300));
-
-      // Check if controller is still usable
       if (!_cameraController!.value.isInitialized) {
-        // Camera was fully released — need full re-init
         await _initCamera();
         return;
       }
-
-      // Restart stream only if still recording
       if (ref.read(isRecordingProvider)) {
         await _cameraController!.startImageStream((CameraImage frame) async {
           final now = DateTime.now();
@@ -204,9 +229,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         });
       }
       _streamPausedForBackground = false;
-    } catch (e) {
+    } catch (_) {
       _streamPausedForBackground = false;
-      // If restart fails, do a full camera re-init
       await _initCamera();
     }
   }
@@ -234,10 +258,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         (c) => c.lensDirection == CameraLensDirection.front,
         orElse: () => _cameras.first,
       );
-
-      // Dispose old controller before creating new one
       await _cameraController?.dispose();
-
       _cameraController = CameraController(
         selectedCamera,
         ResolutionPreset.low,
@@ -299,6 +320,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(isRecordingProvider.notifier).state = true;
     ref.read(driverStateProvider.notifier).state = 'neutral';
 
+    // Tell native side that recording has started (enables PiP on Home press)
+    await _syncRecordingState(true);
+
     _startNotificationWithRetry();
 
     _addLogSync('System Initialized', 'INFO');
@@ -357,6 +381,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
 
     _addLogSync('Session Ended', 'INFO');
+
+    // Tell native side recording stopped (disables PiP on Home press)
+    await _syncRecordingState(false);
+
     BantayDriveService.stopService();
 
     ref.read(isRecordingProvider.notifier).state     = false;
@@ -407,9 +435,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     } else {
       _consecutiveDrowsy     = 0;
       _consecutiveDistracted = 0;
-      if (!ref.read(showAlertBannerProvider)) {
-        _alertLevel = 0;
-      }
+      if (!ref.read(showAlertBannerProvider)) _alertLevel = 0;
       _alarmPlayer.stop();
       BantayDriveService.updateState('neutral');
     }
@@ -517,6 +543,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final showAlert = ref.watch(showAlertBannerProvider);
     final alertType = ref.watch(alertBannerTypeProvider);
     final isLevel3  = _alertLevel == 3;
+    final isInPip   = ref.watch(isInPipProvider);
+
+    // When in PiP mode — show ONLY the camera feed, nothing else
+    // This is what appears in the mini floating window
+    if (isInPip) {
+      return _buildPipView();
+    }
 
     return ColoredBox(
       color: const Color(0xFF080E1A),
@@ -539,6 +572,108 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
           if (showAlert && isLevel3)
             Positioned.fill(child: _buildWarningOverlay(alertType)),
+        ],
+      ),
+    );
+  }
+
+  // PiP mini view — just the camera + state indicator
+  // This is what shows in the floating window when Home is pressed
+  Widget _buildPipView() {
+    final driverState = ref.watch(driverStateProvider);
+    final previewSize = _getPreviewSize(false);
+
+    Color stateColor;
+    String stateLabel;
+    switch (driverState) {
+      case 'drowsy':
+        stateColor = Colors.red;
+        stateLabel = 'DROWSY';
+        break;
+      case 'distracted':
+        stateColor = Colors.orange;
+        stateLabel = 'DISTRACTED';
+        break;
+      default:
+        stateColor = const Color(0xFF00FF88);
+        stateLabel = 'ALERT';
+    }
+
+    return ColoredBox(
+      color: Colors.black,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Camera feed fills the PiP window
+          if (_cameraInitialized)
+            ClipRect(
+              child: FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  width: previewSize.width,
+                  height: previewSize.height,
+                  child: CameraPreview(_cameraController!),
+                ),
+              ),
+            )
+          else
+            const Center(
+              child: CircularProgressIndicator(color: Color(0xFF00D4FF)),
+            ),
+
+          // State badge in top-left corner
+          Positioned(
+            top: 6, left: 6,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+              decoration: BoxDecoration(
+                color: stateColor.withOpacity(0.85),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                stateLabel,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+          ),
+
+          // REC badge in top-right
+          Positioned(
+            top: 6, right: 6,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.85),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 5, height: 5,
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 3),
+                  const Text(
+                    'REC',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 8,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -669,12 +804,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 child: BackdropFilter(
                   filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 6),
                     decoration: BoxDecoration(
                       color: const Color(0xFF0f172a).withValues(alpha: 0.65),
                       borderRadius: BorderRadius.circular(28),
                       border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.08), width: 1),
+                          color: Colors.white.withValues(alpha: 0.08),
+                          width: 1),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -688,13 +825,15 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                             ref.read(clearGlassesProvider.notifier).state =
                                 !clearGlasses;
                             if (!clearGlasses && _currentSessionId != null) {
-                              _addLogSync('Clear Glasses Mode Active', 'SUCCESS');
+                              _addLogSync(
+                                  'Clear Glasses Mode Active', 'SUCCESS');
                             }
                           },
                         ),
                         Container(
                           width: 1, height: 28,
-                          margin: const EdgeInsets.symmetric(horizontal: 6),
+                          margin:
+                              const EdgeInsets.symmetric(horizontal: 6),
                           color: Colors.white.withValues(alpha: 0.15),
                         ),
                         _CameraOverlayButton(
@@ -728,8 +867,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         color: Color(0xFF0f172a),
         borderRadius: BorderRadius.all(Radius.circular(20)),
         boxShadow: [
-          BoxShadow(color: Color(0xFF0b1120), offset: Offset(8, 8),   blurRadius: 16),
-          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-8, -8), blurRadius: 16),
+          BoxShadow(
+              color: Color(0xFF0b1120),
+              offset: Offset(8, 8),
+              blurRadius: 16),
+          BoxShadow(
+              color: Color(0xFF1e293b),
+              offset: Offset(-8, -8),
+              blurRadius: 16),
         ],
       ),
       padding: const EdgeInsets.all(6),
@@ -745,10 +890,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.videocam_off, color: Color(0xFF64748b), size: 48),
+              const Icon(Icons.videocam_off,
+                  color: Color(0xFF64748b), size: 48),
               const SizedBox(height: 12),
               Text(_cameraError!,
-                  style: const TextStyle(color: Color(0xFF64748b), fontSize: 13),
+                  style: const TextStyle(
+                      color: Color(0xFF64748b), fontSize: 13),
                   textAlign: TextAlign.center),
               const SizedBox(height: 12),
               TextButton(
@@ -770,7 +917,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             CircularProgressIndicator(color: Color(0xFF22d3ee)),
             SizedBox(height: 12),
             Text('Initializing camera...',
-                style: TextStyle(color: Color(0xFF64748b), fontSize: 13)),
+                style:
+                    TextStyle(color: Color(0xFF64748b), fontSize: 13)),
           ],
         ),
       ),
@@ -798,7 +946,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     return Positioned(
       top: 12, right: 12,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
           color: Colors.red.withValues(alpha: 0.85),
           borderRadius: BorderRadius.circular(20),
@@ -814,8 +963,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             const SizedBox(width: 6),
             const Text('REC',
                 style: TextStyle(
-                    color: Colors.white, fontSize: 11,
-                    fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2)),
           ],
         ),
       ),
@@ -826,8 +977,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   Widget _buildAlertBanner(String type) {
     final isDrowsy  = type == 'DROWSY';
-    final slideAnim = _notifSlide ?? AlwaysStoppedAnimation(Offset.zero);
-    final fadeAnim  = _notifFade ?? const AlwaysStoppedAnimation(1.0);
+    final slideAnim =
+        _notifSlide ?? AlwaysStoppedAnimation(Offset.zero);
+    final fadeAnim =
+        _notifFade ?? const AlwaysStoppedAnimation(1.0);
 
     return SlideTransition(
       position: slideAnim,
@@ -852,16 +1005,20 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   color: const Color(0xFF1C1C1E).withValues(alpha: 0.96),
                   borderRadius: BorderRadius.circular(18),
                   border: Border.all(
-                    color: Colors.red.withValues(alpha: 0.25 + 0.35 * pulse),
+                    color: Colors.red
+                        .withValues(alpha: 0.25 + 0.35 * pulse),
                     width: 1.2,
                   ),
                   boxShadow: [
                     BoxShadow(
                         color: Colors.black.withValues(alpha: 0.55),
-                        blurRadius: 28, offset: const Offset(0, 8)),
+                        blurRadius: 28,
+                        offset: const Offset(0, 8)),
                     BoxShadow(
-                        color: Colors.red.withValues(alpha: 0.12 + 0.18 * pulse),
-                        blurRadius: 20, spreadRadius: 1,
+                        color: Colors.red
+                            .withValues(alpha: 0.12 + 0.18 * pulse),
+                        blurRadius: 20,
+                        spreadRadius: 1,
                         offset: const Offset(0, 2)),
                   ],
                 ),
@@ -877,7 +1034,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                           AnimatedBuilder(
                             animation: _warningAnimation,
                             builder: (context, _) {
-                              final p = (_warningAnimation.value - 0.8) / 0.2;
+                              final p =
+                                  (_warningAnimation.value - 0.8) / 0.2;
                               return Container(
                                 width: 44, height: 44,
                                 decoration: BoxDecoration(
@@ -885,20 +1043,24 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                                   borderRadius: BorderRadius.circular(12),
                                   boxShadow: [
                                     BoxShadow(
-                                        color: Colors.red
-                                            .withValues(alpha: 0.3 + 0.4 * p),
-                                        blurRadius: 14, spreadRadius: 1),
+                                        color: Colors.red.withValues(
+                                            alpha: 0.3 + 0.4 * p),
+                                        blurRadius: 14,
+                                        spreadRadius: 1),
                                   ],
                                 ),
-                                child: const Icon(Icons.warning_amber_rounded,
-                                    color: Colors.white, size: 24),
+                                child: const Icon(
+                                    Icons.warning_amber_rounded,
+                                    color: Colors.white,
+                                    size: 24),
                               );
                             },
                           ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Row(
@@ -936,8 +1098,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                                       ? 'Stay alert - tap to dismiss'
                                       : 'Focus on the road - tap to dismiss',
                                   style: TextStyle(
-                                      color:
-                                          Colors.white.withValues(alpha: 0.5),
+                                      color: Colors.white
+                                          .withValues(alpha: 0.5),
                                       fontSize: 12),
                                 ),
                               ],
@@ -989,14 +1151,16 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 Container(
                   decoration: BoxDecoration(
                     border: Border.all(
-                        color: Colors.red.withValues(alpha: 0.3 + 0.5 * p),
+                        color:
+                            Colors.red.withValues(alpha: 0.3 + 0.5 * p),
                         width: 5),
                     gradient: RadialGradient(
                       center: Alignment.center,
                       radius: 1.2,
                       colors: [
                         Colors.transparent,
-                        Colors.red.withValues(alpha: 0.06 + 0.10 * p),
+                        Colors.red
+                            .withValues(alpha: 0.06 + 0.10 * p),
                       ],
                     ),
                   ),
@@ -1008,11 +1172,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       Container(
                         width: 88, height: 88,
                         decoration: BoxDecoration(
-                          color: Colors.red.shade900.withValues(alpha: 0.85),
+                          color: Colors.red.shade900
+                              .withValues(alpha: 0.85),
                           shape: BoxShape.circle,
                           border: Border.all(
-                              color:
-                                  Colors.red.shade400.withValues(alpha: 0.6),
+                              color: Colors.red.shade400
+                                  .withValues(alpha: 0.6),
                               width: 2),
                           boxShadow: [
                             BoxShadow(
@@ -1039,8 +1204,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                         style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w700,
-                            color:
-                                Colors.red.shade400.withValues(alpha: 0.8),
+                            color: Colors.red.shade400
+                                .withValues(alpha: 0.8),
                             letterSpacing: 6),
                       ),
                       const SizedBox(height: 28),
@@ -1051,20 +1216,22 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                           color: Colors.white.withValues(alpha: 0.08),
                           borderRadius: BorderRadius.circular(30),
                           border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.15)),
+                              color:
+                                  Colors.white.withValues(alpha: 0.15)),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(Icons.touch_app_rounded,
                                 size: 16,
-                                color: Colors.white.withValues(alpha: 0.6)),
+                                color:
+                                    Colors.white.withValues(alpha: 0.6)),
                             const SizedBox(width: 8),
                             Text('Tap anywhere to dismiss',
                                 style: TextStyle(
                                     fontSize: 13,
-                                    color:
-                                        Colors.white.withValues(alpha: 0.6),
+                                    color: Colors.white
+                                        .withValues(alpha: 0.6),
                                     fontWeight: FontWeight.w500,
                                     letterSpacing: 0.3)),
                           ],
@@ -1083,7 +1250,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
                         BoxShadow(
-                            color: Colors.red.withValues(alpha: 0.4 * pulse),
+                            color: Colors.red
+                                .withValues(alpha: 0.4 * pulse),
                             blurRadius: 10)
                       ],
                     ),
@@ -1176,7 +1344,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             const Align(
               alignment: Alignment.topCenter,
               child: Text('No logs yet. Start recording to begin.',
-                  style: TextStyle(color: Colors.white24, fontSize: 12),
+                  style:
+                      TextStyle(color: Colors.white24, fontSize: 12),
                   textAlign: TextAlign.center),
             )
           else
@@ -1184,10 +1353,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               height: 120,
               child: ListView.builder(
                 physics: const BouncingScrollPhysics(),
-                itemCount:
-                    _systemLogs.length > 20 ? 20 : _systemLogs.length,
+                itemCount: _systemLogs.length > 20
+                    ? 20
+                    : _systemLogs.length,
                 itemBuilder: (context, index) {
-                  final log = _systemLogs.reversed.toList()[index];
+                  final log =
+                      _systemLogs.reversed.toList()[index];
                   Color textColor;
                   switch (log['type']) {
                     case 'SUCCESS':
@@ -1229,7 +1400,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 }
 
-// ─── METRIC GAUGE WIDGET ──────────────────────────────────────────────────────
+// ─── METRIC GAUGE ─────────────────────────────────────────────────────────────
 
 class _MetricGauge extends StatelessWidget {
   final String   label;
@@ -1275,7 +1446,8 @@ class _MetricGauge extends StatelessWidget {
                     blurRadius: 12),
               ],
       ),
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+      padding:
+          const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1341,10 +1513,10 @@ class _MetricGauge extends StatelessWidget {
 // ─── CAMERA OVERLAY BUTTON ────────────────────────────────────────────────────
 
 class _CameraOverlayButton extends StatelessWidget {
-  final IconData icon;
-  final String   label;
-  final bool     isActive;
-  final Color    activeColor;
+  final IconData     icon;
+  final String       label;
+  final bool         isActive;
+  final Color        activeColor;
   final VoidCallback onTap;
 
   const _CameraOverlayButton({
@@ -1361,7 +1533,8 @@ class _CameraOverlayButton extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
           color: isActive
               ? activeColor.withValues(alpha: 0.18)
