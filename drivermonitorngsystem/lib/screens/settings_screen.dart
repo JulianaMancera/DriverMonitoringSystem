@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:volume_controller/volume_controller.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';         
+import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../core/database/database_helper.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import 'dart:async';
@@ -33,6 +34,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   StreamSubscription<double>? _volumeSubscription;
 
+  // ScrollController to programmatically scroll the list
+  final ScrollController _scrollController = ScrollController();
+
+  // GlobalKey to find the authors tile position
+  final GlobalKey _authorsKey = GlobalKey();
+
   @override
   void initState() {
     super.initState();
@@ -45,6 +52,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     _volumeSubscription?.cancel();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -65,6 +73,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  /// Called when the authors ExpansionTile is expanded.
+  /// Waits for the animation to finish, then scrolls so the
+  /// expanded content is fully visible.
+  void _onAuthorsExpanded(bool expanded) {
+    if (!expanded) return;
+    // Wait for the expansion animation (~300 ms) to complete
+    Future.delayed(const Duration(milliseconds: 320), () {
+      if (!mounted) return;
+      final ctx = _authorsKey.currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeInOut,
+        alignment: 0.0,
+        alignmentPolicy: ScrollPositionAlignmentPolicy.explicit,
+      );
+    });
+  }
+
   // ── BUILD ──────────────────────────────────────────────────────────────────
 
   @override
@@ -80,6 +108,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Scaffold(
       backgroundColor: _bg,
       body: ListView(
+        controller: _scrollController,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         children: [
           _sectionLabel('ALERT SETTINGS'),
@@ -135,7 +164,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: 'Session Retention',
               subtitle: 'Auto-delete sessions older than',
               value: _retentionPeriod,
-              options: const ['7 days', '30 days', 'Forever'], // 90 days removed
+              options: const ['7 days', '30 days', 'Forever'],
               onChanged: (v) {
                 setState(() => _retentionPeriod = v!);
                 PreferencesHelper.instance.setRetention(v!);
@@ -162,9 +191,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 24),
           _sectionLabel('ABOUT'),
           _buildCard([
-            _infoTile(icon: Icons.school_rounded,  title: 'Institution', value: 'New Era University'),
+            _infoTile(
+              icon: Icons.school_rounded,
+              title: 'Institution',
+              value: 'New Era University',
+            ),
             _dividerLine(),
-            _infoTile(icon: Icons.people_rounded,  title: 'Authors',     value: 'Macalanda & Mancera'),
+            _authorsTile(),
           ]),
           const SizedBox(height: 32),
         ],
@@ -466,6 +499,95 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  // ── AUTHORS TILE WITH EXPANDABLE GITHUB LINKS + AUTO-SCROLL ───────────────
+
+  Widget _authorsTile() {
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        key: _authorsKey,
+        tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+        leading: _iconBox(Icons.people_rounded, _textSecondary),
+        title: Text('Authors',
+            style: TextStyle(
+                color: _textSecondary,
+                fontSize: 14,
+                fontWeight: FontWeight.w400)),
+        trailing: Icon(Icons.expand_more_rounded,
+            color: _textSecondary, size: 20),
+        collapsedIconColor: _textSecondary,
+        iconColor: _cyan,
+        onExpansionChanged: _onAuthorsExpanded,
+        children: [
+           _githubLink(
+            name: 'Juliana Mancera',
+            username: 'JulianaMancera',
+            url: 'https://github.com/JulianaMancera',
+          ),
+          const SizedBox(height: 8),
+          _githubLink(
+            name: 'Pia Katleya Macalanda',
+            username: 'PiaMacalanda',
+            url: 'https://github.com/PiaMacalanda',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _githubLink({
+    required String name,
+    required String username,
+    required String url,
+  }) {
+    return InkWell(
+      onTap: () async {
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+      },
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: _surfaceAlt,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: _divider, width: 1),
+        ),
+        child: Row(children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: _cyan.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(Icons.code_rounded, color: _cyan, size: 16),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(name,
+                  style: TextStyle(
+                      color: _textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500)),
+              const SizedBox(height: 1),
+              Text('github.com/$username',
+                  style: TextStyle(
+                      color: _cyan,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w400)),
+            ]),
+          ),
+          Icon(Icons.open_in_new_rounded, color: _textSecondary, size: 14),
+        ]),
+      ),
+    );
+  }
+
   Widget _iconBox(IconData icon, Color color) => Container(
     width: 36,
     height: 36,
@@ -475,8 +597,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     child: Icon(icon, color: color, size: 18),
   );
 
-  // ── SNACKBAR ───────────────────────────────────────────────────────────────
-
+  // SNACKBAR 
   void _showSnackbar(BuildContext context, String message,
       {required bool isError}) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -491,8 +612,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ));
   }
 
-  // ── CSV EXPORT ─────────────────────────────────────────────────────────────
-
+  // CSV EXPORT
   String _pad(int n) => n.toString().padLeft(2, '0');
 
   Future<void> _exportCSV(BuildContext ctx) async {
@@ -559,8 +679,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  // ── ACTION HANDLERS ────────────────────────────────────────────────────────
-
+  //  ACTION HANDLERS
   void _onExportData(BuildContext context) {
     showDialog(
       context: context,
