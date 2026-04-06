@@ -7,8 +7,6 @@ import '../core/database/db_change_notifier.dart';
 import '../utils/responsive.dart';
 
 // RIVERPOD PROVIDER
-// Using keepAlive: true to prevent the provider from disposing
-// when navigating away — fixes the chart disappearing bug
 final dashboardProvider =
     FutureProvider<Map<String, dynamic>>((ref) async {
   ref.watch(dbChangeCounterProvider);
@@ -25,8 +23,6 @@ class DashboardScreen extends ConsumerStatefulWidget {
 
 class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Timer? _refreshTimer;
-  /// Toggle between current session view and 30-day per-date view in the chart
-  bool _showDailyView = false;
 
   @override
   void initState() {
@@ -66,14 +62,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  // MAIN SCROLLABLE CONTENT
   Widget _buildContent(BuildContext context, Map<String, dynamic> data) {
     final safetyScore   = data['safety_score']        as double? ?? 0.0;
     final totalDriveHrs = data['total_drive_hrs']      as double? ?? 0.0;
     final alertsLast24h = data['alerts_last_24h']      as int?    ?? 0;
     final safetyStreak  = data['safety_streak_days']   as int?    ?? 0;
     final avgAlertness  = data['avg_alertness_pct']    as double? ?? 0.0;
-    final snapshots     = (data['alertness_snapshots'] as List<Map<String, dynamic>>?) ?? [];
     final dailyScores   = (data['daily_safety_scores'] as List<Map<String, dynamic>>?) ?? [];
 
     String scoreLabel = 'EXCELLENT';
@@ -126,11 +120,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 }
               },
             ),
-
             SizedBox(height: Responsive.responsiveSpacing(context, mobile: 24, tablet: 28, desktop: 32)),
-
-            _buildAlertnessChart(context, snapshots, dailyScores),
-
+            _buildAlertnessHistory(context, dailyScores),
             SizedBox(height: isMobile ? 16 : 32),
           ],
         ),
@@ -141,7 +132,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   // SAFETY SCORE CARD
   Widget _buildSafetyScoreCard(BuildContext context, double score, String label) {
     final isMobile = Responsive.isMobile(context);
-
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
@@ -197,7 +187,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  // CIRCULAR SCORE INDICATOR
   Widget _buildCircularScoreIndicator(BuildContext context, double score, String label) {
     final outerSize    = Responsive.responsiveValue(context, mobile: 150.0, tablet: 170.0, desktop: 195.0);
     final progressSize = Responsive.responsiveValue(context, mobile: 138.0, tablet: 156.0, desktop: 179.0);
@@ -291,50 +280,53 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  Widget _buildAlertnessChart(
+  // ── ALERTNESS HISTORY ──────────────────────────────────────────────────────
+  Widget _buildAlertnessHistory(
     BuildContext context,
-    List<Map<String, dynamic>> snapshots,
     List<Map<String, dynamic>> dailyScores,
   ) {
-    final bool hasSessions = snapshots.length >= 2;
-    final bool hasDaily    = dailyScores.length >= 2;
-    final bool useDaily    = _showDailyView && hasDaily;
+    final bool hasData = dailyScores.length >= 2;
 
-    if (snapshots.length < 2) {
-      spots      = const [FlSpot(0,95), FlSpot(1,92), FlSpot(2,88), FlSpot(3,94), FlSpot(4,85), FlSpot(5,78), FlSpot(6,82)];
-      timeLabels = const ['10:00', '10:10', '10:20', '10:30', '10:40', '10:50', '11:00'];
-    } else {
-      spots = []; timeLabels = [];
-      for (int i = 0; i < snapshots.length; i++) {
-        final raw     = snapshots[i]['alertness_pct'] as double? ?? 50.0;
-        final clamped = raw.clamp(0.0, 100.0);
-        spots.add(FlSpot(i.toDouble(), clamped));
-        xLabels.add(snapshots[i]['time_label'] as String? ?? '$i');
+    final List<FlSpot> spots;
+    final List<String> xLabels;
+    final bool         isPlaceholder;
+
+    if (hasData) {
+      spots   = [];
+      xLabels = [];
+      for (int i = 0; i < dailyScores.length; i++) {
+        final score = (dailyScores[i]['avg_score'] as double? ?? 0.0).clamp(0.0, 100.0);
+        final day   = dailyScores[i]['day'] as String? ?? '';
+        final parts = day.split('-');
+        const mo = ['','Jan','Feb','Mar','Apr','May','Jun',
+                       'Jul','Aug','Sep','Oct','Nov','Dec'];
+        final label = parts.length == 3
+            ? '${mo[int.tryParse(parts[1]) ?? 0]} ${int.tryParse(parts[2]) ?? 0}'
+            : day;
+        spots.add(FlSpot(i.toDouble(), score));
+        xLabels.add(label);
       }
       isPlaceholder = false;
     } else {
-      // Placeholder — no data yet
-      spots         = const [FlSpot(0,95),FlSpot(1,92),FlSpot(2,88),FlSpot(3,94),FlSpot(4,85),FlSpot(5,78),FlSpot(6,82)];
-      xLabels       = const ['10:00','10:10','10:20','10:30','10:40','10:50','11:00'];
+      // Placeholder — mirrors screenshot shape
+      spots = const [
+        FlSpot(0,  95), FlSpot(1,  96), FlSpot(2,  95), FlSpot(3,  96),
+        FlSpot(4,  95), FlSpot(5,  96), FlSpot(6,  95), FlSpot(7,  96),
+        FlSpot(8,  95), FlSpot(9,  97), FlSpot(10, 67), FlSpot(11, 48),
+        FlSpot(12, 57), FlSpot(13, 42), FlSpot(14, 53), FlSpot(15, 49),
+        FlSpot(16, 55),
+      ];
+      xLabels = const [
+        'Mar 14','','','','','','Mar 20','','','Mar 27','','Apr 2','','','','','Apr 6',
+      ];
       isPlaceholder = true;
     }
 
-    final double maxX        = (spots.length - 1).toDouble().clamp(1.0, double.infinity);
-    // FIX: Show at most 6 x-axis labels to prevent crowding
-    final int    labelEvery  = ((spots.length - 1) / 5).ceil().clamp(1, 9999);
-
-    // FIX: Add 4-point padding above/below so line never touches axis numbers
-    final double dataMin = spots.map((s) => s.y).fold(100.0, (a, b) => a < b ? a : b);
-    final double dataMax = spots.map((s) => s.y).fold(0.0,   (a, b) => a > b ? a : b);
-    final double chartMin = (dataMin - 5).clamp(0.0, 95.0);
-    final double chartMax = (dataMax + 5).clamp(5.0, 100.0);
-
     final Color lineColor = isPlaceholder
-        ? const Color(0xFF22d3ee).withOpacity(0.3)
+        ? const Color(0xFF22d3ee).withOpacity(0.5)
         : const Color(0xFF22d3ee);
 
     return Container(
-      height: 260,
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.circular(
@@ -345,59 +337,49 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           BoxShadow(color: Color(0xFF1e293b), offset: Offset(-6, -6), blurRadius: 16),
         ],
       ),
-      padding: EdgeInsets.fromLTRB(
-        Responsive.responsivePadding(context, mobile: 16, tablet: 20, desktop: 24),
-        Responsive.responsivePadding(context, mobile: 16, tablet: 20, desktop: 24),
-        Responsive.responsivePadding(context, mobile: 16, tablet: 20, desktop: 24),
-        Responsive.responsivePadding(context, mobile: 8,  tablet: 12, desktop: 16),
-      ),
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header row with toggle
+
+          // ── Header ──────────────────────────────────────────────────────
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Expanded(
+              const Expanded(
                 child: Text(
-                  useDaily ? '30-Day Safety Score' : 'Current Session Alertness',
+                  'Safety Score History',
                   style: TextStyle(
-                    color:      const Color(0xFFcbd5e1),
-                    fontSize:   Responsive.responsiveFont(context, mobile: 15, tablet: 15.5, desktop: 16),
-                    fontWeight: FontWeight.w500,
+                    color:      Color(0xFFe2e8f0),
+                    fontSize:   19,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.1,
                   ),
                 ),
               ),
-              // Toggle between session view and 30-day view
-              GestureDetector(
-                onTap: () => setState(() => _showDailyView = !_showDailyView),
+              // Session pill — teal border + teal text, NOT tappable (placeholder)
+              IgnorePointer(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
                   decoration: BoxDecoration(
-                    color: _showDailyView
-                        ? const Color(0xFF22d3ee).withOpacity(0.15)
-                        : const Color(0xFF1e293b),
-                    borderRadius: BorderRadius.circular(20),
+                    color: const Color(0xFF22d3ee).withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(24),
                     border: Border.all(
-                      color: _showDailyView
-                          ? const Color(0xFF22d3ee).withOpacity(0.4)
-                          : Colors.transparent,
+                      color: const Color(0xFF22d3ee).withOpacity(0.65),
+                      width: 1.4,
                     ),
                   ),
-                  child: Row(
+                  child: const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
-                        _showDailyView ? Icons.show_chart : Icons.calendar_month_outlined,
-                        size: 13,
-                        color: _showDailyView ? const Color(0xFF22d3ee) : const Color(0xFF64748b),
-                      ),
-                      const SizedBox(width: 5),
+                      Icon(Icons.show_chart_rounded, size: 14, color: Color(0xFF22d3ee)),
+                      SizedBox(width: 6),
                       Text(
-                        _showDailyView ? 'Session' : '30 Days',
+                        'Session',
                         style: TextStyle(
-                          fontSize:   11,
-                          fontWeight: FontWeight.w500,
-                          color: _showDailyView ? const Color(0xFF22d3ee) : const Color(0xFF64748b),
+                          fontSize:   12,
+                          fontWeight: FontWeight.w600,
+                          color:      Color(0xFF22d3ee),
                         ),
                       ),
                     ],
@@ -406,150 +388,27 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          // Subtitle
+
+          const SizedBox(height: 5),
+
+          // ── Subtitle ────────────────────────────────────────────────────
           Text(
             isPlaceholder
-                ? 'Start a session to see live data'
-                : useDaily
-                    ? 'Avg safety score per drive day'
-                    : 'Alertness % over session time',
-            style: TextStyle(
-              color:    const Color(0xFF475569),
-              fontSize: Responsive.responsiveFont(context, mobile: 11, tablet: 11.5, desktop: 12),
-            ),
+                ? 'Start a session to see your history'
+                : 'Avg safety score per drive day · swipe to explore',
+            style: const TextStyle(color: Color(0xFF475569), fontSize: 12),
           ),
-          SizedBox(height: Responsive.responsiveSpacing(context, mobile: 12, tablet: 16, desktop: 20)),
-          Expanded(
-            child: LineChart(
-              LineChartData(
-                gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: false,
-                  horizontalInterval: 10,
-                  getDrawingHorizontalLine: (_) => FlLine(
-                    color:       const Color(0xFF1e293b),
-                    strokeWidth: 1,
-                    dashArray:   [3, 3],
-                  ),
-                ),
-                titlesData: FlTitlesData(
-                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  topTitles:   const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles:   true,
-                      reservedSize: 32,
-                      interval:     1,
-                      getTitlesWidget: (value, meta) {
-                        final idx = value.toInt();
-                        // Only show every Nth label to prevent crowding
-                        if (idx % labelEvery != 0) return const SizedBox.shrink();
-                        if (idx >= 0 && idx < xLabels.length) {
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: Text(
-                              xLabels[idx],
-                              style: TextStyle(
-                                color:    const Color(0xFF64748b),
-                                fontSize: Responsive.responsiveFont(context, mobile: 9, tablet: 10, desktop: 11),
-                              ),
-                            ),
-                          );
-                        }
-                        return const SizedBox.shrink();
-                      },
-                    ),
-                  ),
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles:   true,
-                      interval:     10,
-                      reservedSize: 36,
-                      getTitlesWidget: (value, meta) {
-                        // FIX: skip labels too close to min/max to prevent overlap
-                        if (value < chartMin + 3 || value > chartMax - 3) {
-                          return const SizedBox.shrink();
-                        }
-                        return Text(
-                          '${value.toInt()}',
-                          style: TextStyle(
-                            color:    const Color(0xFF64748b),
-                            fontSize: Responsive.responsiveFont(context, mobile: 10, tablet: 11, desktop: 12),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-                borderData: FlBorderData(show: false),
-                minX: 0,
-                maxX: (spots.length - 1).toDouble().clamp(1.0, double.infinity),
-                minY: 50,
-                maxY: 100,
-                lineBarsData: [
-                  LineChartBarData(
-                    spots:            spots,
-                    isCurved:         true,
-                    color:            lineColor,
-                    barWidth:         Responsive.responsiveValue(context, mobile: 2.5, tablet: 2.75, desktop: 3.0),
-                    isStrokeCapRound: true,
-                    dotData: FlDotData(
-                      show: useDaily, // show dots on per-date view so each day is tappable
-                      getDotPainter: (spot, percent, bar, index) =>
-                          FlDotCirclePainter(
-                            radius:    3.5,
-                            color:     const Color(0xFF22d3ee),
-                            strokeWidth: 1.5,
-                            strokeColor: const Color(0xFF0f172a),
-                          ),
-                    ),
-                    belowBarData: BarAreaData(
-                      show: true,
-                      gradient: LinearGradient(
-                        colors: [
-                          lineColor.withOpacity(isPlaceholder ? 0.08 : 0.25),
-                          lineColor.withOpacity(0.0),
-                        ],
-                        begin: Alignment.topCenter,
-                        end:   Alignment.bottomCenter,
-                      ),
-                    ),
-                  ),
-                ],
-                lineTouchData: isPlaceholder
-                    ? const LineTouchData(enabled: false)
-                    : LineTouchData(
-                        touchTooltipData: LineTouchTooltipData(
-                          getTooltipColor: (_) => const Color(0xFF0f172a),
-                          tooltipBorderRadius: BorderRadius.circular(12),
-                          tooltipPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          getTooltipItems: (touchedSpots) => touchedSpots.map((s) {
-                            final label = s.x.toInt() < xLabels.length
-                                ? xLabels[s.x.toInt()]
-                                : '';
-                            return LineTooltipItem(
-                              '${s.y.toInt()}%\n',
-                              const TextStyle(
-                                color:      Color(0xFF22d3ee),
-                                fontWeight: FontWeight.bold,
-                                fontSize:   13,
-                              ),
-                              children: [
-                                TextSpan(
-                                  text:  label,
-                                  style: const TextStyle(
-                                    color:    Color(0xFF64748b),
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.normal,
-                                  ),
-                                ),
-                              ],
-                            );
-                          }).toList(),
-                        ),
-                      ),
-              ),
+
+          const SizedBox(height: 18),
+
+          // ── Horizontally scrollable chart ────────────────────────────────
+          SizedBox(
+            height: 245,
+            child: _AlertnessChartInner(
+              spots:         spots,
+              xLabels:       xLabels,
+              isPlaceholder: isPlaceholder,
+              lineColor:     lineColor,
             ),
           ),
         ],
@@ -558,116 +417,319 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 }
 
-// REUSABLE STAT CARD
-class _StatCard extends StatefulWidget {
-  final IconData icon;
-  final String label, value, subtext;
-  final bool accent;
+// ── Horizontally-scrollable chart ─────────────────────────────────────────────
+// Each day gets a fixed pixel slot so labels never crowd, and the user can
+// swipe left/right to explore all 30 days. Auto-scrolls to the latest date.
+// Y-axis is fixed: minY = 15, maxY = 105  →  labels 20, 30 … 90, 100 visible.
+class _AlertnessChartInner extends StatefulWidget {
+  final List<FlSpot>  spots;
+  final List<String>  xLabels;
+  final bool          isPlaceholder;
+  final Color         lineColor;
 
-  const _StatCard({
-    required this.icon, required this.label,
-    required this.value, required this.subtext, required this.accent,
+  const _AlertnessChartInner({
+    required this.spots,
+    required this.xLabels,
+    required this.isPlaceholder,
+    required this.lineColor,
   });
 
   @override
-  State<_StatCard> createState() => _StatCardState();
+  State<_AlertnessChartInner> createState() => _AlertnessChartInnerState();
 }
 
-class _StatCardState extends State<_StatCard> {
+class _AlertnessChartInnerState extends State<_AlertnessChartInner> {
+  final ScrollController _sc = ScrollController();
+
+  // Pixels per day point — wide enough so "Mar 14" labels never touch
+  static const double _pointSpacing = 42.0;
+  static const double _yAxisWidth   = 38.0;
+  static const double _rightPad     = 16.0;
+
+  // Fixed Y bounds so 20 and 100 always appear as axis labels
+  static const double _chartMin = 15.0;   // just below 20 so the label fits
+  static const double _chartMax = 105.0;  // just above 100 so the label fits
+
+  @override
+  void initState() {
+    super.initState();
+    // Auto-scroll to the most-recent (rightmost) day after first layout
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_sc.hasClients && _sc.position.maxScrollExtent > 0) {
+        _sc.jumpTo(_sc.position.maxScrollExtent);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _sc.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final double chartW =
+        _yAxisWidth + (widget.spots.length * _pointSpacing) + _rightPad;
+    final double maxX =
+        (widget.spots.length - 1).toDouble().clamp(1.0, double.infinity);
+
+    return SingleChildScrollView(
+      controller:      _sc,
+      scrollDirection: Axis.horizontal,
+      physics:         const BouncingScrollPhysics(),
+      child: SizedBox(
+        width: chartW,
+        child: LineChart(
+          LineChartData(
+            gridData: FlGridData(
+              show: true,
+              drawVerticalLine: false,
+              horizontalInterval: 10,
+              getDrawingHorizontalLine: (_) => FlLine(
+                color:       const Color(0xFF1e293b),
+                strokeWidth: 1,
+                dashArray:   [4, 4],
+              ),
+            ),
+            titlesData: FlTitlesData(
+              rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              topTitles:   const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+
+              // X-axis — every label stored in xLabels; blanks are skipped
+              bottomTitles: AxisTitles(
+                sideTitles: SideTitles(
+                  showTitles:   true,
+                  reservedSize: 30,
+                  interval:     1,
+                  getTitlesWidget: (value, meta) {
+                    final idx = value.toInt();
+                    if (idx < 0 || idx >= widget.xLabels.length) {
+                      return const SizedBox.shrink();
+                    }
+                    final text = widget.xLabels[idx];
+                    if (text.isEmpty) return const SizedBox.shrink();
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        text,
+                        style: const TextStyle(
+                          color:    Color(0xFF64748b),
+                          fontSize: 10.5,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+
+              // Y-axis — 10-unit ticks; 20 and 100 are intentionally included
+              leftTitles: AxisTitles(
+                sideTitles: SideTitles(
+                  showTitles:   true,
+                  interval:     10,
+                  reservedSize: _yAxisWidth,
+                  getTitlesWidget: (value, meta) {
+                    // Only render the values we actually want: 20 → 100
+                    final v = value.toInt();
+                    if (v < 20 || v > 100) return const SizedBox.shrink();
+                    return Text(
+                      '$v',
+                      style: const TextStyle(
+                        color:    Color(0xFF64748b),
+                        fontSize: 11,
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+
+            borderData: FlBorderData(show: false),
+            minX: 0,
+            maxX: maxX,
+            minY: _chartMin,
+            maxY: _chartMax,
+
+            lineBarsData: [
+              LineChartBarData(
+                spots:            widget.spots,
+                isCurved:         true,
+                curveSmoothness:  0.3,
+                color:            widget.lineColor,
+                barWidth:         2.5,
+                isStrokeCapRound: true,
+                dotData: FlDotData(
+                  show: true,
+                  getDotPainter: (spot, percent, bar, index) =>
+                      FlDotCirclePainter(
+                        radius:      3.2,
+                        color:       widget.lineColor,
+                        strokeWidth: 1.5,
+                        strokeColor: const Color(0xFF0f172a),
+                      ),
+                ),
+                belowBarData: BarAreaData(
+                  show: true,
+                  gradient: LinearGradient(
+                    colors: [
+                      widget.lineColor.withOpacity(widget.isPlaceholder ? 0.20 : 0.30),
+                      widget.lineColor.withOpacity(0.0),
+                    ],
+                    begin: Alignment.topCenter,
+                    end:   Alignment.bottomCenter,
+                  ),
+                ),
+              ),
+            ],
+
+            lineTouchData: widget.isPlaceholder
+                ? const LineTouchData(enabled: false)
+                : LineTouchData(
+                    touchTooltipData: LineTouchTooltipData(
+                      getTooltipColor: (_) => const Color(0xFF0f172a),
+                      tooltipBorderRadius: BorderRadius.circular(12),
+                      tooltipPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      getTooltipItems: (touchedSpots) =>
+                          touchedSpots.map((s) {
+                        final label = s.x.toInt() < widget.xLabels.length
+                            ? widget.xLabels[s.x.toInt()]
+                            : '';
+                        return LineTooltipItem(
+                          '${s.y.toInt()}%\n',
+                          const TextStyle(
+                            color:      Color(0xFF22d3ee),
+                            fontWeight: FontWeight.bold,
+                            fontSize:   13,
+                          ),
+                          children: [
+                            TextSpan(
+                              text: label,
+                              style: const TextStyle(
+                                color:      Color(0xFF64748b),
+                                fontSize:   10,
+                                fontWeight: FontWeight.normal,
+                              ),
+                            ),
+                          ],
+                        );
+                      }).toList(),
+                    ),
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// REUSABLE STAT CARD
+class _StatCard extends StatelessWidget {
+  final IconData icon;
+  final String   label, value, subtext;
+  final bool     accent;
+
+  const _StatCard({
+    required this.icon,   required this.label,
+    required this.value,  required this.subtext,
+    required this.accent,
+  });
+
   @override
   Widget build(BuildContext context) {
     return AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeInOut,
-          decoration: BoxDecoration(
-            color: const Color(0xFF0f172a),
-            borderRadius: BorderRadius.circular(
-              Responsive.responsiveBorderRadius(context, mobile: 16, tablet: 18, desktop: 20),
-            ),
-            boxShadow: const [
-                BoxShadow(color: Color(0xFF0b1120), offset: Offset(3, 3),   blurRadius: 8),
-                BoxShadow(color: Color(0xFF1e293b), offset: Offset(-3, -3), blurRadius: 8),
-            ],
-          ),
-          padding: EdgeInsets.all(
-            Responsive.responsivePadding(context, mobile: 16, tablet: 18, desktop: 20),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeInOut,
+      decoration: BoxDecoration(
+        color: const Color(0xFF0f172a),
+        borderRadius: BorderRadius.circular(
+          Responsive.responsiveBorderRadius(context, mobile: 16, tablet: 18, desktop: 20),
+        ),
+        boxShadow: const [
+          BoxShadow(color: Color(0xFF0b1120), offset: Offset(3, 3),   blurRadius: 8),
+          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-3, -3), blurRadius: 8),
+        ],
+      ),
+      padding: EdgeInsets.all(
+        Responsive.responsivePadding(context, mobile: 16, tablet: 18, desktop: 20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: EdgeInsets.all(
-                      Responsive.responsivePadding(context, mobile: 8, tablet: 9, desktop: 10),
-                    ),
-                    decoration: BoxDecoration(
-                      color: widget.accent
-                          ? const Color(0xFF22d3ee).withValues(alpha: 0.1)
-                          : const Color(0xFF1e293b),
-                      borderRadius: BorderRadius.circular(
-                        Responsive.responsiveBorderRadius(context, mobile: 10, tablet: 11, desktop: 12),
-                      ),
-                    ),
-                    child: Icon(
-                      widget.icon,
-                      size:  Responsive.responsiveIconSize(context, mobile: 20, tablet: 21, desktop: 22),
-                      color: widget.accent ? const Color(0xFF22d3ee) : const Color(0xFF64748b),
-                    ),
+              Container(
+                padding: EdgeInsets.all(
+                  Responsive.responsivePadding(context, mobile: 8, tablet: 9, desktop: 10),
+                ),
+                decoration: BoxDecoration(
+                  color: accent
+                      ? const Color(0xFF22d3ee).withValues(alpha: 0.1)
+                      : const Color(0xFF1e293b),
+                  borderRadius: BorderRadius.circular(
+                    Responsive.responsiveBorderRadius(context, mobile: 10, tablet: 11, desktop: 12),
                   ),
-                  if (widget.accent)
-                    Padding(
-                      padding: EdgeInsets.only(
-                        left: Responsive.responsiveSpacing(context, mobile: 10, tablet: 11, desktop: 12),
-                      ),
-                      child: Container(
-                        width:  Responsive.responsiveValue(context, mobile: 7.0, tablet: 7.5, desktop: 8.0),
-                        height: Responsive.responsiveValue(context, mobile: 7.0, tablet: 7.5, desktop: 8.0),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF22d3ee),
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: const Color(0xFF22d3ee).withValues(alpha: 0.4),
-                              blurRadius: 8, spreadRadius: 2,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                ],
+                ),
+                child: Icon(
+                  icon,
+                  size:  Responsive.responsiveIconSize(context, mobile: 20, tablet: 21, desktop: 22),
+                  color: accent ? const Color(0xFF22d3ee) : const Color(0xFF64748b),
+                ),
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(widget.label,
-                    style: TextStyle(
-                      color: const Color(0xFF64748b),
-                      fontSize: Responsive.responsiveFont(context, mobile: 12, tablet: 12.5, desktop: 13),
-                      fontWeight: FontWeight.w500,
+              if (accent)
+                Padding(
+                  padding: EdgeInsets.only(
+                    left: Responsive.responsiveSpacing(context, mobile: 10, tablet: 11, desktop: 12),
+                  ),
+                  child: Container(
+                    width:  Responsive.responsiveValue(context, mobile: 7.0, tablet: 7.5, desktop: 8.0),
+                    height: Responsive.responsiveValue(context, mobile: 7.0, tablet: 7.5, desktop: 8.0),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF22d3ee),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color:       const Color(0xFF22d3ee).withValues(alpha: 0.4),
+                          blurRadius:  8,
+                          spreadRadius: 2,
+                        ),
+                      ],
                     ),
                   ),
-                  SizedBox(height: Responsive.responsiveSpacing(context, mobile: 4, tablet: 5, desktop: 6)),
-                  Text(widget.value,
-                    style: TextStyle(
-                      fontSize:   Responsive.responsiveFont(context, mobile: 22, tablet: 24, desktop: 26),
-                      fontWeight: FontWeight.bold,
-                      color:      const Color(0xFFe2e8f0),
-                    ),
-                  ),
-                  SizedBox(height: Responsive.responsiveSpacing(context, mobile: 2, tablet: 3, desktop: 4)),
-                  Text(widget.subtext,
-                    style: TextStyle(
-                      fontSize: Responsive.responsiveFont(context, mobile: 10, tablet: 10.5, desktop: 11),
-                      color:    const Color(0xFF475569),
-                    ),
-                  ),
-                ],
+                ),
+            ],
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label,
+                style: TextStyle(
+                  color:      const Color(0xFF64748b),
+                  fontSize:   Responsive.responsiveFont(context, mobile: 12, tablet: 12.5, desktop: 13),
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              SizedBox(height: Responsive.responsiveSpacing(context, mobile: 4, tablet: 5, desktop: 6)),
+              Text(value,
+                style: TextStyle(
+                  fontSize:   Responsive.responsiveFont(context, mobile: 22, tablet: 24, desktop: 26),
+                  fontWeight: FontWeight.bold,
+                  color:      const Color(0xFFe2e8f0),
+                ),
+              ),
+              SizedBox(height: Responsive.responsiveSpacing(context, mobile: 2, tablet: 3, desktop: 4)),
+              Text(subtext,
+                style: TextStyle(
+                  fontSize: Responsive.responsiveFont(context, mobile: 10, tablet: 10.5, desktop: 11),
+                  color:    const Color(0xFF475569),
+                ),
               ),
             ],
           ),
+        ],
+      ),
     );
   }
 }

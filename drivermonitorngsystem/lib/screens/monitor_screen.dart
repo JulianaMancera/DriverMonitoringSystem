@@ -791,10 +791,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ════════════════════════════════════════════════════════════════════════════
   // CAMERA WITH OVERLAY (full-screen mode)
-  // ════════════════════════════════════════════════════════════════════════════
-
   Widget _buildCameraWithOverlay({
     double? height,
     required bool isLandscape,
@@ -802,7 +799,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }) {
     final isRecording  = ref.watch(isRecordingProvider);
     final clearGlasses = ref.watch(clearGlassesProvider);
-    final driverState  = ref.watch(driverStateProvider);
     final previewSize  = _getPreviewSize(isLandscape);
 
     final cameraWidget = ClipRect(
