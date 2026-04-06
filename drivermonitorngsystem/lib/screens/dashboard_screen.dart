@@ -348,7 +348,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             children: [
               const Expanded(
                 child: Text(
-                  'Alertness History',
+                  'Safety Score History',
                   style: TextStyle(
                     color:      Color(0xFFe2e8f0),
                     fontSize:   19,
