@@ -72,6 +72,7 @@ flutter:
     - assets/L1_L2_sound.mp3
     - assets/L3_critical_alert.wav
     - assets/dms_hybridnet.tflite
+    - assets/bantay_drive_logo.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

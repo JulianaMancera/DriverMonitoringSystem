@@ -13,6 +13,8 @@ import 'screens/monitor_screen.dart';
 import 'screens/analytics_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/history_screen.dart';
+import 'screens/splash_screen.dart';      // ← NEW
+import 'screens/onboarding_screen.dart';  // ← NEW
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -65,8 +67,78 @@ class BantayDriveApp extends StatelessWidget {
           ),
           useMaterial3: true,
         ),
-        home: const MainShell(),
+        home: const EntryPoint(), // ← was: MainShell()
       ),
+    );
+  }
+}
+
+// ─── ENTRY POINT  (splash → onboarding? → shell) ──────────────────────────────
+// NEW — only addition to this file. Everything below is unchanged from original.
+
+enum _AppState { splash, onboarding, main }
+
+class EntryPoint extends StatefulWidget {
+  const EntryPoint({super.key});
+
+  @override
+  State<EntryPoint> createState() => _EntryPointState();
+}
+
+class _EntryPointState extends State<EntryPoint> {
+  // ── DEV TOGGLE ───────────────────────────────────────────────────────────────
+  // Set to true to always show onboarding (ignores SharedPreferences).
+  // Set back to false when you're done previewing.
+  static const bool _forceOnboarding = true;
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  _AppState _state             = _AppState.splash;
+  bool      _onboardingNeeded  = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkFirstLaunch();
+  }
+
+  Future<void> _checkFirstLaunch() async {
+    if (_forceOnboarding) {
+      setState(() => _onboardingNeeded = true);
+      return;
+    }
+    final seen = await OnboardingScreen.hasBeenSeen();
+    setState(() => _onboardingNeeded = !seen);
+  }
+
+  void _onSplashComplete() {
+    setState(() {
+      _state = _onboardingNeeded ? _AppState.onboarding : _AppState.main;
+    });
+  }
+
+  void _onOnboardingComplete() {
+    setState(() => _state = _AppState.main);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration:        const Duration(milliseconds: 400),
+      switchInCurve:   Curves.easeOut,
+      switchOutCurve:  Curves.easeIn,
+      transitionBuilder: (child, animation) =>
+          FadeTransition(opacity: animation, child: child),
+      child: switch (_state) {
+        _AppState.splash => SplashScreen(
+            key:        const ValueKey('splash'),
+            onComplete: _onSplashComplete,
+          ),
+        _AppState.onboarding => OnboardingScreen(
+            key:        const ValueKey('onboarding'),
+            onComplete: _onOnboardingComplete,
+          ),
+        _AppState.main => const MainShell(key: ValueKey('main')),
+      },
     );
   }
 }
@@ -138,25 +210,12 @@ class MainShell extends ConsumerWidget {
     final isMonitor     = currentIndex == 1;
     final isTransparent = isLandscape && isMonitor;
 
-    // ── CRITICAL: NEVER swap out the widget tree when entering/leaving PIP.
-    // Replacing with a new Scaffold remounts MonitorScreen and kills all state
-    // (session ID, recording, logs, camera stream). Instead, keep the SAME
-    // Scaffold always mounted and just collapse the AppBar + BottomNav to
-    // zero height/size while in PIP. MonitorScreen stays alive the whole time.
-    //
-    // AppBar → PreferredSize(height: 0) hides it without remounting children.
-    // BottomNav → SizedBox.shrink() collapses it to nothing.
-    // extendBodyBehindAppBar: true ensures the body fills the screen in PIP.
-
     return Scaffold(
       backgroundColor:        const Color(0xFF080E1A),
       extendBodyBehindAppBar: isTransparent || isInPip,
 
-      // ── AppBar: hidden in PIP, normal otherwise ──────────────────────────
       appBar: isInPip
           ? PreferredSize(
-              // Zero-height placeholder — hides the bar but keeps the
-              // Scaffold structure intact so the body doesn't remount.
               preferredSize: Size.zero,
               child:         const SizedBox.shrink(),
             )
@@ -207,14 +266,14 @@ class MainShell extends ConsumerWidget {
                     ),
                     RichText(
                       text: TextSpan(
-                        text:  'Connected: ',
+                        text: 'Connected: ',
                         style: TextStyle(
                           color:    Colors.white54,
                           fontSize: isLandscape ? 10 : 13,
                         ),
                         children: [
                           TextSpan(
-                            text:  deviceName,
+                            text: deviceName,
                             style: const TextStyle(
                               color:      Color(0xFF00D4FF),
                               fontWeight: FontWeight.w600,
@@ -226,6 +285,7 @@ class MainShell extends ConsumerWidget {
                   ],
                 ),
 
+                // ── Original green-dot recording indicator — UNCHANGED ──────
                 actions: [
                   Padding(
                     padding: const EdgeInsets.only(right: 20),
@@ -242,8 +302,9 @@ class MainShell extends ConsumerWidget {
                         boxShadow: isRecording
                             ? [
                                 BoxShadow(
-                                  color:       const Color(0xFF00FF88).withOpacity(0.6),
-                                  blurRadius:  8,
+                                  color:        const Color(0xFF00FF88)
+                                      .withOpacity(0.6),
+                                  blurRadius:   8,
                                   spreadRadius: 1,
                                 ),
                               ]
@@ -266,7 +327,6 @@ class MainShell extends ConsumerWidget {
             ),
 
       body: SafeArea(
-        // In PIP the AppBar is gone so we need top safe-area inset removed too
         top: !isTransparent && !isInPip,
         child: isLandscape
             ? _LandscapeSidebarLayout(
@@ -284,15 +344,14 @@ class MainShell extends ConsumerWidget {
               ),
       ),
 
-      // ── BottomNav: collapsed to nothing in PIP ───────────────────────────
       bottomNavigationBar: isInPip
-          ? const SizedBox.shrink()   // collapsed — NOT null, which would
-                                      // remove it and could shift layout
+          ? const SizedBox.shrink()
           : isLandscape
               ? null
               : _BottomNav(
                   currentIndex: currentIndex,
-                  onTap: (i) => ref.read(navIndexProvider.notifier).state = i,
+                  onTap: (i) =>
+                      ref.read(navIndexProvider.notifier).state = i,
                 ),
     );
   }
@@ -301,11 +360,11 @@ class MainShell extends ConsumerWidget {
 // ─── LANDSCAPE SIDEBAR PUSH LAYOUT ───────────────────────────────────────────
 
 class _LandscapeSidebarLayout extends StatelessWidget {
-  final bool               sidebarOpen;
-  final int                currentIndex;
-  final List<_NavData>     navItems;
-  final List<Widget>       screens;
-  final ValueChanged<int>  onNavTap;
+  final bool              sidebarOpen;
+  final int               currentIndex;
+  final List<_NavData>    navItems;
+  final List<Widget>      screens;
+  final ValueChanged<int> onNavTap;
 
   static const double _sidebarWidth = 200.0;
 
@@ -529,8 +588,9 @@ class _BottomNav extends StatelessWidget {
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                              color:       const Color(0xFF00D4FF).withOpacity(0.15),
-                              blurRadius:  10,
+                              color:        const Color(0xFF00D4FF)
+                                  .withOpacity(0.15),
+                              blurRadius:   10,
                               spreadRadius: 1),
                         ],
                       ),

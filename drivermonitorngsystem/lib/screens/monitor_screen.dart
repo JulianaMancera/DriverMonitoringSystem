@@ -1527,10 +1527,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 } // end _MonitorScreenState
 
-// ════════════════════════════════════════════════════════════════════════════
 // METRIC GAUGE
-// ════════════════════════════════════════════════════════════════════════════
-
 class _MetricGauge extends StatelessWidget {
   final String   label;
   final double   value;
@@ -1647,10 +1644,7 @@ class _MetricGauge extends StatelessWidget {
   }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
 // CAMERA OVERLAY BUTTON
-// ════════════════════════════════════════════════════════════════════════════
-
 class _CameraOverlayButton extends StatelessWidget {
   final IconData     icon;
   final String       label;
