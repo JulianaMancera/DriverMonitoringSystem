@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart'; 
 import 'package:fl_chart/fl_chart.dart';
-import 'package:flutter_riverpod/legacy.dart';
 import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
 import '../utils/responsive.dart';
@@ -58,6 +58,10 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
   }
 
 
+  /// Must match the actual sidebar width defined in sidebar.dart.
+  /// Update this if the sidebar width ever changes.
+  static const double _kSidebarWidth = 201.0;
+
   double _summaryCardAspectRatio(BuildContext context) {
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
@@ -68,12 +72,11 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
           mobile: 0.95, tablet: 1.2, desktop: 1.5);
     }
 
-    final screenW   = MediaQuery.of(context).size.width;
-    const sidebarW  = 201.0; 
-    const padding   = 40.0; 
-    const spacing   = 36.0;  
-    final contentW  = screenW - sidebarW - padding - spacing;
-    final cardW     = contentW / 4;
+    final screenW  = MediaQuery.of(context).size.width;
+    const padding  = 40.0;
+    const spacing  = 36.0;
+    final contentW = screenW - _kSidebarWidth - padding - spacing;
+    final cardW    = contentW / 4;
 
     // Target card height = 115px (icon row + number + label + breathing room)
     return (cardW / 115).clamp(1.2, 3.0);

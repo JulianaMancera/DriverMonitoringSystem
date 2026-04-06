@@ -18,25 +18,33 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+   # Database
   sqflite: ^2.3.0
   path: ^1.8.3
+  # Charts
   fl_chart: ^1.1.1
+  # Camera
   camera: ^0.12.0
+  # Permissions
   permission_handler: ^12.0.1
-  cached_network_image: ^3.3.1
+   # State management 
   flutter_riverpod: ^3.2.1
+  # Audio 
   audioplayers: ^6.0.0
-  gal: ^2.3.0
-  shared_preferences: ^2.3.0
   volume_controller: ^3.4.3
+  #Storage / Prefs
+  shared_preferences: ^2.3.0
   path_provider: ^2.1.2
+  # ML inference (BiLSTM + Attention — Android)
   tflite_flutter: ^0.12.1
   image: ^4.1.7
+  # Notifications / Background 
+  flutter_local_notifications: ^21.0.0
+  flutter_foreground_task: ^9.0.1
+  # Sharing / Device info
   share_plus: ^12.0.2
-
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
-  cupertino_icons: ^1.0.8
+  device_info_plus: ^12.4.0
+  cached_network_image: ^3.3.1  
 
 dev_dependencies:
   flutter_test:
@@ -64,6 +72,7 @@ flutter:
     - assets/L1_L2_sound.mp3
     - assets/L3_critical_alert.wav
     - assets/dms_hybridnet.tflite
+    - assets/bantay_drive_logo.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

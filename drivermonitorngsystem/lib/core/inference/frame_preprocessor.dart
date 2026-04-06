@@ -1,7 +1,8 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:camera/camera.dart';
-import 'package:image/image.dart' as img;
+// Note: 'package:image/image.dart' removed — bgra8888/JPEG paths were iOS-only.
+// Android always delivers YUV420, processed directly without the image package.
 
 
 // Key optimizations:
@@ -43,19 +44,15 @@ class FramePreprocessor {
     }
   }
 
-  // STEP 1: FAST YUV/BGRA → RAW RGB BYTES 
+  // STEP 1: FAST YUV → RAW RGB BYTES
+  // Android camera always delivers YUV420 — no iOS formats needed.
   /// Returns flat RGB bytes: [R, G, B, R, G, B, ...] length = w * h * 3
   Uint8List? _toRgbBytes(CameraImage image) {
     switch (image.format.group) {
       case ImageFormatGroup.yuv420:
         return _yuv420ToRgbBytes(image);
-      case ImageFormatGroup.bgra8888:
-        return _bgra8888ToRgbBytes(image);
-      case ImageFormatGroup.jpeg:
-        final decoded = img.decodeJpg(image.planes[0].bytes);
-        if (decoded == null) return null;
-        return _imgToRgbBytes(decoded);
       default:
+        // Unrecognised format on Android — skip frame
         return null;
     }
   }
@@ -90,36 +87,6 @@ class FramePreprocessor {
         out[outIdx++] = r;
         out[outIdx++] = g;
         out[outIdx++] = b;
-      }
-    }
-    return out;
-  }
-
-  Uint8List _bgra8888ToRgbBytes(CameraImage image) {
-    final w     = image.width;
-    final h     = image.height;
-    final bytes = image.planes[0].bytes;
-    final out   = Uint8List(w * h * 3);
-    int outIdx  = 0;
-    for (int i = 0; i < w * h; i++) {
-      final idx = i * 4;
-      out[outIdx++] = bytes[idx + 2]; // R
-      out[outIdx++] = bytes[idx + 1]; // G
-      out[outIdx++] = bytes[idx];     // B
-    }
-    return out;
-  }
-
-  Uint8List _imgToRgbBytes(img.Image image) {
-    final w = image.width; final h = image.height;
-    final out = Uint8List(w * h * 3);
-    int outIdx = 0;
-    for (int row = 0; row < h; row++) {
-      for (int col = 0; col < w; col++) {
-        final pixel = image.getPixel(col, row);
-        out[outIdx++] = pixel.r.toInt() & 0xFF;
-        out[outIdx++] = pixel.g.toInt() & 0xFF;
-        out[outIdx++] = pixel.b.toInt() & 0xFF;
       }
     }
     return out;

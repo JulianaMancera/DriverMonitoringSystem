@@ -21,6 +21,7 @@ class DatabaseHelper {
       path,
       version: 1,
       onCreate: _createTables,
+      onUpgrade: _migrateDB,
     );
   }
 
@@ -89,12 +90,18 @@ class DatabaseHelper {
     ''');
   }
 
+  /// Migration handler — add ALTER TABLE statements here for future versions.
+  /// Example for v2: await db.execute('ALTER TABLE sessions ADD COLUMN trip_label TEXT');
+  Future<void> _migrateDB(Database db, int oldVersion, int newVersion) async {
+    // No migrations yet — app is at version 1.
+  }
+
   // SESSIONS — CRUD
   /// Call when driver presses Record — creates a new session
   Future<int> insertSession() async {
     final db = await database;
     return await db.insert('sessions', {
-      'started_at': DateTime.now().toIso8601String(),
+      'started_at': DateTime.now().toUtc().toIso8601String(),
     });
   }
 
@@ -109,7 +116,7 @@ class DatabaseHelper {
     await db.update(
       'sessions',
       {
-        'ended_at': DateTime.now().toIso8601String(),
+        'ended_at': DateTime.now().toUtc().toIso8601String(),
         'duration_sec': durationSec,
         'alertness_avg': alertnessAvg,
         'safety_score': safetyScore,
@@ -195,30 +202,34 @@ class DatabaseHelper {
   }
 
   /// Safety streak — Dashboard card "Safety Streak"
+  /// Uses a single query instead of N+1 daily queries.
   Future<int> getSafetyStreakDays() async {
     final db = await database;
+    final since = DateTime.now()
+        .toUtc()
+        .subtract(const Duration(days: 365))
+        .toIso8601String();
+
+    // Fetch all distinct calendar days (UTC) that had at least one alert
+    final result = await db.rawQuery('''
+      SELECT DISTINCT DATE(s.started_at) as day
+      FROM alert_events ae
+      JOIN sessions s ON ae.session_id = s.id
+      WHERE s.started_at >= ?
+      ORDER BY day DESC
+    ''', [since]);
+
+    final alertDays = result.map((r) => r['day'] as String).toSet();
+
     int streak = 0;
-    DateTime day = DateTime.now();
-
+    DateTime day = DateTime.now().toUtc();
     for (int i = 0; i < 365; i++) {
-      final dayStart = DateTime(day.year, day.month, day.day)
-          .toIso8601String();
-      final dayEnd = DateTime(day.year, day.month, day.day, 23, 59, 59)
-          .toIso8601String();
-
-      final result = await db.rawQuery('''
-        SELECT COUNT(*) as cnt FROM alert_events ae
-        JOIN sessions s ON ae.session_id = s.id
-        WHERE s.started_at >= ? AND s.started_at <= ?
-      ''', [dayStart, dayEnd]);
-
-      final count = (result.first['cnt'] as int?) ?? 0;
-      if (count == 0) {
-        streak++;
-        day = day.subtract(const Duration(days: 1));
-      } else {
-        break;
-      }
+      // Format as "YYYY-MM-DD" to match DATE() output
+      final key =
+          '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
+      if (alertDays.contains(key)) break;
+      streak++;
+      day = day.subtract(const Duration(days: 1));
     }
     return streak;
   }
@@ -260,8 +271,14 @@ class DatabaseHelper {
     required int sessionId,
     required String state,
   }) async {
+    // Guard against invalid state values — column name is interpolated
+    // directly into SQL (parameterized queries don't work for column names)
+    const validStates = {'neutral', 'drowsy', 'distracted'};
+    final normalizedState = state.toLowerCase();
+    if (!validStates.contains(normalizedState)) return;
+
     final db = await database;
-    final column = '${state.toLowerCase()}_count';
+    final column = '${normalizedState}_count';
     await db.rawUpdate('''
       UPDATE state_counts
       SET $column = $column + 1
@@ -293,7 +310,7 @@ class DatabaseHelper {
       'session_id': sessionId,
       'alert_type': alertType,
       'alert_level': alertLevel,
-      'triggered_at': DateTime.now().toIso8601String(),
+      'triggered_at': DateTime.now().toUtc().toIso8601String(),
     });
   }
 
@@ -401,7 +418,7 @@ class DatabaseHelper {
     final db = await database;
     await db.insert('system_logs', {
       'session_id': sessionId,
-      'log_time': DateTime.now().toIso8601String(),
+      'log_time': DateTime.now().toUtc().toIso8601String(),
       'message': message,
       'log_type': logType,
     });
@@ -420,14 +437,14 @@ class DatabaseHelper {
 
   // ALERTNESS SNAPSHOTS — CRUD
   /// Insert alertness snapshot — call every ~5 seconds during monitoring
-  Future<void> insertAlertnesSnapshot({
+  Future<void> insertAlertnessSnapshot({
     required int sessionId,
     required double alertnessPct,
   }) async {
     final db = await database;
     await db.insert('alertness_snapshots', {
       'session_id': sessionId,
-      'recorded_at': DateTime.now().toIso8601String(),
+      'recorded_at': DateTime.now().toUtc().toIso8601String(),
       'alertness_pct': alertnessPct,
     });
   }
@@ -456,42 +473,70 @@ class DatabaseHelper {
     return await getAlertnessSnapshots(sessionId);
   }
 
+  /// Per-day average safety score — Dashboard "Alertness History" expanded chart
+  Future<List<Map<String, dynamic>>> getDailySafetyScores({int days = 30}) async {
+    final db = await database;
+    final since = DateTime.now()
+        .toUtc()
+        .subtract(Duration(days: days))
+        .toIso8601String();
+    return await db.rawQuery('''
+      SELECT
+        DATE(started_at) as day,
+        AVG(safety_score) as avg_score,
+        COUNT(*) as session_count
+      FROM sessions
+      WHERE started_at >= ? AND ended_at IS NOT NULL
+      GROUP BY DATE(started_at)
+      ORDER BY day ASC
+    ''', [since]);
+  }
+
   // COMBINED QUERIES
   /// Get all dashboard summary data in one call
+  /// Queries run in parallel via Future.wait for faster load times.
   Future<Map<String, dynamic>> getDashboardSummary() async {
-    final totalDriveSec = await getTotalDriveTimeSec(days: 30);
-    final alertsLast24h = await getTotalAlertCount(hours: 24);
-    final safetyStreak  = await getSafetyStreakDays();
-    final avgAlertness  = await getAvgAlertness(days: 7);
-    final safetyScore   = await getAvgSafetyScore(days: 30);
-    final snapshots     = await getLatestSessionSnapshots();
+    final results = await Future.wait([
+      getTotalDriveTimeSec(days: 30),
+      getTotalAlertCount(hours: 24),
+      getSafetyStreakDays(),
+      getAvgAlertness(days: 7),
+      getAvgSafetyScore(days: 30),
+      getLatestSessionSnapshots(),
+      getDailySafetyScores(days: 30),
+    ]);
 
     return {
-      'total_drive_hrs':     totalDriveSec / 3600,
-      'alerts_last_24h':     alertsLast24h,
-      'safety_streak_days':  safetyStreak,
-      'avg_alertness_pct':   avgAlertness,
-      'safety_score':        safetyScore,
-      'alertness_snapshots': snapshots,
+      'total_drive_hrs':      (results[0] as int) / 3600,
+      'alerts_last_24h':      results[1] as int,
+      'safety_streak_days':   results[2] as int,
+      'avg_alertness_pct':    results[3] as double,
+      'safety_score':         results[4] as double,
+      'alertness_snapshots':  results[5] as List<Map<String, dynamic>>,
+      'daily_safety_scores':  results[6] as List<Map<String, dynamic>>,
     };
   }
 
   /// Get all analytics summary data in one call
+  /// Queries run in parallel via Future.wait for faster load times.
   Future<Map<String, dynamic>> getAnalyticsSummary({int? days}) async {
-    final totalSessions     = await getTotalSessionCount(days: days);
-    final totalAlerts       = await getTotalAlertCount(days: days);
-    final drowsinessEvents  = await getAlertCountByType(alertType: 'DROWSY',     days: days);
-    final distractionEvents = await getAlertCountByType(alertType: 'DISTRACTED', days: days);
-    final dailyTrends       = await getDailyAlertTrends(days: days ?? 7);
-    final hourlyDistribution = await getHourlyAlertDistribution(days: days ?? 7);
+    final effectiveDays = days ?? 7;
+    final results = await Future.wait([
+      getTotalSessionCount(days: days),
+      getTotalAlertCount(days: days),
+      getAlertCountByType(alertType: 'DROWSY',     days: days),
+      getAlertCountByType(alertType: 'DISTRACTED', days: days),
+      getDailyAlertTrends(days: effectiveDays),
+      getHourlyAlertDistribution(days: effectiveDays),
+    ]);
 
     return {
-      'total_sessions':      totalSessions,
-      'total_alerts':        totalAlerts,
-      'drowsiness_events':   drowsinessEvents,
-      'distraction_events':  distractionEvents,
-      'daily_trends':        dailyTrends,
-      'hourly_distribution': hourlyDistribution,
+      'total_sessions':      results[0] as int,
+      'total_alerts':        results[1] as int,
+      'drowsiness_events':   results[2] as int,
+      'distraction_events':  results[3] as int,
+      'daily_trends':        results[4] as List<Map<String, dynamic>>,
+      'hourly_distribution': results[5] as List<Map<String, dynamic>>,
     };
   }
 
@@ -504,10 +549,12 @@ class DatabaseHelper {
   /// Delete all data — for testing/reset only
   Future<void> clearAllData() async {
     final db = await database;
-    await db.delete('alertness_snapshots');
-    await db.delete('system_logs');
-    await db.delete('alert_events');
-    await db.delete('state_counts');
-    await db.delete('sessions');
+    await db.transaction((txn) async {
+      await txn.delete('alertness_snapshots');
+      await txn.delete('system_logs');
+      await txn.delete('alert_events');
+      await txn.delete('state_counts');
+      await txn.delete('sessions');
+    });
   }
 }
