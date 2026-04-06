@@ -28,6 +28,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   List<Map<String, dynamic>> _filtered = [];
   int    _selectedFilter = 0;
   final  TextEditingController _searchCtrl = TextEditingController();
+  final  ScrollController _filterScrollCtrl = ScrollController();
+  bool   _filterCanScrollRight = true;
+  bool   _filterCanScrollLeft  = false;
 
   final List<String> _filters = [
     'All', 'This Week', 'This Month', 'With Alerts', 'Safe Drives',
@@ -39,12 +42,41 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     super.initState();
     _loadSessions();
     _searchCtrl.addListener(_applyFilter);
+    _filterScrollCtrl.addListener(_onFilterScroll);
+    // Check after layout whether arrow is needed
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkFilterScroll());
   }
 
   @override
   void dispose() {
     _searchCtrl.dispose();
+    _filterScrollCtrl.dispose();
     super.dispose();
+  }
+
+  void _onFilterScroll() {
+    final pos = _filterScrollCtrl.position;
+    // Right arrow: hide only when fully at the end
+    final showRight = pos.extentAfter > 4;
+    // Left arrow: hide only when fully at the start
+    final showLeft  = pos.extentBefore > 4;
+
+    if (showRight != _filterCanScrollRight || showLeft != _filterCanScrollLeft) {
+      setState(() {
+        _filterCanScrollRight = showRight;
+        _filterCanScrollLeft  = showLeft;
+      });
+    }
+  }
+
+  void _checkFilterScroll() {
+    if (_filterScrollCtrl.hasClients) {
+      final hasOverflow = _filterScrollCtrl.position.maxScrollExtent > 0;
+      setState(() {
+        _filterCanScrollRight = hasOverflow;
+        _filterCanScrollLeft  = false;
+      });
+    }
   }
 
   // DATA
@@ -78,8 +110,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         final local      = d?.toLocal();
         final alertCount = s['alert_count'] as int? ?? 0;
 
-        // Build a searchable string from friendly formats:
-        // "Mar 17, 2026", "march", "2026", "safe", "alert", "11:04 PM"
         final searchables = <String>[];
 
         if (local != null) {
@@ -92,14 +122,13 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             'jul','aug','sep','oct','nov','dec'
           ];
           searchables.addAll([
-            months[local.month - 1],                    // "march"
-            short[local.month - 1],                     // "mar"
-            '${short[local.month - 1]} ${local.day}',   // "mar 17"
-            '${local.day}',                             // "17"
-            '${local.year}',                            // "2026"
-            '${local.month}/${local.day}/${local.year}',// "3/17/2026"
+            months[local.month - 1],
+            short[local.month - 1],
+            '${short[local.month - 1]} ${local.day}',
+            '${local.day}',
+            '${local.year}',
+            '${local.month}/${local.day}/${local.year}',
           ]);
-          // Time: "11:04 pm" or "am" — use local time for search strings
           final h    = local.hour == 0 ? 12 : (local.hour > 12 ? local.hour - 12 : local.hour);
           final m    = local.minute.toString().padLeft(2, '0');
           final ampm = local.hour >= 12 ? 'pm' : 'am';
@@ -107,7 +136,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
           searchables.add(ampm);
         }
 
-        // Keywords: "safe", "alert", "alerts"
         if (alertCount == 0) searchables.add('safe');
         if (alertCount > 0)  searchables.addAll(['alert', 'alerts']);
 
@@ -144,12 +172,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     setState(() => _filtered = result);
   }
 
-  // BOTTOM SHEET — session detail
+  // BOTTOM SHEET
   void _openSessionDetail(Map<String, dynamic> session) {
-    // Dismiss keyboard before opening — prevents it from
-    // reappearing when the sheet closes
     FocusScope.of(context).unfocus();
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -180,8 +205,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     return '${mo[local.month - 1]} ${local.day}, ${local.year}';
   }
 
-  /// Converts a UTC ISO8601 timestamp to a 12-hour local time string.
-  /// Handles midnight (00:xx → 12:xx AM) and noon (12:xx → 12:xx PM) correctly.
   String _formatTime(String? iso) {
     if (iso == null) return '—';
     final d = DateTime.tryParse(iso);
@@ -225,10 +248,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   // BUILD
   @override
   Widget build(BuildContext context) {
-    // AUTO-REFRESH 
-    // ref.listen fires every time dbChangeCounterProvider increments
-    // (i.e. when monitor_screen starts/stops recording or triggers an alert)
-    // This is the correct Riverpod way to trigger side effects on state change
     ref.listen<int>(dbChangeCounterProvider, (previous, next) {
       if (next > (previous ?? 0)) _loadSessions();
     });
@@ -252,82 +271,152 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     );
   }
 
-  // SEARCH BAR
+  // ── SEARCH BAR ──────────────────────────────────────────────────────────────
+  // FIX: use textAlignVertical + isDense + contentPadding: EdgeInsets.zero
+  // so the icon and hint text are perfectly centered inside the 40px container.
   Widget _buildSearchBar() {
     return Container(
       color: _surface,
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-      child: Container(
+      child: SizedBox(
         height: 40,
-        decoration: BoxDecoration(
-          color: _surfaceAlt,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: TextField(
-          controller: _searchCtrl,
-          style: TextStyle(color: _textPrimary, fontSize: 13),
-          textInputAction: TextInputAction.search,
-          onSubmitted: (_) => FocusScope.of(context).unfocus(),
-          decoration: InputDecoration(
-            hintText: 'Search by date, month, or "safe"...',
-            hintStyle: TextStyle(color: _textDim, fontSize: 13),
-            prefixIcon: Icon(Icons.search_rounded, color: _textDim, size: 18),
-            suffixIcon: _searchCtrl.text.isNotEmpty
-                ? GestureDetector(
-                    onTap: () {
-                      _searchCtrl.clear();
-                      FocusScope.of(context).unfocus();
-                    },
-                    child: Icon(Icons.close_rounded, color: _textDim, size: 16),
-                  )
-                : null,
-            border: InputBorder.none,
-            contentPadding: const EdgeInsets.symmetric(vertical: 10),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: _surfaceAlt,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: TextField(
+            controller: _searchCtrl,
+            style: TextStyle(color: _textPrimary, fontSize: 13),
+            textInputAction: TextInputAction.search,
+            textAlignVertical: TextAlignVertical.center,
+            onSubmitted: (_) => FocusScope.of(context).unfocus(),
+            decoration: InputDecoration(
+              hintText: 'Search by date, month, or "safe"...',
+              hintStyle: TextStyle(color: _textDim, fontSize: 13),
+              prefixIcon: Icon(Icons.search_rounded, color: _textDim, size: 18),
+              prefixIconConstraints: const BoxConstraints(
+                minWidth: 40,
+                minHeight: 40,
+              ),
+              suffixIcon: _searchCtrl.text.isNotEmpty
+                  ? GestureDetector(
+                      onTap: () {
+                        _searchCtrl.clear();
+                        FocusScope.of(context).unfocus();
+                      },
+                      child: Icon(Icons.close_rounded, color: _textDim, size: 16),
+                    )
+                  : null,
+              suffixIconConstraints: const BoxConstraints(
+                minWidth: 36,
+                minHeight: 36,
+              ),
+              border: InputBorder.none,
+              isDense: true,
+              contentPadding: EdgeInsets.zero,
+            ),
           ),
         ),
       ),
     );
   }
 
-  // FILTER CHIPS
+  // ── FILTER CHIPS ────────────────────────────────────────────────────────────
+  // FIX: wrap the SingleChildScrollView in a Row with a chevron arrow on the
+  // right that fades out once the user has scrolled all the way to the end.
+  // Builds one scroll-hint arrow that occupies NO space when invisible.
+  Widget _scrollArrow({required bool visible, required bool isLeft}) {
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeInOut,
+      child: SizedBox(
+        width: visible ? 24 : 0,
+        child: visible
+            ? Container(
+                alignment:
+                    isLeft ? Alignment.centerRight : Alignment.centerLeft,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: isLeft
+                        ? [_surface, _surface.withOpacity(0.0)]
+                        : [_surface.withOpacity(0.0), _surface],
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                  ),
+                ),
+                child: Icon(
+                  isLeft
+                      ? Icons.chevron_left_rounded
+                      : Icons.chevron_right_rounded,
+                  color: _textDim,
+                  size: 16,
+                ),
+              )
+            : const SizedBox.shrink(),
+      ),
+    );
+  }
+
   Widget _buildFilterChips() {
     return Container(
       color: _surface,
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: List.generate(_filters.length, (i) {
-            final on = i == _selectedFilter;
-            return GestureDetector(
-              onTap: () {
-                setState(() => _selectedFilter = i);
-                _applyFilter();
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                margin: const EdgeInsets.only(right: 8),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                decoration: BoxDecoration(
-                  color: on ? _cyan.withOpacity(0.15) : _surfaceAlt,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: on ? _cyan.withOpacity(0.4) : _divider,
-                  ),
-                ),
-                child: Text(
-                  _filters[i],
-                  style: TextStyle(
-                    color: on ? _cyan : _textDim,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.5,
-                  ),
-                ),
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+
+          // ── Left arrow — only takes space when scrolled right ──
+          _scrollArrow(visible: _filterCanScrollLeft, isLeft: true),
+
+          // ── Scrollable chips — always starts at left edge with 16px indent ──
+          Expanded(
+            child: SingleChildScrollView(
+              controller: _filterScrollCtrl,
+              scrollDirection: Axis.horizontal,
+              // No padding here — left padding is handled by the fixed 16px
+              // margin on the first chip, so position 0 is always "All".
+              child: Row(
+                children: [
+                  const SizedBox(width: 16), // fixed left gutter
+                  ...List.generate(_filters.length, (i) {
+                    final on = i == _selectedFilter;
+                    return GestureDetector(
+                      onTap: () {
+                        setState(() => _selectedFilter = i);
+                        _applyFilter();
+                      },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        margin: const EdgeInsets.only(right: 8),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 13, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: on ? _cyan.withOpacity(0.15) : _surfaceAlt,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: on ? _cyan.withOpacity(0.4) : _divider,
+                          ),
+                        ),
+                        child: Text(
+                          _filters[i],
+                          style: TextStyle(
+                            color: on ? _cyan : _textDim,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+                ],
               ),
-            );
-          }),
-        ),
+            ),
+          ),
+
+          // ── Right arrow — disappears when fully scrolled ──
+          _scrollArrow(visible: _filterCanScrollRight, isLeft: false),
+        ],
       ),
     );
   }
@@ -366,7 +455,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     );
   }
 
-  // SESSION CARD 
+  // SESSION CARD
   Widget _buildCard(Map<String, dynamic> s) {
     final score      = (s['safety_score'] as double? ?? 0.0);
     final duration   = s['duration_sec'] as int? ?? 0;
@@ -397,10 +486,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center, // ← centered
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-
-                  // Score circle 
                   Container(
                     width: 48,
                     height: 48,
@@ -424,7 +511,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 
                   const SizedBox(width: 14),
 
-                  // Date + time + duration
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -464,7 +550,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     ),
                   ),
 
-                  // Alert badge + chevron
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.center,
@@ -564,8 +649,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
 // SESSION DETAIL BOTTOM SHEET
-// Loads all session details from DB on open.
+// ═══════════════════════════════════════════════════════════════════════════════
 class _SessionDetailSheet extends StatefulWidget {
   final Map<String, dynamic> session;
   const _SessionDetailSheet({required this.session});
@@ -577,7 +663,6 @@ class _SessionDetailSheet extends StatefulWidget {
 class _SessionDetailSheetState extends State<_SessionDetailSheet>
     with SingleTickerProviderStateMixin {
 
-  //  COLORS 
   static const Color _sheetBg    = Color(0xFF0D1627);
   static const Color _surfaceAlt = Color(0xFF1A2235);
   static const Color _cyan       = Color(0xFF00D4FF);
@@ -589,7 +674,6 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
   static const Color _textDim    = Color(0xFF6B7A99);
   static const Color _divider    = Color(0xFF1E2D45);
 
-  // STATE
   bool _loading = true;
   Map<String, dynamic>? _counts;
   List<Map<String, dynamic>> _alerts = [];
@@ -599,12 +683,9 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
   late Animation<double>    _scaleAnim;
   late Animation<double>    _fadeAnim;
 
-  // LIFECYCLE
   @override
   void initState() {
     super.initState();
-
-    // Entry animation — scale from 0.93 → 1.0 + fade in
     _animCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 320),
@@ -614,7 +695,6 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     _fadeAnim = CurvedAnimation(
         parent: _animCtrl, curve: Curves.easeOut);
     _animCtrl.forward();
-
     _loadDetail();
   }
 
@@ -639,7 +719,6 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     }
   }
 
-  // HELPERS
   String _formatDate(String? iso) {
     if (iso == null) return '—';
     final d = DateTime.tryParse(iso);
@@ -650,8 +729,6 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     return '${mo[local.month - 1]} ${local.day}, ${local.year}';
   }
 
-  /// Converts a UTC ISO8601 timestamp to a 12-hour local time string.
-  /// Handles midnight (00:xx → 12:xx AM) and noon (12:xx → 12:xx PM) correctly.
   String _formatTime(String? iso) {
     if (iso == null) return '—';
     final d = DateTime.tryParse(iso);
@@ -698,7 +775,6 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     }
   }
 
-  // BUILD
   @override
   Widget build(BuildContext context) {
     final score    = (widget.session['safety_score'] as double? ?? 0.0);
@@ -711,7 +787,6 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
         scale: Tween<double>(begin: 0.93, end: 1.0).animate(_scaleAnim),
         alignment: Alignment.bottomCenter,
         child: Container(
-          // max 88% of screen height
           constraints: BoxConstraints(
             maxHeight: MediaQuery.of(context).size.height * 0.88,
           ),
@@ -736,7 +811,6 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
             mainAxisSize: MainAxisSize.min,
             children: [
 
-              // DRAG HANDLE 
               Padding(
                 padding: const EdgeInsets.only(top: 12, bottom: 4),
                 child: Container(
@@ -748,13 +822,10 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                 ),
               ),
 
-              // HEADER 
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 16, 12),
                 child: Row(
                   children: [
-
-                    // Score circle
                     Container(
                       width: 52,
                       height: 52,
@@ -778,7 +849,6 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
 
                     const SizedBox(width: 14),
 
-                    // Date + time range
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -808,7 +878,6 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                       ),
                     ),
 
-                    // CLOSE BUTTON 
                     GestureDetector(
                       onTap: () => Navigator.of(context).pop(),
                       child: Container(
@@ -832,7 +901,6 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
 
               Divider(color: _divider, height: 1, thickness: 1),
 
-              // SCROLLABLE CONTENT 
               Flexible(
                 child: _loading
                     ? const Padding(
@@ -845,20 +913,12 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-
-                            // STATE BREAKDOWN 
                             _sectionLabel('STATE BREAKDOWN'),
                             _buildStateBreakdown(),
-
                             const SizedBox(height: 20),
-
-                            // ALERT EVENTS 
                             _sectionLabel('ALERT EVENTS'),
                             _buildAlertEvents(),
-
                             const SizedBox(height: 20),
-
-                            // SYSTEM LOG 
                             _sectionLabel('SYSTEM LOG'),
                             _buildSystemLog(),
                           ],
@@ -872,7 +932,6 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     );
   }
 
-  // SECTION LABEL
   Widget _sectionLabel(String label) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -888,7 +947,6 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     );
   }
 
- // STATE BREAKDOWN
   Widget _buildStateBreakdown() {
     final neutral    = _counts?['neutral_count']    as int? ?? 0;
     final drowsy     = _counts?['drowsy_count']     as int? ?? 0;
@@ -923,7 +981,6 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
       ),
       child: Column(
         children: [
-          // Segmented bar
           ClipRRect(
             borderRadius: BorderRadius.circular(6),
             child: Row(
@@ -953,8 +1010,6 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
             ),
           ),
           const SizedBox(height: 14),
-
-          // Labels row
           Row(
             children: [
               Expanded(child: _statePill(_cyan, 'Neutral', '$nPct%')),
@@ -993,7 +1048,6 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     );
   }
 
-  // ALERT EVENTS
   Widget _buildAlertEvents() {
     if (_alerts.isEmpty) {
       return Container(
@@ -1037,7 +1091,6 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                     horizontal: 14, vertical: 10),
                 child: Row(
                   children: [
-                    // Level badge
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 7, vertical: 3),
@@ -1056,10 +1109,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                         ),
                       ),
                     ),
-
                     const SizedBox(width: 10),
-
-                    // Type
                     Expanded(
                       child: Text(
                         type == 'DROWSY'
@@ -1072,11 +1122,8 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                         ),
                       ),
                     ),
-
-                    // Time
                     Text(time,
-                        style:
-                            TextStyle(color: _textDim, fontSize: 11)),
+                        style: TextStyle(color: _textDim, fontSize: 11)),
                   ],
                 ),
               ),
@@ -1093,7 +1140,6 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     );
   }
 
-  // SYSTEM LOG
   Widget _buildSystemLog() {
     if (_logs.isEmpty) {
       return Container(
