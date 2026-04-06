@@ -300,11 +300,32 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final bool hasDaily    = dailyScores.length >= 2;
     final bool useDaily    = _showDailyView && hasDaily;
 
-    if (snapshots.length < 2) {
-      spots      = const [FlSpot(0,95), FlSpot(1,92), FlSpot(2,88), FlSpot(3,94), FlSpot(4,85), FlSpot(5,78), FlSpot(6,82)];
-      timeLabels = const ['10:00', '10:10', '10:20', '10:30', '10:40', '10:50', '11:00'];
-    } else {
-      spots = []; timeLabels = [];
+    final List<FlSpot> spots;
+    final List<String> xLabels;
+    final bool isPlaceholder;
+
+    if (useDaily) {
+      // Per-date view — x = date index, y = avg safety score
+      spots   = [];
+      xLabels = [];
+      for (int i = 0; i < dailyScores.length; i++) {
+        final score = (dailyScores[i]['avg_score'] as double? ?? 0.0).clamp(0.0, 100.0);
+        final day   = dailyScores[i]['day'] as String? ?? '';
+        // Show "Mar 17" style labels
+        final parts = day.split('-'); // ["2026","03","17"]
+        const mo = ['','Jan','Feb','Mar','Apr','May','Jun',
+                       'Jul','Aug','Sep','Oct','Nov','Dec'];
+        final label = parts.length == 3
+            ? '${mo[int.tryParse(parts[1]) ?? 0]} ${int.tryParse(parts[2]) ?? 0}'
+            : day;
+        spots.add(FlSpot(i.toDouble(), score));
+        xLabels.add(label);
+      }
+      isPlaceholder = false;
+    } else if (hasSessions) {
+      // Current session snapshots
+      spots   = [];
+      xLabels = [];
       for (int i = 0; i < snapshots.length; i++) {
         final raw     = snapshots[i]['alertness_pct'] as double? ?? 50.0;
         final clamped = raw.clamp(0.0, 100.0);
@@ -484,9 +505,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 ),
                 borderData: FlBorderData(show: false),
                 minX: 0,
-                maxX: (spots.length - 1).toDouble().clamp(1.0, double.infinity),
-                minY: 50,
-                maxY: 100,
+                maxX: maxX,
+                minY: chartMin,
+                maxY: chartMax,
                 lineBarsData: [
                   LineChartBarData(
                     spots:            spots,
