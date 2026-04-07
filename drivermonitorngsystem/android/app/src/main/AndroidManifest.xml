@@ -2,7 +2,6 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.CAMERA"/>
-    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29"
         tools:replace="android:maxSdkVersion"/>
@@ -60,7 +59,7 @@
         <!-- ✅ ADD THIS — flutter_foreground_task needs this service declared -->
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundTaskService"
-            android:foregroundServiceType="camera|microphone"
+            android:foregroundServiceType="camera"
             android:exported="false"/>
 
         <meta-data

@@ -13,6 +13,12 @@ import 'package:camera/camera.dart';
 //   4. Single-pass: resize + normalize done together where possible
 //   5. processRaw() is a static top-level function so compute() can call it
 
+// NOTE: FramePreprocessor.instance is intentionally not called by TfliteService
+// during inference — the isolate-safe preprocessing is done inline inside
+// _preprocessInIsolate() in tflite_service.dart (top-level functions required
+// by compute()). This class holds the shared constants (inputWidth, inputHeight,
+// gamma) and is kept for future direct use (e.g., clear-glasses preprocessing
+// mode when that feature is activated).
 class FramePreprocessor {
   static final FramePreprocessor instance = FramePreprocessor._init();
   FramePreprocessor._init() {

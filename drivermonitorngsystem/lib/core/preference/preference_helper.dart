@@ -4,6 +4,10 @@ class PreferencesHelper {
   static final PreferencesHelper instance = PreferencesHelper._init();
   PreferencesHelper._init();
 
+  // Cached instance — avoids repeated async getInstance() calls.
+  // Initialised lazily on first access via _prefs().
+  SharedPreferences? _cache;
+
   // KEYS 
   static const String _keyAlertVolume      = 'alert_volume';
   static const String _keyAlertSensitivity = 'alert_sensitivity';
@@ -43,6 +47,9 @@ class PreferencesHelper {
 
   // PRIVATE
 
-  Future<SharedPreferences> _prefs() async =>
-      await SharedPreferences.getInstance();
+  /// Returns the cached SharedPreferences instance, initialising it once.
+  Future<SharedPreferences> _prefs() async {
+    _cache ??= await SharedPreferences.getInstance();
+    return _cache!;
+  }
 }

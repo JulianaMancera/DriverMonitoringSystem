@@ -13,7 +13,7 @@ import '../core/services/notifications.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import '../utils/responsive.dart';
 
-// ─── PROVIDERS ────────────────────────────────────────────────────────────────
+// PROVIDERS 
 final driverStateProvider     = StateProvider<String>((ref) => 'neutral');
 final alertnessPctProvider    = StateProvider<double>((ref) => 100.0);
 final drowsinessPctProvider   = StateProvider<double>((ref) => 0.0);
@@ -24,7 +24,7 @@ final alertBannerTypeProvider = StateProvider<String>((ref) => 'DROWSY');
 final clearGlassesProvider    = StateProvider<bool>((ref) => false);
 final isInPipProvider         = StateProvider<bool>((ref) => false);
 
-// ─── MONITOR SCREEN ───────────────────────────────────────────────────────────
+//  MONITOR SCREEN 
 class MonitorScreen extends ConsumerStatefulWidget {
   const MonitorScreen({super.key});
   @override
@@ -84,7 +84,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   };
 
   bool     _modelLoaded       = false;
-  DateTime _lastInferenceTime = DateTime.fromMillisecondsSinceEpoch(0);
 
 
   // ─── LIFECYCLE ──────────────────────────────────────────────────────────────
@@ -342,11 +341,30 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         : 0;
     final alertness = ref.read(alertnessPctProvider);
 
+    // Safety score formula:
+    //   Base = average alertness over the session (already tracked)
+    //   Penalty = each alert event deducts points, scaled by severity
+    //     Level 1 alert → -2 pts
+    //     Level 2 alert → -4 pts
+    //     Level 3 alert → -8 pts
+    //   Score is then clamped to [0, 100].
+    //   This ensures safety score is meaningfully distinct from alertness.
+    final alerts = await DatabaseHelper.instance
+        .getAlertsBySession(_currentSessionId!);
+    double penalty = 0.0;
+    for (final a in alerts) {
+      final level = (a['alert_level'] as int?) ?? 1;
+      if (level == 1)      penalty += 2.0;
+      else if (level == 2) penalty += 4.0;
+      else                 penalty += 8.0;
+    }
+    final safetyScore = (alertness - penalty).clamp(0.0, 100.0);
+
     await DatabaseHelper.instance.endSession(
       sessionId:    _currentSessionId!,
       durationSec:  durationSec,
       alertnessAvg: alertness,
-      safetyScore:  alertness.clamp(0.0, 100.0),
+      safetyScore:  safetyScore,
     );
 
     _addLogSync('Session Ended', 'INFO');
@@ -367,9 +385,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // ─── CAMERA FRAME CALLBACK ─────────────────────────────────────────────────
 
   Future<void> _onCameraFrame(CameraImage frame) async {
-    final now = DateTime.now();
-    if (now.difference(_lastInferenceTime).inMilliseconds < 100) return;
-    _lastInferenceTime = now;
+    // Frame-rate is controlled entirely by TfliteService's built-in frame-skip
+    // gate (_frameSkip) and busy gate (_isRunning). No extra throttle needed here.
     final result = await TfliteService.instance.runInference(frame);
     if (result != null && mounted && ref.read(isRecordingProvider)) {
       onModelOutput(
@@ -437,8 +454,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(showAlertBannerProvider.notifier).state = true;
     ref.read(alertBannerTypeProvider.notifier).state = type;
     if (newLevel < 3) { _notifController?.forward(from: 0.0); }
-    BantayDriveService.showAlertNotification(type);
-
     if (_currentSessionId != null) {
       await DatabaseHelper.instance.insertAlertEvent(
           sessionId:  _currentSessionId!,
@@ -484,7 +499,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     setState(() {
       _systemLogs.add({'time': t, 'message': message, 'type': type});
       // Cap in-memory log list to prevent unbounded growth on long drives
-      if (_systemLogs.length > 100) _systemLogs.removeAt(0);
+      if (_systemLogs.length > 20) _systemLogs.removeAt(0);
     });
     if (_currentSessionId != null) {
       DatabaseHelper.instance.insertSystemLog(
