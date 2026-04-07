@@ -20,8 +20,6 @@
 
     <!-- Required for fullScreenIntent notifications to show on lock screen (Android 14+) -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
-    <!-- Required for notification vibration -->
-    <uses-permission android:name="android.permission.VIBRATE"/>
     <!-- Keeps CPU alive so foreground service can fire alert while screen is off -->
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <!-- Needed on MIUI/HyperOS for exact-time alert delivery -->

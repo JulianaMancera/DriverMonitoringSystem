@@ -35,7 +35,7 @@ class BantayDriveService {
   static Future<void> initialize() async {
     try {
       // ── 1. Local notifications ─────────────────────────────────────────────
-      const android  = fln.AndroidInitializationSettings('@mipmap/ic_launcher');
+      const android  = fln.AndroidInitializationSettings('@mipmap/bantay_drive');
       const settings = fln.InitializationSettings(android: android);
       await _notif.initialize(settings: settings);
 
