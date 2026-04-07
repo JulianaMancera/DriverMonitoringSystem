@@ -29,7 +29,8 @@ class MainActivity : FlutterActivity() {
                         result.success(null)
                     }
                     "enterPip" -> {
-                        val success = enterPipMode()
+                        val isLandscape = call.argument<Boolean>("isLandscape") ?: false
+                        val success = enterPipMode(isLandscape)
                         result.success(success)
                     }
                     else -> result.notImplemented()
@@ -52,7 +53,9 @@ class MainActivity : FlutterActivity() {
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         if (isRecording) {
-            enterPipMode()
+            val isLandscape = resources.configuration.orientation ==
+                android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            enterPipMode(isLandscape)
         }
     }
 
@@ -68,11 +71,15 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun enterPipMode(): Boolean {
+    private fun enterPipMode(isLandscape: Boolean = false): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
         return try {
+            // Dynamically match the aspect ratio to the device's current orientation
+            // so the PiP window fills correctly whether the driver is using the phone
+            // in portrait (9:16) or landscape (16:9) — e.g. when using Spotify landscape.
+            val ratio = if (isLandscape) Rational(16, 9) else Rational(9, 16)
             val params = PictureInPictureParams.Builder()
-                .setAspectRatio(Rational(9, 16))
+                .setAspectRatio(ratio)
                 .build()
             enterPictureInPictureMode(params)
             true

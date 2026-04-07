@@ -17,13 +17,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 
-    <!-- Required for fullScreenIntent notifications to show on lock screen (Android 14+) -->
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
-    <!-- Required for notification vibration -->
+
+    <!-- Vibrate and wake for weekly summary notification delivery -->
     <uses-permission android:name="android.permission.VIBRATE"/>
-    <!-- Keeps CPU alive so foreground service can fire alert while screen is off -->
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
-    <!-- Needed on MIUI/HyperOS for exact-time alert delivery -->
+    <!-- Exact alarm needed for reliable weekly summary scheduling -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
 
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
@@ -56,10 +54,20 @@
             </intent-filter>
         </activity>
 
+        <!-- Reschedules weekly summary notification after device reboot -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+            </intent-filter>
+        </receiver>
+
         <!-- ✅ ADD THIS — flutter_foreground_task needs this service declared -->
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundTaskService"
-            android:foregroundServiceType="camera"
+            android:foregroundServiceType="camera|microphone"
             android:exported="false"/>
 
         <meta-data

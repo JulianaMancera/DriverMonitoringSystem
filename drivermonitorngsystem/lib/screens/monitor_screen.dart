@@ -177,7 +177,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   Future<void> _enterPip() async {
     try {
-      await _methodChannel.invokeMethod('enterPip');
+      final isLandscape =
+          MediaQuery.of(context).orientation == Orientation.landscape;
+      // Pass orientation so native side can set the correct PiP aspect ratio:
+      // portrait → 9:16, landscape → 16:9
+      await _methodChannel.invokeMethod('enterPip', {
+        'isLandscape': isLandscape,
+      });
     } catch (_) {}
   }
 
