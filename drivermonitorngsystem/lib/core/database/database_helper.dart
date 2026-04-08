@@ -19,7 +19,7 @@ class DatabaseHelper {
     final path = join(dbPath, fileName);
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _createTables,
       onUpgrade: _migrateDB,
     );
@@ -90,10 +90,14 @@ class DatabaseHelper {
     ''');
   }
 
-  /// Migration handler — add ALTER TABLE statements here for future versions.
-  /// Example for v2: await db.execute('ALTER TABLE sessions ADD COLUMN trip_label TEXT');
+  /// Migration handler — runs automatically when version number increases.
   Future<void> _migrateDB(Database db, int oldVersion, int newVersion) async {
-    // No migrations yet — app is at version 1.
+    // v1 → v2: add optional trip_label so drivers can name their sessions
+    if (oldVersion < 2) {
+      await db.execute(
+          "ALTER TABLE sessions ADD COLUMN trip_label TEXT");
+    }
+    // Future versions: add more if/else blocks here following the same pattern.
   }
 
   // SESSIONS — CRUD
@@ -544,6 +548,56 @@ class DatabaseHelper {
   Future<void> close() async {
     final db = await database;
     db.close();
+  }
+
+
+  /// Deletes sessions (and all child rows) older than [days] days.
+  /// Called on app start when the user has chosen a retention period.
+  /// Cascades to alert_events, state_counts, system_logs, alertness_snapshots
+  /// via individual deletes (SQLite FK cascade not guaranteed without PRAGMA).
+  Future<void> deleteSessionsOlderThan(int days) async {
+    final db    = await database;
+    final cutoff = DateTime.now()
+        .toUtc()
+        .subtract(Duration(days: days))
+        .toIso8601String();
+
+    // Find affected session IDs first
+    final rows = await db.rawQuery(
+      "SELECT id FROM sessions WHERE started_at < ?",
+      [cutoff],
+    );
+    if (rows.isEmpty) return;
+
+    final ids = rows.map((r) => r['id'] as int).toList();
+    final placeholders = ids.map((_) => '?').join(',');
+
+    await db.transaction((txn) async {
+      await txn.rawDelete(
+          "DELETE FROM alertness_snapshots WHERE session_id IN ($placeholders)", ids);
+      await txn.rawDelete(
+          "DELETE FROM system_logs        WHERE session_id IN ($placeholders)", ids);
+      await txn.rawDelete(
+          "DELETE FROM alert_events       WHERE session_id IN ($placeholders)", ids);
+      await txn.rawDelete(
+          "DELETE FROM state_counts       WHERE session_id IN ($placeholders)", ids);
+      await txn.rawDelete(
+          "DELETE FROM sessions           WHERE id         IN ($placeholders)", ids);
+    });
+  }
+
+  /// Returns alert counts for all sessions in one query — avoids the N+1
+  /// problem in HistoryScreen where getAlertsBySession() was called per session.
+  /// Returns a map of sessionId → alertCount.
+  Future<Map<int, int>> getAllSessionAlertCounts() async {
+    final db = await database;
+    final rows = await db.rawQuery(
+      "SELECT session_id, COUNT(*) as cnt FROM alert_events GROUP BY session_id",
+    );
+    return {
+      for (final r in rows)
+        (r['session_id'] as int): (r['cnt'] as int),
+    };
   }
 
   /// Delete all data — for testing/reset only

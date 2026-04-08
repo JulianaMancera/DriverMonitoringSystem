@@ -1,13 +1,10 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:volume_controller/volume_controller.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
 import '../core/database/database_helper.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import 'dart:async';
@@ -73,6 +70,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _retentionPeriod  = retention;
         _isLoading        = false;
       });
+    }
+    // Enforce retention policy on every settings open — silently purges
+    // sessions older than the chosen period from the database.
+    await _enforceRetention(retention);
+  }
+
+  /// Deletes sessions older than the current retention period.
+  /// '7 days' / '30 days' / '90 days' → calls deleteSessionsOlderThan().
+  /// 'Forever' → no-op (keep everything).
+  Future<void> _enforceRetention(String period) async {
+    int? days;
+    if      (period == '7 days')  days = 7;
+    else if (period == '30 days') days = 30;
+    else if (period == '90 days') days = 90;
+    // 'Forever' → days stays null → skip
+    if (days != null) {
+      await DatabaseHelper.instance.deleteSessionsOlderThan(days);
     }
   }
 
@@ -167,7 +181,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: 'Session Retention',
               subtitle: 'Auto-delete sessions older than',
               value: _retentionPeriod,
-              options: const ['7 days', '30 days', 'Forever'],
+              options: const ['7 days', '30 days', '90 days', 'Forever'],
               onChanged: (v) {
                 setState(() => _retentionPeriod = v!);
                 PreferencesHelper.instance.setRetention(v!);
@@ -178,7 +192,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: Icons.download_rounded,
               iconColor: _cyan,
               title: 'Export Session Data',
-              subtitle: 'Export as CSV or PDF report with analytics',
+              subtitle: 'Share all sessions as CSV',
               onTap: () => _onExportData(context),
             ),
             _dividerLine(),
@@ -692,29 +706,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: Text('Export Session Data',
             style: TextStyle(color: _textPrimary, fontWeight: FontWeight.bold)),
         content: Text(
-          'Choose your export format.\n\n'
-          '• CSV — raw session table for spreadsheets\n'
-          '• PDF — formatted report with safety scores & analytics\n\n'
-          'A share sheet will open so you can save to Downloads, '
-          'Google Drive, email, or any app.',
+          'All sessions will be exported as a CSV file.\n\n'
+          'A share sheet will open so you can save it to '
+          'Downloads, Google Drive, email, or any app.',
           style: TextStyle(color: _textSecondary, fontSize: 14),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: Text('Cancel', style: TextStyle(color: _textSecondary)),
-          ),
-          OutlinedButton(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: _cyan,
-              side: BorderSide(color: _cyan.withOpacity(0.4)),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-            onPressed: () {
-              Navigator.pop(context);
-              _exportCSV(context);
-            },
-            child: const Text('CSV'),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -724,9 +724,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             onPressed: () {
               Navigator.pop(context);
-              _exportPDF(context);
+              _exportCSV(context);
             },
-            child: const Text('PDF Report'),
+            child: const Text('Export & Share'),
           ),
         ],
       ),
@@ -734,290 +734,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
 
-  // ── PDF EXPORT ─────────────────────────────────────────────────────────────
-  /// Generates a formatted PDF report containing:
-  ///   1. Summary analytics (total sessions, alerts, avg safety score)
-  ///   2. Per-session table with date, duration, alertness, safety score, alerts
-  /// Uses the `pdf` package (pdf: ^3.x). Add to pubspec.yaml if not present.
-  Future<void> _exportPDF(BuildContext ctx) async {
-    try {
-      final sessions = await DatabaseHelper.instance.getAllSessions();
-      if (sessions.isEmpty) {
-        if (ctx.mounted) _showSnackbar(ctx, 'No sessions to export.', isError: false);
-        return;
-      }
-
-      // ── Gather per-session alert counts ──────────────────────────────────
-      final alertCounts = <int, int>{};
-      for (final s in sessions) {
-        final id = s['id'] as int;
-        final alerts = await DatabaseHelper.instance.getAlertsBySession(id);
-        alertCounts[id] = alerts.length;
-      }
-
-      // ── Compute summary analytics ────────────────────────────────────────
-      final totalSessions = sessions.length;
-      final completedSessions = sessions.where((s) => s['ended_at'] != null).toList();
-      final totalAlerts   = alertCounts.values.fold(0, (a, b) => a + b);
-      final avgSafety     = completedSessions.isEmpty ? 0.0
-          : completedSessions.map((s) => s['safety_score'] as double? ?? 0.0)
-              .reduce((a, b) => a + b) / completedSessions.length;
-      final avgAlertness  = completedSessions.isEmpty ? 0.0
-          : completedSessions.map((s) => s['alertness_avg'] as double? ?? 0.0)
-              .reduce((a, b) => a + b) / completedSessions.length;
-      final safeSessions  = alertCounts.values.where((c) => c == 0).length;
-
-      // ── Build PDF ────────────────────────────────────────────────────────
-      final pdf  = pw.Document();
-      final now  = DateTime.now();
-      final dateStr = '${now.year}-${_pad(now.month)}-${_pad(now.day)}';
-      final timeStr = '${_pad(now.hour)}:${_pad(now.minute)}';
-
-      // Color palette matching app theme
-      const cyanColor   = PdfColor.fromInt(0xFF00D4FF);
-      const darkBg      = PdfColor.fromInt(0xFF0D1627);
-      const surfaceBg   = PdfColor.fromInt(0xFF1A2235);
-      const textPrimary = PdfColor.fromInt(0xFFEEF2FF);
-      const textMuted   = PdfColor.fromInt(0xFF6B7A99);
-      const greenColor  = PdfColor.fromInt(0xFF00FF88);
-      const redColor    = PdfColor.fromInt(0xFFFF4757);
-      const orangeColor = PdfColor.fromInt(0xFFFFA500);
-
-      pdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.all(32),
-          theme: pw.ThemeData.withFont(
-            base: pw.Font.helvetica(),
-            bold: pw.Font.helveticaBold(),
-          ),
-          build: (pw.Context pdfCtx) => [
-
-            // ── HEADER ──────────────────────────────────────────────────────
-            pw.Container(
-              padding: const pw.EdgeInsets.all(20),
-              decoration: pw.BoxDecoration(
-                color: darkBg,
-                borderRadius: pw.BorderRadius.circular(12),
-              ),
-              child: pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text('BANTAY DRIVE',
-                        style: pw.TextStyle(
-                          font: pw.Font.helveticaBold(),
-                          fontSize: 22,
-                          color: cyanColor,
-                          letterSpacing: 2,
-                        )),
-                      pw.SizedBox(height: 4),
-                      pw.Text('Driver Monitoring System — Session Report',
-                        style: pw.TextStyle(fontSize: 10, color: textMuted)),
-                    ],
-                  ),
-                  pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.end,
-                    children: [
-                      pw.Text('Generated', style: pw.TextStyle(fontSize: 8, color: textMuted)),
-                      pw.Text('$dateStr  $timeStr',
-                        style: pw.TextStyle(font: pw.Font.helveticaBold(), fontSize: 10, color: textPrimary)),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            pw.SizedBox(height: 20),
-
-            // ── ANALYTICS SUMMARY ────────────────────────────────────────
-            pw.Text('ANALYTICS SUMMARY',
-              style: pw.TextStyle(font: pw.Font.helveticaBold(), fontSize: 10,
-                color: textMuted, letterSpacing: 1.5)),
-            pw.SizedBox(height: 10),
-            pw.Row(children: [
-              _pdfStatBox('Total Sessions',  '$totalSessions',             cyanColor),
-              pw.SizedBox(width: 8),
-              _pdfStatBox('Total Alerts',    '$totalAlerts',               totalAlerts == 0 ? greenColor : redColor),
-              pw.SizedBox(width: 8),
-              _pdfStatBox('Avg Safety Score','${avgSafety.toStringAsFixed(1)}%', _pdfScoreColor(avgSafety)),
-              pw.SizedBox(width: 8),
-              _pdfStatBox('Avg Alertness',   '${avgAlertness.toStringAsFixed(1)}%', cyanColor),
-              pw.SizedBox(width: 8),
-              _pdfStatBox('Safe Drives',     '$safeSessions',              safeSessions == totalSessions ? greenColor : orangeColor),
-            ]),
-            pw.SizedBox(height: 24),
-
-            // ── SESSION TABLE ─────────────────────────────────────────────
-            pw.Text('SESSION HISTORY',
-              style: pw.TextStyle(font: pw.Font.helveticaBold(), fontSize: 10,
-                color: textMuted, letterSpacing: 1.5)),
-            pw.SizedBox(height: 10),
-            pw.Table(
-              border: pw.TableBorder(
-                horizontalInside: pw.BorderSide(color: surfaceBg, width: 1),
-                bottom: pw.BorderSide(color: surfaceBg, width: 1),
-              ),
-              columnWidths: {
-                0: const pw.FlexColumnWidth(2.2), // Date
-                1: const pw.FlexColumnWidth(1.4), // Start
-                2: const pw.FlexColumnWidth(1.2), // Duration
-                3: const pw.FlexColumnWidth(1.3), // Alertness
-                4: const pw.FlexColumnWidth(1.4), // Safety Score
-                5: const pw.FlexColumnWidth(1.0), // Alerts
-              },
-              children: [
-                // Header row
-                pw.TableRow(
-                  decoration: const pw.BoxDecoration(color: darkBg),
-                  children: [
-                    _pdfTh('DATE'),
-                    _pdfTh('START'),
-                    _pdfTh('DURATION'),
-                    _pdfTh('ALERTNESS'),
-                    _pdfTh('SAFETY SCORE'),
-                    _pdfTh('ALERTS'),
-                  ],
-                ),
-                // Data rows
-                ...sessions.map((s) {
-                  final id         = s['id'] as int;
-                  final alertCount = alertCounts[id] ?? 0;
-                  final started    = s['started_at'] as String? ?? '';
-                  final duration   = s['duration_sec'] as int? ?? 0;
-                  final alertness  = (s['alertness_avg'] as double? ?? 0.0);
-                  final safety     = (s['safety_score']  as double? ?? 0.0);
-                  final sd         = DateTime.tryParse(started)?.toLocal();
-                  final dateLabel  = sd != null
-                      ? '${_pdfMonth(sd.month)} ${sd.day}, ${sd.year}' : '—';
-                  final timeLabel  = sd != null
-                      ? '${_padAmPm(sd.hour, sd.minute)}' : '—';
-                  final durLabel   = _formatDurationPdf(duration);
-                  final safetyColor = _pdfScoreColor(safety);
-
-                  return pw.TableRow(children: [
-                    _pdfTd(dateLabel),
-                    _pdfTd(timeLabel),
-                    _pdfTd(durLabel),
-                    _pdfTd('${alertness.toStringAsFixed(1)}%'),
-                    _pdfTdColored('${safety.toStringAsFixed(1)}%', safetyColor),
-                    _pdfTdColored('$alertCount', alertCount == 0 ? greenColor : (alertCount <= 2 ? orangeColor : redColor)),
-                  ]);
-                }),
-              ],
-            ),
-            pw.SizedBox(height: 24),
-
-            // ── FOOTER ──────────────────────────────────────────────────────
-            pw.Divider(color: surfaceBg),
-            pw.SizedBox(height: 6),
-            pw.Text(
-              'Safety Score = Average Alertness − Alert Penalty  '
-              '(L1 −2 pts, L2 −4 pts, L3 −8 pts), clamped to [0, 100].',
-              style: pw.TextStyle(fontSize: 7, color: textMuted),
-            ),
-            pw.Text(
-              'Bantay Drive · Driver Monitoring System · New Era University',
-              style: pw.TextStyle(fontSize: 7, color: textMuted),
-            ),
-          ],
-        ),
-      );
-
-      // ── Save & share ──────────────────────────────────────────────────────
-      final bytes    = await pdf.save();
-      final docsDir  = await getApplicationDocumentsDirectory();
-      final stamp    = '${now.year}${_pad(now.month)}${_pad(now.day)}_${_pad(now.hour)}${_pad(now.minute)}';
-      final fileName = 'bantaydrive_report_$stamp.pdf';
-      final file     = File('${docsDir.path}/$fileName');
-      await file.writeAsBytes(bytes);
-
-      if (!ctx.mounted) return;
-      await Share.shareXFiles(
-        [XFile(file.path, mimeType: 'application/pdf', name: fileName)],
-        subject: 'Bantay Drive Session Report',
-        text: 'Bantay Drive — $totalSessions sessions, avg safety ${avgSafety.toStringAsFixed(1)}%',
-      );
-    } catch (e) {
-      if (ctx.mounted) _showSnackbar(ctx, 'PDF export failed: $e', isError: true);
-    }
-  }
-
-  // ── PDF HELPERS ───────────────────────────────────────────────────────────
-
-  PdfColor _pdfScoreColor(double score) {
-    if (score >= 80) return const PdfColor.fromInt(0xFF00FF88);
-    if (score >= 60) return const PdfColor.fromInt(0xFFFFA500);
-    return const PdfColor.fromInt(0xFFFF4757);
-  }
-
-  pw.Widget _pdfStatBox(String label, String value, PdfColor color) {
-    return pw.Expanded(
-      child: pw.Container(
-        padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-        decoration: pw.BoxDecoration(
-          color: const PdfColor.fromInt(0xFF0D1627),
-          borderRadius: pw.BorderRadius.circular(8),
-        ),
-        child: pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Text(value,
-              style: pw.TextStyle(
-                font: pw.Font.helveticaBold(),
-                fontSize: 16,
-                color: color,
-              )),
-            pw.SizedBox(height: 3),
-            pw.Text(label,
-              style: pw.TextStyle(fontSize: 7, color: const PdfColor.fromInt(0xFF6B7A99))),
-          ],
-        ),
-      ),
-    );
-  }
-
-  pw.Widget _pdfTh(String text) => pw.Padding(
-    padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-    child: pw.Text(text,
-      style: pw.TextStyle(
-        font: pw.Font.helveticaBold(),
-        fontSize: 8,
-        color: const PdfColor.fromInt(0xFF6B7A99),
-        letterSpacing: 0.8,
-      )),
-  );
-
-  pw.Widget _pdfTd(String text) => pw.Padding(
-    padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-    child: pw.Text(text,
-      style: const pw.TextStyle(fontSize: 9, color: PdfColor.fromInt(0xFFCBD5E1))),
-  );
-
-  pw.Widget _pdfTdColored(String text, PdfColor color) => pw.Padding(
-    padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-    child: pw.Text(text,
-      style: pw.TextStyle(font: pw.Font.helveticaBold(), fontSize: 9, color: color)),
-  );
-
-  String _formatDurationPdf(int sec) {
-    final h = sec ~/ 3600; final m = (sec % 3600) ~/ 60; final s = sec % 60;
-    if (h > 0) return '${h}h ${m}m';
-    if (m > 0) return '${m}m ${s}s';
-    return '${s}s';
-  }
-
-  String _pdfMonth(int m) {
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return months[m - 1];
-  }
-
-  String _padAmPm(int hour, int minute) {
-    final h    = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
-    final ampm = hour >= 12 ? 'PM' : 'AM';
-    return '$h:${minute.toString().padLeft(2, '0')} $ampm';
-  }
 
   void _onClearHistory(BuildContext context) {
     showDialog(
