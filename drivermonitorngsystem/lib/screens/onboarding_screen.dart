@@ -209,89 +209,172 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                     ),
                   ),
 
-                  // Dots + button — fixed at bottom, no overflow possible
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(32, 0, 32, 40),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: List.generate(
-                            _pages.length,
-                            (i) => AnimatedContainer(
-                              duration: const Duration(milliseconds: 280),
-                              curve: Curves.easeInOutCubic,
-                              margin: const EdgeInsets.symmetric(horizontal: 4),
-                              width: i == _currentPage ? 24 : 6,
-                              height: 6,
-                              decoration: BoxDecoration(
-                                color: i == _currentPage
-                                    ? const Color(0xFF00D4FF)
-                                    : Colors.white.withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(3),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 28),
+                  // Dots + button — responsive for portrait and landscape
+                  Builder(builder: (context) {
+                    final isLandscape = MediaQuery.of(context).orientation ==
+                        Orientation.landscape;
+                    final bottomPad  = isLandscape ? 8.0  : 40.0;
+                    final btnHeight  = isLandscape ? 40.0 : 54.0;
+                    final dotSpacing = isLandscape ? 12.0 : 28.0;
+                    final btnWidth   = isLandscape
+                        ? MediaQuery.of(context).size.width * 0.45
+                        : double.infinity;
 
-                        SizedBox(
-                          width: double.infinity,
-                          height: 54,
-                          child: GestureDetector(
-                            onTap: _nextPage,
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 280),
-                              decoration: BoxDecoration(
-                                gradient: const LinearGradient(
-                                  colors: [
-                                    Color(0xFF00B8D9),
-                                    Color(0xFF00D4FF),
-                                  ],
-                                ),
-                                borderRadius: BorderRadius.circular(14),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: const Color(0xFF00D4FF)
-                                        .withOpacity(0.25),
-                                    blurRadius: 20,
-                                    offset: const Offset(0, 6),
-                                  ),
-                                ],
-                              ),
-                              child: Center(
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      _currentPage < _pages.length - 1
-                                          ? 'Next'
-                                          : 'Get Started',
-                                      style: const TextStyle(
-                                        color: Color(0xFF080E1A),
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w700,
-                                        letterSpacing: 0.5,
+                    return Padding(
+                      padding: EdgeInsets.fromLTRB(32, 0, 32, bottomPad),
+                      child: isLandscape
+                          // ── LANDSCAPE: dots + button side by side ──────────
+                          ? Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                // Dot indicators
+                                Row(
+                                  children: List.generate(
+                                    _pages.length,
+                                    (i) => AnimatedContainer(
+                                      duration: const Duration(milliseconds: 280),
+                                      curve: Curves.easeInOutCubic,
+                                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                                      width:  i == _currentPage ? 18 : 5,
+                                      height: 5,
+                                      decoration: BoxDecoration(
+                                        color: i == _currentPage
+                                            ? const Color(0xFF00D4FF)
+                                            : Colors.white.withOpacity(0.15),
+                                        borderRadius: BorderRadius.circular(3),
                                       ),
                                     ),
-                                    const SizedBox(width: 8),
-                                    Icon(
-                                      _currentPage < _pages.length - 1
-                                          ? Icons.arrow_forward_rounded
-                                          : Icons.check_rounded,
-                                      color: const Color(0xFF080E1A),
-                                      size: 18,
-                                    ),
-                                  ],
+                                  ),
                                 ),
-                              ),
+                                const SizedBox(width: 20),
+                                // Button — compact width only
+                                SizedBox(
+                                  width:  btnWidth,
+                                  height: btnHeight,
+                                  child: GestureDetector(
+                                    onTap: _nextPage,
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        gradient: const LinearGradient(
+                                          colors: [Color(0xFF00B8D9), Color(0xFF00D4FF)],
+                                        ),
+                                        borderRadius: BorderRadius.circular(10),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: const Color(0xFF00D4FF).withOpacity(0.20),
+                                            blurRadius: 12,
+                                            offset: const Offset(0, 4),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Center(
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              _currentPage < _pages.length - 1
+                                                  ? 'Next'
+                                                  : 'Get Started',
+                                              style: const TextStyle(
+                                                color: Color(0xFF080E1A),
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w700,
+                                                letterSpacing: 0.5,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Icon(
+                                              _currentPage < _pages.length - 1
+                                                  ? Icons.arrow_forward_rounded
+                                                  : Icons.check_rounded,
+                                              color: const Color(0xFF080E1A),
+                                              size: 14,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            )
+                          // ── PORTRAIT: stacked dots then button ─────────────
+                          : Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: List.generate(
+                                    _pages.length,
+                                    (i) => AnimatedContainer(
+                                      duration: const Duration(milliseconds: 280),
+                                      curve: Curves.easeInOutCubic,
+                                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                                      width:  i == _currentPage ? 24 : 6,
+                                      height: 6,
+                                      decoration: BoxDecoration(
+                                        color: i == _currentPage
+                                            ? const Color(0xFF00D4FF)
+                                            : Colors.white.withOpacity(0.15),
+                                        borderRadius: BorderRadius.circular(3),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(height: dotSpacing),
+                                SizedBox(
+                                  width:  btnWidth,
+                                  height: btnHeight,
+                                  child: GestureDetector(
+                                    onTap: _nextPage,
+                                    child: AnimatedContainer(
+                                      duration: const Duration(milliseconds: 280),
+                                      decoration: BoxDecoration(
+                                        gradient: const LinearGradient(
+                                          colors: [Color(0xFF00B8D9), Color(0xFF00D4FF)],
+                                        ),
+                                        borderRadius: BorderRadius.circular(14),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: const Color(0xFF00D4FF).withOpacity(0.25),
+                                            blurRadius: 20,
+                                            offset: const Offset(0, 6),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Center(
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              _currentPage < _pages.length - 1
+                                                  ? 'Next'
+                                                  : 'Get Started',
+                                              style: const TextStyle(
+                                                color: Color(0xFF080E1A),
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w700,
+                                                letterSpacing: 0.5,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Icon(
+                                              _currentPage < _pages.length - 1
+                                                  ? Icons.arrow_forward_rounded
+                                                  : Icons.check_rounded,
+                                              color: const Color(0xFF080E1A),
+                                              size: 18,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                    );
+                  }),
                 ],
               ),
             ),

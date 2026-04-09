@@ -45,6 +45,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   bool _cameraInitialized = false;
   String? _cameraError;
   bool _streamPausedForBackground = false;
+  // Tracks physical device orientation while in PiP.
+  // Seeded on PiP entry, then updated by native EventChannel on rotation.
+  bool _pipIsLandscape = false;
 
   // Session
   int? _currentSessionId;
@@ -96,13 +99,17 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     // Listen to native PIP state changes via EventChannel.
     // onPictureInPictureModeChanged in MainActivity fires reliably.
     _pipSubscription = _eventChannel.receiveBroadcastStream().listen((dynamic v) {
-      if (mounted) {
-        final inPip = v as bool;
-        ref.read(isInPipProvider.notifier).state = inPip;
-        // When returning from PIP, resume camera stream
-        if (!inPip) {
-          _resumeCameraStream();
-        }
+      if (!mounted) return;
+
+      if (v is bool) {
+        // PiP entered/exited event
+        ref.read(isInPipProvider.notifier).state = v;
+        if (!v) _resumeCameraStream();
+
+      } else if (v is String && v.startsWith('orientation:')) {
+        // Phone rotated while in PiP — update camera preview dimensions
+        final isLandscape = v == 'orientation:landscape';
+        setState(() => _pipIsLandscape = isLandscape);
       }
     });
 
@@ -126,17 +133,45 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   @override
+  @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _pipSubscription?.cancel();
     _snapshotTimer?.cancel();
+
+    // ── Stop image stream BEFORE disposing the controller ──────────────────
+    // Critical: if the stream is still active when the Flutter engine shuts
+    // down, the camera hardware fires one last frame into a dead renderer →
+    // FATAL: "Cannot execute operation because FlutterJNI is not attached".
+    // Stopping the stream first gives the camera time to drain before dispose.
+    _stopCameraSafely();
+
     _warningController.dispose();
     _notifController?.dispose();
-    _cameraController?.dispose();
     _audioPlayer.dispose();
     _alarmPlayer.dispose();
     TfliteService.instance.dispose();
     super.dispose();
+  }
+
+  /// Stops the image stream synchronously then disposes the controller.
+  /// Uses a fire-and-forget pattern because dispose() cannot be async.
+  void _stopCameraSafely() {
+    final ctrl = _cameraController;
+    if (ctrl == null) return;
+    _cameraController = null; // null out immediately so no new frames queue
+    _cameraInitialized = false;
+    try {
+      if (ctrl.value.isInitialized && ctrl.value.isStreamingImages) {
+        ctrl.stopImageStream().then((_) => ctrl.dispose()).catchError((_) {
+          try { ctrl.dispose(); } catch (_) {}
+        });
+      } else {
+        ctrl.dispose();
+      }
+    } catch (_) {
+      try { ctrl.dispose(); } catch (_) {}
+    }
   }
 
   @override
@@ -145,10 +180,15 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     switch (state) {
       case AppLifecycleState.inactive:
-        // When going inactive (home pressed), request PIP immediately.
-        // The EventChannel (onPictureInPictureModeChanged) will confirm
-        // and set isInPipProvider accurately. We do NOT pre-set it here
-        // because inactive fires for many non-PIP reasons (e.g. notification pull).
+        // inactive fires for many reasons — notification shade pull, phone call
+        // incoming, etc. We only want PiP when truly leaving the app.
+        // Do NOT trigger PiP here; wait for paused/hidden instead.
+        break;
+
+      case AppLifecycleState.hidden:
+        // hidden fires when the app is fully covered by another window
+        // (home pressed, recents, another app opened). This is the right
+        // place to enter PiP — same behaviour as Discord's live call.
         if (isRecording) {
           await _enterPip();
           await BantayDriveService.startService(
@@ -157,14 +197,17 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         break;
 
       case AppLifecycleState.paused:
-        // Pause image stream to save resources while fully backgrounded.
+        // Pause image stream to save battery while in background.
         await _pauseCameraStream();
         break;
 
       case AppLifecycleState.resumed:
-        // Coming back to full screen — EventChannel already set isInPipProvider
-        // to false via onPictureInPictureModeChanged. Ensure it's cleared.
-        if (mounted) ref.read(isInPipProvider.notifier).state = false;
+        // isInPipProvider is cleared by the EventChannel listener when
+        // onPictureInPictureModeChanged fires — do NOT clear it here to
+        // avoid a race condition that kept _buildPipView() showing after
+        // returning from PiP (making the stop button unreachable).
+        // Only reset orientation and resume camera stream.
+        if (mounted) setState(() => _pipIsLandscape = false);
         await _resumeCameraStream();
         break;
 
@@ -177,10 +220,17 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   Future<void> _enterPip() async {
     try {
-      final isLandscape =
+      // Use both MediaQuery and window physical size as cross-checks.
+      // On some devices MediaQuery.orientation lags during the inactive
+      // transition, so we compare window size as a reliable fallback.
+      final mqOrientation =
           MediaQuery.of(context).orientation == Orientation.landscape;
-      // Pass orientation so native side can set the correct PiP aspect ratio:
-      // portrait → 9:16, landscape → 16:9
+      final windowSize =
+          WidgetsBinding.instance.platformDispatcher.views.first.physicalSize;
+      final windowIsLandscape = windowSize.width > windowSize.height;
+      final isLandscape = mqOrientation || windowIsLandscape;
+
+      if (mounted) setState(() => _pipIsLandscape = isLandscape);
       await _methodChannel.invokeMethod('enterPip', {
         'isLandscape': isLandscape,
       });
@@ -391,8 +441,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // ─── CAMERA FRAME CALLBACK ─────────────────────────────────────────────────
 
   Future<void> _onCameraFrame(CameraImage frame) async {
-    // Quick bail-out guards — checked before any async work
-    if (!mounted || !ref.read(isRecordingProvider)) return;
+    // Quick bail-out guards — checked before any async work.
+    // Also guard against _cameraController being nulled by _stopCameraSafely()
+    // during dispose — prevents frames from reaching a dead Flutter engine.
+    if (!mounted || _cameraController == null || !ref.read(isRecordingProvider)) return;
     final result = await TfliteService.instance.runInference(frame);
     if (result != null && mounted && ref.read(isRecordingProvider)) {
       onModelOutput(
@@ -579,10 +631,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final showAlert   = ref.watch(showAlertBannerProvider);
     final alertType   = ref.watch(alertBannerTypeProvider);
     final isLevel3    = _alertLevel == 3;
-    // Detect orientation so PiP camera fills correctly in both modes
-    final isLandscape =
-        MediaQuery.of(context).orientation == Orientation.landscape;
-    final previewSize = _getPreviewSize(isLandscape);
+    // Use _pipIsLandscape which is pushed from native MainActivity via
+    // EventChannel whenever the phone rotates while in PiP.
+    // This is more reliable than MediaQuery inside a PiP window,
+    // because the app window size doesn't change when the phone rotates.
+    final previewSize = _getPreviewSize(_pipIsLandscape);
 
     // State badge color + label
     late Color stateColor;
@@ -1679,11 +1732,18 @@ class _CameraOverlayButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // In landscape the camera fills the screen — the control bar pill has
+    // very little horizontal room. Hide the text label and shrink padding
+    // so the Row never overflows regardless of orientation or PiP state.
+    final isLandscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
+    final hPad = isLandscape ? 10.0 : 14.0;
+
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding:  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        padding: EdgeInsets.symmetric(horizontal: hPad, vertical: 8),
         decoration: BoxDecoration(
           color:        isActive
               ? activeColor.withOpacity(0.18)
@@ -1696,15 +1756,19 @@ class _CameraOverlayButton extends StatelessWidget {
             Icon(icon,
                 size:  18,
                 color: isActive ? activeColor : Colors.white60),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                color:      isActive ? activeColor : Colors.white60,
-                fontSize:   12,
-                fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+            // Hide text in landscape — icon alone is clear enough and
+            // prevents the Row from overflowing the constrained pill width.
+            if (!isLandscape) ...[
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color:      isActive ? activeColor : Colors.white60,
+                  fontSize:   12,
+                  fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                ),
               ),
-            ),
+            ],
           ],
         ),
       ),

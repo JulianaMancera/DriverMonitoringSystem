@@ -14,14 +14,12 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 
 
-    <!-- Vibrate and wake for weekly summary notification delivery -->
+    <!-- Required for alerts and wake during monitoring -->
     <uses-permission android:name="android.permission.VIBRATE"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
-    <!-- Exact alarm needed for reliable weekly summary scheduling -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
 
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
@@ -54,20 +52,10 @@
             </intent-filter>
         </activity>
 
-        <!-- Reschedules weekly summary notification after device reboot -->
-        <receiver
-            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED"/>
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
-            </intent-filter>
-        </receiver>
-
-        <!-- ✅ ADD THIS — flutter_foreground_task needs this service declared -->
+        <!-- flutter_foreground_task foreground service -->
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundTaskService"
-            android:foregroundServiceType="camera|microphone"
+            android:foregroundServiceType="camera"
             android:exported="false"/>
 
         <meta-data

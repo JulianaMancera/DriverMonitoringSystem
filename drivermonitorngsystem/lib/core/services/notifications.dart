@@ -42,9 +42,6 @@ class BantayDriveService {
         ),
       );
 
-      // ── 3. Battery optimization exemption ─────────────────────────────────
-      await FlutterForegroundTask.requestIgnoreBatteryOptimization();
-
       _serviceReady = true;
       debugPrint('>>> [BantayDrive] FULLY READY');
     } catch (e, stack) {
