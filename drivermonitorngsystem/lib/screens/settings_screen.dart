@@ -1,9 +1,6 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:volume_controller/volume_controller.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core/database/database_helper.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
@@ -70,23 +67,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _retentionPeriod  = retention;
         _isLoading        = false;
       });
-    }
-    // Enforce retention policy on every settings open — silently purges
-    // sessions older than the chosen period from the database.
-    await _enforceRetention(retention);
-  }
-
-  /// Deletes sessions older than the current retention period.
-  /// '7 days' / '30 days' / '90 days' → calls deleteSessionsOlderThan().
-  /// 'Forever' → no-op (keep everything).
-  Future<void> _enforceRetention(String period) async {
-    int? days;
-    if      (period == '7 days')  days = 7;
-    else if (period == '30 days') days = 30;
-    else if (period == '90 days') days = 90;
-    // 'Forever' → days stays null → skip
-    if (days != null) {
-      await DatabaseHelper.instance.deleteSessionsOlderThan(days);
     }
   }
 
@@ -181,19 +161,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: 'Session Retention',
               subtitle: 'Auto-delete sessions older than',
               value: _retentionPeriod,
-              options: const ['7 days', '30 days', '90 days', 'Forever'],
+              options: const ['7 days', '30 days', 'Forever'],
               onChanged: (v) {
                 setState(() => _retentionPeriod = v!);
                 PreferencesHelper.instance.setRetention(v!);
               },
-            ),
-            _dividerLine(),
-            _actionTile(
-              icon: Icons.download_rounded,
-              iconColor: _cyan,
-              title: 'Export Session Data',
-              subtitle: 'Share all sessions as CSV',
-              onTap: () => _onExportData(context),
             ),
             _dividerLine(),
             _actionTile(
@@ -629,112 +601,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ));
   }
 
-  // CSV EXPORT
-  String _pad(int n) => n.toString().padLeft(2, '0');
-
-  Future<void> _exportCSV(BuildContext ctx) async {
-    try {
-      final sessions = await DatabaseHelper.instance.getAllSessions();
-      if (sessions.isEmpty) {
-        if (ctx.mounted) {
-          _showSnackbar(ctx, 'No sessions to export.', isError: false);
-        }
-        return;
-      }
-
-      final buf = StringBuffer();
-      buf.writeln(
-          'Session ID,Date,Start Time,End Time,Duration (sec),'
-          'Alertness Avg (%),Safety Score (%),Alert Count');
-
-      for (final s in sessions) {
-        final id       = s['id'] as int;
-        final alerts   = await DatabaseHelper.instance.getAlertsBySession(id);
-        final started  = s['started_at'] as String? ?? '';
-        final ended    = s['ended_at']   as String? ?? '';
-        final duration = s['duration_sec'] as int? ?? 0;
-        final alertAvg = (s['alertness_avg'] as double? ?? 0.0).toStringAsFixed(1);
-        final safety   = (s['safety_score']  as double? ?? 0.0).toStringAsFixed(1);
-
-        final sd = DateTime.tryParse(started);
-        final ed = DateTime.tryParse(ended);
-        final date  = sd != null
-            ? '${sd.year}-${_pad(sd.month)}-${_pad(sd.day)}'
-            : '';
-        final sTime = sd != null
-            ? '${_pad(sd.hour)}:${_pad(sd.minute)}:${_pad(sd.second)}'
-            : '';
-        final eTime = ed != null
-            ? '${_pad(ed.hour)}:${_pad(ed.minute)}:${_pad(ed.second)}'
-            : '';
-
-        buf.writeln(
-            '$id,$date,$sTime,$eTime,$duration,$alertAvg,$safety,${alerts.length}');
-      }
-
-      final docsDir  = await getApplicationDocumentsDirectory();
-      final now      = DateTime.now();
-      final stamp    =
-          '${now.year}${_pad(now.month)}${_pad(now.day)}'
-          '_${_pad(now.hour)}${_pad(now.minute)}';
-      final fileName = 'bantaydrive_sessions_$stamp.csv';
-      final file     = File('${docsDir.path}/$fileName');
-      await file.writeAsString(buf.toString());
-
-      if (!ctx.mounted) return;
-
-      await Share.shareXFiles(
-        [XFile(file.path, mimeType: 'text/csv', name: fileName)],
-        subject: 'Bantay Drive Session Export',
-        text: 'Bantay Drive — ${sessions.length} sessions exported',
-      );
-
-    } catch (e) {
-      if (ctx.mounted) {
-        _showSnackbar(ctx, 'Export failed: $e', isError: true);
-      }
-    }
-  }
-
   //  ACTION HANDLERS
-  void _onExportData(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: _surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Export Session Data',
-            style: TextStyle(color: _textPrimary, fontWeight: FontWeight.bold)),
-        content: Text(
-          'All sessions will be exported as a CSV file.\n\n'
-          'A share sheet will open so you can save it to '
-          'Downloads, Google Drive, email, or any app.',
-          style: TextStyle(color: _textSecondary, fontSize: 14),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: TextStyle(color: _textSecondary)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _cyan,
-              foregroundColor: _bg,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-            onPressed: () {
-              Navigator.pop(context);
-              _exportCSV(context);
-            },
-            child: const Text('Export & Share'),
-          ),
-        ],
-      ),
-    );
-  }
-
-
-
   void _onClearHistory(BuildContext context) {
     showDialog(
       context: context,

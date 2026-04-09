@@ -34,9 +34,10 @@ class TfliteService {
 
   static const String _modelAsset = 'assets/dms_hybridnet.tflite';
 
-  /// Infer every Nth frame. 3 = every 4th frame ≈ 7.5 FPS at 30 FPS camera.
-  /// Increase to reduce CPU load further; decrease for faster response.
-  static const int _frameSkip = 3;
+  /// Infer every Nth frame. 5 = every 6th frame ≈ 5 FPS at 30 FPS camera.
+  /// Drowsiness onset is gradual — 5 FPS is sufficient for reliable detection
+  /// and significantly reduces CPU/heat on mid-range phones.
+  static const int _frameSkip = 5;
 
   /// Minimum confidence to accept a non-neutral prediction.
   static const double _confidenceThreshold = 0.45;
@@ -52,6 +53,19 @@ class TfliteService {
 
   /// Pre-allocated output buffer — reused every inference call.
   final List<List<double>> _outputBuffer = [List<double>.filled(3, 0.0)];
+
+  /// Pre-allocated input tensor buffer — reused every inference call.
+  /// Avoids allocating 150k doubles on every frame (224*224*3).
+  /// Shape: [1][H][W][3] — matches tflite_flutter's run() expectation.
+  static const int _h = FramePreprocessor.inputHeight;
+  static const int _w = FramePreprocessor.inputWidth;
+  final List<List<List<List<double>>>> _inputBuffer = List.generate(
+    1, (_) => List.generate(
+      FramePreprocessor.inputHeight, (_) => List.generate(
+        FramePreprocessor.inputWidth, (_) => List.filled(3, 0.0),
+      ),
+    ),
+  );
 
   String? lastError;
   bool get isInitialized => _isInitialized;
@@ -157,17 +171,20 @@ class TfliteService {
 
       if (inputData == null) return null;
 
-      // ── Step 2: Reshape for TFLite ────────────────────────────────────────
-      // tflite_flutter requires nested List input.
-      // We convert the flat Float32List to [1, H, W, 3] as efficiently
-      // as possible using a view — avoids full data copy.
-      final input = _float32ToNestedList(inputData);
+      // ── Step 2: Fill pre-allocated input buffer in-place ───────────────
+      // Reusing _inputBuffer avoids 150k+ double allocations per frame.
+      int idx = 0;
+      for (int r = 0; r < _h; r++) {
+        for (int c = 0; c < _w; c++) {
+          _inputBuffer[0][r][c][0] = inputData[idx++];
+          _inputBuffer[0][r][c][1] = inputData[idx++];
+          _inputBuffer[0][r][c][2] = inputData[idx++];
+        }
+      }
 
-      // ── Step 3: Run inference (stays on main isolate — TFLite is thread-safe
-      //    but the interpreter object itself must not be shared across isolates)
-      // Reset output buffer
+      // ── Step 3: Run inference ─────────────────────────────────────────────
       for (int i = 0; i < 3; i++) { _outputBuffer[0][i] = 0.0; }
-      _interpreter!.run(input, _outputBuffer);
+      _interpreter!.run(_inputBuffer, _outputBuffer);
 
       return _parseOutput(_outputBuffer[0]);
 

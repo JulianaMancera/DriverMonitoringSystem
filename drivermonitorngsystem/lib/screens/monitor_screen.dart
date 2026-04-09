@@ -391,8 +391,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // ─── CAMERA FRAME CALLBACK ─────────────────────────────────────────────────
 
   Future<void> _onCameraFrame(CameraImage frame) async {
-    // Frame-rate is controlled entirely by TfliteService's built-in frame-skip
-    // gate (_frameSkip) and busy gate (_isRunning). No extra throttle needed here.
+    // Quick bail-out guards — checked before any async work
+    if (!mounted || !ref.read(isRecordingProvider)) return;
     final result = await TfliteService.instance.runInference(frame);
     if (result != null && mounted && ref.read(isRecordingProvider)) {
       onModelOutput(
