@@ -59,6 +59,20 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    // Called when BACK is pressed — enter PiP instead of closing the activity
+    // while recording. This is the native-side guard that catches back presses
+    // that bypass Flutter's PopScope (e.g. gesture navigation on some ROMs).
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (isRecording && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val isLandscape = resources.configuration.orientation ==
+                android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            val entered = enterPipMode(isLandscape)
+            if (entered) return   // PiP entered — don't close the activity
+        }
+        super.onBackPressed()
+    }
+
     // Called by Android when PiP mode changes — reliably fires every time
     override fun onPictureInPictureModeChanged(
         isInPictureInPictureMode: Boolean,

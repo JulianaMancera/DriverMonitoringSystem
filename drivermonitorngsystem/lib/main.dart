@@ -202,7 +202,7 @@ class MainShell extends ConsumerWidget {
     final deviceName = ref.watch(deviceNameProvider).when(
       data:    (name) => name,
       loading: () => 'USER',
-      error:   (_, __) => 'USER',
+      error:   (_, _) => 'USER',
     );
 
     final isMonitor     = currentIndex == 1;

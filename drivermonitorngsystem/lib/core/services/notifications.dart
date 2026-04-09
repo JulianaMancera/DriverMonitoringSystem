@@ -58,12 +58,18 @@ class BantayDriveService {
         await FlutterForegroundTask.updateService(
           notificationTitle: 'Bantay Drive',
           notificationText:  _monitoringText(state),
+          notificationButtons: [
+            const NotificationButton(id: 'stop_recording', text: '⏹ Stop'),
+          ],
         );
       } else {
         await FlutterForegroundTask.startService(
           notificationTitle: 'Bantay Drive',
           notificationText:  _monitoringText(state),
           callback:          startCallback,
+          notificationButtons: [
+            const NotificationButton(id: 'stop_recording', text: '⏹ Stop'),
+          ],
         );
       }
     } catch (e) {
@@ -88,6 +94,9 @@ class BantayDriveService {
       await FlutterForegroundTask.updateService(
         notificationTitle: 'Bantay Drive',
         notificationText:  _monitoringText(state),
+        notificationButtons: [
+          const NotificationButton(id: 'stop_recording', text: '⏹ Stop'),
+        ],
       );
     } catch (e) {
       debugPrint('>>> [BantayDrive] updateState() FAILED: $e');
@@ -119,6 +128,14 @@ class BantayDriveTaskHandler extends TaskHandler {
   @override
   void onRepeatEvent(DateTime timestamp) {
     FlutterForegroundTask.sendDataToMain('heartbeat');
+  }
+
+  @override
+  void onNotificationButtonPressed(String id) {
+    // Notification ⏹ Stop button pressed — forward to Flutter main isolate
+    if (id == 'stop_recording') {
+      FlutterForegroundTask.sendDataToMain('stop_recording');
+    }
   }
 
   @override

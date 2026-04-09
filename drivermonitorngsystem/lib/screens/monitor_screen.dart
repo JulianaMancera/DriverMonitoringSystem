@@ -10,6 +10,7 @@ import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
 import '../core/inference/tflite_service.dart';
 import '../core/services/notifications.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import '../utils/responsive.dart';
 
@@ -45,10 +46,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   bool _cameraInitialized = false;
   String? _cameraError;
   bool _streamPausedForBackground = false;
-  // Tracks physical device orientation while in PiP.
-  // Seeded on PiP entry, then updated by native EventChannel on rotation.
-  bool _pipIsLandscape = false;
-
   // Session
   int? _currentSessionId;
   DateTime? _sessionStartTime;
@@ -107,9 +104,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         if (!v) _resumeCameraStream();
 
       } else if (v is String && v.startsWith('orientation:')) {
-        // Phone rotated while in PiP — update camera preview dimensions
-        final isLandscape = v == 'orientation:landscape';
-        setState(() => _pipIsLandscape = isLandscape);
+        // Phone rotated while in PiP — trigger a Flutter frame so
+        // LayoutBuilder in _buildPipView gets new constraints and
+        // the camera preview swaps width/height to fill the window.
+        if (mounted) setState(() {});
       }
     });
 
@@ -130,13 +128,18 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             curve: const Interval(0.0, 0.35, curve: Curves.easeIn)));
 
     _loadPreferencesAndInit();
+
+    // Listen for messages from the foreground task handler —
+    // specifically the 'stop_recording' message sent when the
+    // notification Stop button is pressed while in PiP or background.
+    FlutterForegroundTask.addTaskDataCallback(_onForegroundTaskData);
   }
 
-  @override
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _pipSubscription?.cancel();
+    FlutterForegroundTask.removeTaskDataCallback(_onForegroundTaskData);
     _snapshotTimer?.cancel();
 
     // ── Stop image stream BEFORE disposing the controller ──────────────────
@@ -174,6 +177,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
+  void _onForegroundTaskData(Object data) {
+    if (data == 'stop_recording' && mounted) {
+      // User tapped ⏹ Stop on the persistent notification
+      _stopRecording();
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) async {
     final isRecording = ref.read(isRecordingProvider);
@@ -186,13 +196,17 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         break;
 
       case AppLifecycleState.hidden:
-        // hidden fires when the app is fully covered by another window
-        // (home pressed, recents, another app opened). This is the right
-        // place to enter PiP — same behaviour as Discord's live call.
-        if (isRecording) {
-          await _enterPip();
-          await BantayDriveService.startService(
-              state: ref.read(driverStateProvider));
+        // hidden fires when the app is fully covered by another window.
+        // Only enter PiP if MonitorScreen is the currently visible route —
+        // if the user navigated to Dashboard/History etc. while recording,
+        // we should NOT enter PiP (those screens can't render _buildPipView).
+        if (isRecording && mounted) {
+          final isCurrentRoute = ModalRoute.of(context)?.isCurrent ?? false;
+          if (isCurrentRoute) {
+            await _enterPip();
+            await BantayDriveService.startService(
+                state: ref.read(driverStateProvider));
+          }
         }
         break;
 
@@ -207,7 +221,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         // avoid a race condition that kept _buildPipView() showing after
         // returning from PiP (making the stop button unreachable).
         // Only reset orientation and resume camera stream.
-        if (mounted) setState(() => _pipIsLandscape = false);
         await _resumeCameraStream();
         break;
 
@@ -220,9 +233,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   Future<void> _enterPip() async {
     try {
-      // Use both MediaQuery and window physical size as cross-checks.
-      // On some devices MediaQuery.orientation lags during the inactive
-      // transition, so we compare window size as a reliable fallback.
       final mqOrientation =
           MediaQuery.of(context).orientation == Orientation.landscape;
       final windowSize =
@@ -230,11 +240,24 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       final windowIsLandscape = windowSize.width > windowSize.height;
       final isLandscape = mqOrientation || windowIsLandscape;
 
-      if (mounted) setState(() => _pipIsLandscape = isLandscape);
-      await _methodChannel.invokeMethod('enterPip', {
+      // Ask native to enter PiP and check if it actually succeeded.
+      // On MIUI, enterPictureInPictureMode() can return false without
+      // throwing — in that case we must NOT set isInPipProvider to true
+      // or the full-screen PiP layout will render at full size.
+      final success = await _methodChannel.invokeMethod<bool>('enterPip', {
         'isLandscape': isLandscape,
-      });
-    } catch (_) {}
+      }) ?? false;
+
+      // isInPipProvider is set to true ONLY by the native EventChannel
+      // callback (onPictureInPictureModeChanged) — never pre-set here.
+      // This ensures the PiP layout only shows when Android confirms
+      // the window is actually in PiP mode.
+      if (!success && mounted) {
+        debugPrint('>>> [PiP] enterPictureInPictureMode returned false');
+      }
+    } catch (e) {
+      debugPrint('>>> [PiP] _enterPip failed: $e');
+    }
   }
 
   Future<void> _syncRecordingState(bool recording) async {
@@ -410,9 +433,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     double penalty = 0.0;
     for (final a in alerts) {
       final level = (a['alert_level'] as int?) ?? 1;
-      if (level == 1)      penalty += 2.0;
-      else if (level == 2) penalty += 4.0;
-      else                 penalty += 8.0;
+      if (level == 1) {
+        penalty += 2.0;
+      } else if (level == 2) {
+        penalty += 4.0;
+      } else {
+        penalty += 8.0;
+      }
     }
     final safetyScore = (alertness - penalty).clamp(0.0, 100.0);
 
@@ -578,11 +605,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   @override
   Widget build(BuildContext context) {
-    final isInPip = ref.watch(isInPipProvider);
+    final isInPip     = ref.watch(isInPipProvider);
+    final isRecording = ref.watch(isRecordingProvider);
 
     // ── PIP MODE: ultra-minimal view ─────────────────────────────────────────
-    // Only camera feed + state badge + REC badge + optional alert bar/overlay.
-    // Nothing else renders in PIP.
     if (isInPip) return _buildPipView();
 
     // ── FULL SCREEN MODE ─────────────────────────────────────────────────────
@@ -593,33 +619,47 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final alertType = ref.watch(alertBannerTypeProvider);
     final isLevel3  = _alertLevel == 3;
 
-    return ColoredBox(
-      color: const Color(0xFF080E1A),
-      child: Stack(
-        children: [
-          // Main layout
-          isDesktop
-              ? _buildDesktopLayout()
-              : isLandscape
-                  ? _buildLandscapeLayout()
-                  : _buildPortraitLayout(),
+    // Intercept back button while recording — enter PiP instead of closing.
+    // This prevents the crash where back closes the activity while the camera
+    // stream is still active, killing Flutter's engine mid-frame.
+    return PopScope(
+      canPop: !isRecording,
+      onPopInvokedWithResult: (didPop, _) async {
+        // Only enter PiP if MonitorScreen itself is being popped —
+        // not a child route. isCurrent confirms we're the top route.
+        if (!didPop && isRecording) {
+          final isCurrentRoute = ModalRoute.of(context)?.isCurrent ?? false;
+          if (isCurrentRoute) await _enterPip();
+        }
+      },
+      child: ColoredBox(
+        color: const Color(0xFF080E1A),
+        child: Stack(
+          children: [
+            // Main layout
+            isDesktop
+                ? _buildDesktopLayout()
+                : isLandscape
+                    ? _buildLandscapeLayout()
+                    : _buildPortraitLayout(),
 
-          // L1 / L2 — slide-in banner
-          if (showAlert && !isLevel3)
-            Positioned(
-              top: 0, left: 0, right: 0,
-              child: SafeArea(
-                bottom: false,
-                child: _buildAlertBanner(alertType),
+            // L1 / L2 — slide-in banner
+            if (showAlert && !isLevel3)
+              Positioned(
+                top: 0, left: 0, right: 0,
+                child: SafeArea(
+                  bottom: false,
+                  child: _buildAlertBanner(alertType),
+                ),
               ),
-            ),
 
-          // L3 — full-screen blocking overlay
-          if (showAlert && isLevel3)
-            Positioned.fill(child: _buildWarningOverlay(alertType)),
-        ],
-      ),
-    );
+            // L3 — full-screen blocking overlay
+            if (showAlert && isLevel3)
+              Positioned.fill(child: _buildWarningOverlay(alertType)),
+          ],
+        ),
+      ), // end ColoredBox
+    ); // end PopScope
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -631,12 +671,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final showAlert   = ref.watch(showAlertBannerProvider);
     final alertType   = ref.watch(alertBannerTypeProvider);
     final isLevel3    = _alertLevel == 3;
-    // Use _pipIsLandscape which is pushed from native MainActivity via
-    // EventChannel whenever the phone rotates while in PiP.
-    // This is more reliable than MediaQuery inside a PiP window,
-    // because the app window size doesn't change when the phone rotates.
-    final previewSize = _getPreviewSize(_pipIsLandscape);
-
     // State badge color + label
     late Color stateColor;
     late String stateLabel;
@@ -664,21 +698,36 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           children: [
 
             // ── Camera feed ─────────────────────────────────────────────────
+            // Use LayoutBuilder to read the actual PiP window size at render time.
+            // This is more reliable than _pipIsLandscape (which depends on an
+            // async EventChannel message) — the window dimensions are always
+            // correct even mid-rotation, so the camera fills the window instantly.
             if (_cameraInitialized)
-              ClipRect(
-                child: FittedBox(
-                  fit: BoxFit.cover,
-                  child: SizedBox(
-                    width:  previewSize.width,
-                    height: previewSize.height,
-                    child: Transform(
-                      alignment: Alignment.center,
-                      transform: Matrix4.diagonal3Values(
-                          _mirrorCamera ? -1.0 : 1.0, 1.0, 1.0),
-                      child: CameraPreview(_cameraController!),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  // Determine orientation from actual window dimensions
+                  final windowIsLandscape =
+                      constraints.maxWidth > constraints.maxHeight;
+                  // Camera previewSize is always reported landscape by Android
+                  final ps = _cameraController!.value.previewSize!;
+                  final camW = windowIsLandscape ? ps.width  : ps.height;
+                  final camH = windowIsLandscape ? ps.height : ps.width;
+                  return ClipRect(
+                    child: FittedBox(
+                      fit: BoxFit.cover,
+                      child: SizedBox(
+                        width:  camW,
+                        height: camH,
+                        child: Transform(
+                          alignment: Alignment.center,
+                          transform: Matrix4.diagonal3Values(
+                              _mirrorCamera ? -1.0 : 1.0, 1.0, 1.0),
+                          child: CameraPreview(_cameraController!),
+                        ),
+                      ),
                     ),
-                  ),
-                ),
+                  );
+                },
               )
             else
               const Center(
@@ -942,13 +991,15 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             ),
           ),
 
-          // Bottom control bar
+          // Bottom control bar — ClipRect prevents overflow errors
+          // during PiP window resize transitions
           Positioned(
             bottom: fullscreen ? 20 : 14,
             left: 0, right: 0,
             child: Center(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(28),
+              child: ClipRect(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(28),
                 child: BackdropFilter(
                   filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
                   child: Container(
@@ -996,10 +1047,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                               : _startRecording(),
                         ),
                       ],
-                    ),
+                    )
                   ),
                 ),
-              ),
+                ), // end inner ClipRRect
+              ), // end ClipRect
             ),
           ),
         ],
