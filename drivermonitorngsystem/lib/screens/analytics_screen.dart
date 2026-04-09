@@ -490,11 +490,19 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     required double yInterval,
     required double labelFontSize,
   }) {
+    // FIX: Calculate interval for bottom labels to prevent overlapping
+    // If we have 30 days, show a label roughly every 5 days.
+    double bottomInterval = 1;
+    if (xLabels.length > 14) {
+      bottomInterval = (xLabels.length / 5).floorToDouble(); 
+    }
+
     return LineChart(
       LineChartData(
         clipData: const FlClipData.all(),
         gridData: FlGridData(
-          show: true, drawVerticalLine: false,
+          show: true, 
+          drawVerticalLine: false,
           horizontalInterval: yInterval,
           getDrawingHorizontalLine: (_) => FlLine(
             color: const Color(0xFF1e293b), strokeWidth: 1, dashArray: [3, 3],
@@ -503,16 +511,34 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
         titlesData: FlTitlesData(
           rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
           topTitles:   const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          bottomTitles: AxisTitles(sideTitles: SideTitles(
-            showTitles: true, reservedSize: 30, interval: 1,
-            getTitlesWidget: (value, meta) {
-              final idx = value.round();
-              if (idx < 0 || idx >= xLabels.length) return const SizedBox.shrink();
-              return Padding(padding: const EdgeInsets.only(top: 8.0),
-                child: Text(xLabels[idx],
-                  style: TextStyle(color: const Color(0xFF64748b), fontSize: labelFontSize - 1)));
-            },
-          )),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true, 
+              reservedSize: 30, 
+              // FIX: Use the calculated interval here
+              interval: bottomInterval, 
+              getTitlesWidget: (value, meta) {
+                final idx = value.round();
+                if (idx < 0 || idx >= xLabels.length) return const SizedBox.shrink();
+                
+                // Extra safety: only show the label if it lands exactly on the interval
+                if (idx % bottomInterval.toInt() != 0 && idx != xLabels.length - 1) {
+                   return const SizedBox.shrink();
+                }
+
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Text(
+                    xLabels[idx],
+                    style: TextStyle(
+                      color: const Color(0xFF64748b), 
+                      fontSize: labelFontSize - 1,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
           leftTitles: AxisTitles(sideTitles: SideTitles(
             showTitles: true, interval: yInterval, reservedSize: 40,
             getTitlesWidget: (value, meta) {
@@ -525,8 +551,8 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
         borderData: FlBorderData(show: false),
         minX: 0, maxX: maxX, minY: 0, maxY: maxY,
         lineBarsData: [
-          _lineBar(drowsySpots,     const Color(0xFFef4444)),
-          _lineBar(distractedSpots, const Color(0xFFfbbf24)),
+          _lineBar(drowsySpots, const Color(0xFFef4444), xLabels.length),
+          _lineBar(distractedSpots, const Color(0xFFfbbf24), xLabels.length),
         ],
         lineTouchData: LineTouchData(
           handleBuiltInTouches: true,
@@ -547,14 +573,39 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     );
   }
 
-  LineChartBarData _lineBar(List<FlSpot> spots, Color color) {
+   LineChartBarData _lineBar(List<FlSpot> spots, Color color, int dataCount) {
+    // If data is dense (e.g. 30 days), use smaller dots
+    final double dotRadius = dataCount > 15 ? 2.0 : 4.0;
+    final double strokeWidth = dataCount > 15 ? 2.0 : 3.0;
+
     return LineChartBarData(
-      spots: spots, isCurved: spots.length > 2, curveSmoothness: 0.3,
-      color: color, barWidth: 3, isStrokeCapRound: true,
-      dotData: FlDotData(show: true,
+      spots: spots, 
+      isCurved: true, 
+      curveSmoothness: 0.35,
+      color: color, 
+      barWidth: strokeWidth, 
+      isStrokeCapRound: true,
+      dotData: FlDotData(
+        show: true,
         getDotPainter: (_, _, _, _) => FlDotCirclePainter(
-          radius: 4, color: color, strokeWidth: 2, strokeColor: const Color(0xFF0f172a))),
-      belowBarData: BarAreaData(show: false),
+          radius: dotRadius, 
+          color: color, 
+          strokeWidth: 1, 
+          strokeColor: const Color(0xFF0f172a),
+        ),
+      ),
+      belowBarData: BarAreaData(
+        show: true,
+        // Adding a very light gradient helps distinguish the two lines
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            color.withOpacity(0.15),
+            color.withOpacity(0.0),
+          ],
+        ),
+      ),
     );
   }
 

@@ -10,13 +10,11 @@ class OnboardingScreen extends StatefulWidget {
 
   static const _prefKey = 'onboarding_complete';
 
-  /// Returns true if the user has already seen onboarding.
   static Future<bool> hasBeenSeen() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool(_prefKey) ?? false;
   }
 
-  /// Persist that onboarding is done.
   static Future<void> markSeen() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefKey, true);
@@ -68,8 +66,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
       vsync: this,
       duration: const Duration(milliseconds: 600),
     )..forward();
-    _fadeAnim =
-        CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
+    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
   }
 
   @override
@@ -101,15 +98,18 @@ class _OnboardingScreenState extends State<OnboardingScreen>
       opacity: _fadeAnim,
       child: Scaffold(
         backgroundColor: const Color(0xFF080E1A),
+        // Prevent the onboarding from being affected by keyboard or
+        // system UI insets that could cause layout shifts
+        resizeToAvoidBottomInset: false,
         body: Stack(
           children: [
-            // ── Background grid ─────────────────────────────────────────────
+            // Background grid
             CustomPaint(
               painter: _OBGridPainter(),
               size: MediaQuery.of(context).size,
             ),
 
-            // ── Ambient top glow ────────────────────────────────────────────
+            // Ambient top glow
             Positioned(
               top: -100,
               left: 0,
@@ -128,7 +128,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
               ),
             ),
 
-            // ── Content ─────────────────────────────────────────────────────
+            // Content
             SafeArea(
               child: Column(
                 children: [
@@ -139,7 +139,6 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        // Logo mark
                         Row(
                           children: [
                             Container(
@@ -149,8 +148,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                                 color: const Color(0xFF00D4FF).withOpacity(0.12),
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border.all(
-                                  color:
-                                      const Color(0xFF00D4FF).withOpacity(0.3),
+                                  color: const Color(0xFF00D4FF).withOpacity(0.3),
                                   width: 1,
                                 ),
                               ),
@@ -184,7 +182,6 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                             ),
                           ],
                         ),
-                        // Skip
                         if (_currentPage < _pages.length - 1)
                           GestureDetector(
                             onTap: _finish,
@@ -201,24 +198,23 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                     ),
                   ),
 
-                  // Page view
+                  // Page view — Expanded so it takes all remaining space
                   Expanded(
                     child: PageView.builder(
                       controller: _pageCtrl,
                       itemCount: _pages.length,
-                      onPageChanged: (i) =>
-                          setState(() => _currentPage = i),
+                      onPageChanged: (i) => setState(() => _currentPage = i),
                       itemBuilder: (_, i) =>
                           _OnboardingPageWidget(page: _pages[i]),
                     ),
                   ),
 
-                  // Dots + button
+                  // Dots + button — fixed at bottom, no overflow possible
                   Padding(
                     padding: const EdgeInsets.fromLTRB(32, 0, 32, 40),
                     child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        // Dot indicators
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: List.generate(
@@ -226,8 +222,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                             (i) => AnimatedContainer(
                               duration: const Duration(milliseconds: 280),
                               curve: Curves.easeInOutCubic,
-                              margin:
-                                  const EdgeInsets.symmetric(horizontal: 4),
+                              margin: const EdgeInsets.symmetric(horizontal: 4),
                               width: i == _currentPage ? 24 : 6,
                               height: 6,
                               decoration: BoxDecoration(
@@ -241,7 +236,6 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                         ),
                         const SizedBox(height: 28),
 
-                        // CTA button
                         SizedBox(
                           width: double.infinity,
                           height: 54,
@@ -308,7 +302,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
   }
 }
 
-// ── Individual page widget ─────────────────────────────────────────────────────
+// ── Individual page data ───────────────────────────────────────────────────────
 class _OnboardingPage {
   final IconData icon;
   final String title;
@@ -323,6 +317,7 @@ class _OnboardingPage {
   });
 }
 
+// ── Individual page widget ─────────────────────────────────────────────────────
 class _OnboardingPageWidget extends StatefulWidget {
   final _OnboardingPage page;
   const _OnboardingPageWidget({required this.page});
@@ -371,129 +366,137 @@ class _OnboardingPageWidgetState extends State<_OnboardingPageWidget>
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // Icon in a layered circle
-          ScaleTransition(
-            scale: _iconScale,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                // Outer glow ring
-                Container(
-                  width: 160,
-                  height: 160,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        const Color(0xFF00D4FF).withOpacity(0.10),
-                        Colors.transparent,
+    // Use LayoutBuilder so the icon size scales down on small/landscape screens
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxHeight < 500;
+        final iconOuter = isCompact ? 120.0 : 160.0;
+        final iconMid   = isCompact ?  90.0 : 120.0;
+        final iconInner = isCompact ?  60.0 :  80.0;
+        final iconSize  = isCompact ?  26.0 :  36.0;
+        final vGap1     = isCompact ?  24.0 :  48.0;
+        final vGap2     = isCompact ?   8.0 :  16.0;
+        final vGap3     = isCompact ?  12.0 :  24.0;
+
+        return SingleChildScrollView(
+          // Allow scrolling on very small screens so nothing overflows
+          physics: const NeverScrollableScrollPhysics(),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Icon
+                  ScaleTransition(
+                    scale: _iconScale,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Container(
+                          width: iconOuter, height: iconOuter,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: RadialGradient(colors: [
+                              const Color(0xFF00D4FF).withOpacity(0.10),
+                              Colors.transparent,
+                            ]),
+                          ),
+                        ),
+                        Container(
+                          width: iconMid, height: iconMid,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: const Color(0xFF0D1627),
+                            border: Border.all(
+                              color: const Color(0xFF00D4FF).withOpacity(0.18),
+                              width: 1.5,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFF00D4FF).withOpacity(0.08),
+                                blurRadius: 30, spreadRadius: 4,
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          width: iconInner, height: iconInner,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: const Color(0xFF00D4FF).withOpacity(0.12),
+                          ),
+                          child: Icon(widget.page.icon,
+                              size: iconSize, color: const Color(0xFF00D4FF)),
+                        ),
                       ],
                     ),
                   ),
-                ),
-                // Mid ring
-                Container(
-                  width: 120,
-                  height: 120,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: const Color(0xFF0D1627),
-                    border: Border.all(
-                      color: const Color(0xFF00D4FF).withOpacity(0.18),
-                      width: 1.5,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF00D4FF).withOpacity(0.08),
-                        blurRadius: 30,
-                        spreadRadius: 4,
+
+                  SizedBox(height: vGap1),
+
+                  // Title
+                  SlideTransition(
+                    position: _textSlide,
+                    child: FadeTransition(
+                      opacity: _textFade,
+                      child: Text(
+                        widget.page.title,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: isCompact ? 22 : 28,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.5,
+                          height: 1.1,
+                        ),
                       ),
-                    ],
+                    ),
                   ),
-                ),
-                // Inner icon circle
-                Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: const Color(0xFF00D4FF).withOpacity(0.12),
-                  ),
-                  child: Icon(
-                    widget.page.icon,
-                    size: 36,
-                    color: const Color(0xFF00D4FF),
-                  ),
-                ),
-              ],
-            ),
-          ),
 
-          const SizedBox(height: 48),
+                  SizedBox(height: vGap2),
 
-          // Title
-          SlideTransition(
-            position: _textSlide,
-            child: FadeTransition(
-              opacity: _textFade,
-              child: Text(
-                widget.page.title,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 28,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.5,
-                  height: 1.1,
-                ),
+                  // Subtitle
+                  SlideTransition(
+                    position: _textSlide,
+                    child: FadeTransition(
+                      opacity: _textFade,
+                      child: Text(
+                        widget.page.subtitle,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.50),
+                          fontSize: isCompact ? 13 : 15,
+                          height: 1.6,
+                          letterSpacing: 0.1,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  SizedBox(height: vGap3),
+
+                  // Accent line
+                  SlideTransition(
+                    position: _textSlide,
+                    child: FadeTransition(
+                      opacity: _textFade,
+                      child: Container(
+                        width: 40, height: 2,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF00D4FF).withOpacity(0.5),
+                          borderRadius: BorderRadius.circular(1),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-
-          const SizedBox(height: 16),
-
-          // Subtitle
-          SlideTransition(
-            position: _textSlide,
-            child: FadeTransition(
-              opacity: _textFade,
-              child: Text(
-                widget.page.subtitle,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.50),
-                  fontSize: 15,
-                  height: 1.6,
-                  letterSpacing: 0.1,
-                ),
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 24),
-
-          // Decorative cyan line accent
-          SlideTransition(
-            position: _textSlide,
-            child: FadeTransition(
-              opacity: _textFade,
-              child: Container(
-                width: 40,
-                height: 2,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF00D4FF).withOpacity(0.5),
-                  borderRadius: BorderRadius.circular(1),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

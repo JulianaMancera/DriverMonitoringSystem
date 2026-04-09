@@ -65,9 +65,40 @@ class MainActivity : FlutterActivity() {
         newConfig: Configuration
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
-        // Push to Flutter via EventChannel — more reliable than MethodChannel invoke
         runOnUiThread {
             pipEventSink?.success(isInPictureInPictureMode)
+        }
+    }
+
+    // Called whenever the device rotates — including while already in PiP.
+    // We update the PiP aspect ratio live so the window reshapes to match
+    // the new orientation (portrait ↔ landscape) without needing to re-enter PiP.
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            isInPictureInPictureMode && isRecording) {
+            try {
+                val isLandscape = newConfig.orientation ==
+                    Configuration.ORIENTATION_LANDSCAPE
+                // 1. Reshape the PiP window to match new orientation
+                val ratio = if (isLandscape) Rational(16, 9) else Rational(9, 16)
+                val params = PictureInPictureParams.Builder()
+                    .setAspectRatio(ratio)
+                    .build()
+                setPictureInPictureParams(params)
+                // 2. Tell Flutter the new orientation so the camera preview
+                //    SizedBox can swap its width/height dimensions to match.
+                //    We reuse the existing EventChannel with a string prefix
+                //    so Flutter can distinguish orientation events from pip events.
+                runOnUiThread {
+                    pipEventSink?.success(
+                        if (isLandscape) "orientation:landscape"
+                        else             "orientation:portrait"
+                    )
+                }
+            } catch (e: Exception) {
+                // Ignore — device may not support params update mid-PiP
+            }
         }
     }
 
