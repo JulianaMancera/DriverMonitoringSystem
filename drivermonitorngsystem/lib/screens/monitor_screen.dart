@@ -25,6 +25,25 @@ final alertBannerTypeProvider = StateProvider<String>((ref) => 'DROWSY');
 final clearGlassesProvider    = StateProvider<bool>((ref) => false);
 final isInPipProvider         = StateProvider<bool>((ref) => false);
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SUBCLASS PROVIDERS — UNCOMMENT WHEN MODEL OUTPUTS 11 CLASSES
+// These will hold the active subclass label within each main class.
+// Model output map (11 outputs):
+//   [0]        = neutral   → main class 'neutral'
+//   [1]        = yawning   → main class 'drowsy', subclass 'Yawning'
+//   [2]        = fatigue/head droop → main class 'drowsy', subclass 'Head Droop'
+//   [10/index] = eyes closed (PERCLOS) → main class 'drowsy', subclass 'Eyes Closed'
+//   [3]        = texting          → main class 'distracted', subclass 'Texting'
+//   [4]        = phone call       → main class 'distracted', subclass 'Phone Call'
+//   [5]        = adjusting radio  → main class 'distracted', subclass 'Radio'
+//   [6]        = drinking         → main class 'distracted', subclass 'Drinking'
+//   [7]        = reaching behind  → main class 'distracted', subclass 'Reaching'
+//   [8]        = hair/makeup      → main class 'distracted', subclass 'Hair/Makeup'
+//   [9]        = talking to passenger → main class 'distracted', subclass 'Talking'
+// ─────────────────────────────────────────────────────────────────────────────
+// final activeSubclassProvider = StateProvider<String?>((ref) => null);
+// ═══════════════════════════════════════════════════════════════════════════════
+
 //  MONITOR SCREEN 
 class MonitorScreen extends ConsumerStatefulWidget {
   const MonitorScreen({super.key});
@@ -521,6 +540,26 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       _alarmPlayer.stop();
       BantayDriveService.updateState('neutral');
     }
+
+    // ─── SUBCLASS TRACKING — UNCOMMENT WHEN MODEL OUTPUTS 11 CLASSES ────────
+    // When the final model is integrated, replace onModelOutput's `state`
+    // parameter with the specific subclass string (e.g. 'yawning', 'texting')
+    // and map it here to set activeSubclassProvider.
+    //
+    // Example mapping:
+    // const subclassToDrowsy = {'yawning', 'head_droop', 'eyes_closed'};
+    // const subclassToDistracted = {
+    //   'texting', 'phone_call', 'radio', 'drinking',
+    //   'reaching', 'hair_makeup', 'talking_passenger'
+    // };
+    // if (subclassToDrowsy.contains(state)) {
+    //   ref.read(activeSubclassProvider.notifier).state = state;
+    // } else if (subclassToDistracted.contains(state)) {
+    //   ref.read(activeSubclassProvider.notifier).state = state;
+    // } else {
+    //   ref.read(activeSubclassProvider.notifier).state = null;
+    // }
+    // ─────────────────────────────────────────────────────────────────────────
   }
 
   // ─── ALERTS ─────────────────────────────────────────────────────────────────
@@ -1511,6 +1550,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         IntrinsicHeight(
           child: Row(
             children: [
+              // ── Alertness gauge — not tappable (no subclasses) ──────────────
               Expanded(
                 child: _MetricGauge(
                   label: 'Alertness',
@@ -1520,23 +1560,66 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 ),
               ),
               const SizedBox(width: 12),
+
+              // ── Drowsiness gauge ─────────────────────────────────────────────
+              // Currently shows main class only.
+              // UNCOMMENT the GestureDetector wrapper below when model has
+              // 11 outputs — tapping will open the subclass breakdown modal.
               Expanded(
                 child: _MetricGauge(
                   label: 'Drowsiness',
                   value: drowsiness,
                   color: const Color(0xFFef4444),
                   icon:  Icons.visibility_off,
+                  // TODO (11-class model): add tappable: true
                 ),
               ),
+              // ── UNCOMMENT BELOW FOR 11-CLASS MODEL ──────────────────────────
+              // Expanded(
+              //   child: GestureDetector(
+              //     onTap: drowsiness > 0
+              //         ? () => _showSubclassModal(context, 'drowsy')
+              //         : null,
+              //     child: _MetricGauge(
+              //       label: 'Drowsiness',
+              //       value: drowsiness,
+              //       color: const Color(0xFFef4444),
+              //       icon:  Icons.visibility_off,
+              //       showTapHint: drowsiness > 0,
+              //     ),
+              //   ),
+              // ),
+              // ─────────────────────────────────────────────────────────────────
+
               const SizedBox(width: 12),
+
+              // ── Distraction gauge ────────────────────────────────────────────
+              // Same as above — plain gauge now, tappable after model upgrade.
               Expanded(
                 child: _MetricGauge(
                   label: 'Distraction',
                   value: distraction,
                   color: const Color(0xFFfbbf24),
                   icon:  Icons.visibility,
+                  // TODO (11-class model): add tappable: true
                 ),
               ),
+              // ── UNCOMMENT BELOW FOR 11-CLASS MODEL ──────────────────────────
+              // Expanded(
+              //   child: GestureDetector(
+              //     onTap: distraction > 0
+              //         ? () => _showSubclassModal(context, 'distracted')
+              //         : null,
+              //     child: _MetricGauge(
+              //       label: 'Distraction',
+              //       value: distraction,
+              //       color: const Color(0xFFfbbf24),
+              //       icon:  Icons.visibility,
+              //       showTapHint: distraction > 0,
+              //     ),
+              //   ),
+              // ),
+              // ─────────────────────────────────────────────────────────────────
             ],
           ),
         ),
@@ -1545,6 +1628,166 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       ],
     );
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SUBCLASS MODAL — UNCOMMENT ENTIRE METHOD WHEN MODEL OUTPUTS 11 CLASSES
+  // Shows a bottom sheet with the detected subclass breakdown when the user
+  // taps the Drowsiness or Distraction gauge while that state is active.
+  // ═══════════════════════════════════════════════════════════════════════════
+  //
+  // void _showSubclassModal(BuildContext context, String mainClass) {
+  //   final subclass = ref.read(activeSubclassProvider);
+  //
+  //   // Subclass display data: label + icon + color per subclass key
+  //   const subclassInfo = {
+  //     // DROWSY subclasses
+  //     'yawning':          ('Yawning',          Icons.sentiment_very_dissatisfied, Color(0xFFef4444)),
+  //     'head_droop':       ('Head Droop',        Icons.airline_seat_flat_angled,    Color(0xFFef4444)),
+  //     'eyes_closed':      ('Eyes Closed',       Icons.visibility_off,              Color(0xFFef4444)),
+  //     // DISTRACTED subclasses
+  //     'texting':          ('Texting',           Icons.textsms_outlined,            Color(0xFFfbbf24)),
+  //     'phone_call':       ('Phone Call',        Icons.phone_outlined,              Color(0xFFfbbf24)),
+  //     'radio':            ('Adjusting Radio',   Icons.radio_outlined,              Color(0xFFfbbf24)),
+  //     'drinking':         ('Drinking',          Icons.local_drink_outlined,        Color(0xFFfbbf24)),
+  //     'reaching':         ('Reaching Behind',   Icons.back_hand_outlined,          Color(0xFFfbbf24)),
+  //     'hair_makeup':      ('Hair / Makeup',     Icons.face_retouching_natural,     Color(0xFFfbbf24)),
+  //     'talking_passenger':('Talking to Passenger', Icons.record_voice_over_outlined, Color(0xFFfbbf24)),
+  //   };
+  //
+  //   final isDrowsy    = mainClass == 'drowsy';
+  //   final title       = isDrowsy ? 'Drowsiness Detected' : 'Distraction Detected';
+  //   final mainColor   = isDrowsy ? const Color(0xFFef4444) : const Color(0xFFfbbf24);
+  //   final info        = subclass != null ? subclassInfo[subclass] : null;
+  //
+  //   showModalBottomSheet(
+  //     context: context,
+  //     backgroundColor: Colors.transparent,
+  //     isScrollControlled: true,
+  //     builder: (_) => Container(
+  //       padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+  //       decoration: const BoxDecoration(
+  //         color: Color(0xFF0D1627),
+  //         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+  //       ),
+  //       child: Column(
+  //         mainAxisSize: MainAxisSize.min,
+  //         children: [
+  //           // Drag handle
+  //           Center(
+  //             child: Container(
+  //               width: 40, height: 4,
+  //               margin: const EdgeInsets.only(bottom: 16),
+  //               decoration: BoxDecoration(
+  //                 color: const Color(0xFF1E2D45),
+  //                 borderRadius: BorderRadius.circular(2),
+  //               ),
+  //             ),
+  //           ),
+  //
+  //           // Header
+  //           Row(children: [
+  //             Container(
+  //               padding: const EdgeInsets.all(10),
+  //               decoration: BoxDecoration(
+  //                 color: mainColor.withOpacity(0.12),
+  //                 borderRadius: BorderRadius.circular(12),
+  //               ),
+  //               child: Icon(
+  //                 isDrowsy ? Icons.bedtime_outlined : Icons.warning_amber_outlined,
+  //                 color: mainColor, size: 22,
+  //               ),
+  //             ),
+  //             const SizedBox(width: 12),
+  //             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+  //               Text(title, style: const TextStyle(
+  //                 color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700)),
+  //               Text('Tap the gauge while active to see details',
+  //                 style: const TextStyle(color: Color(0xFF6B7A99), fontSize: 11)),
+  //             ])),
+  //           ]),
+  //
+  //           const SizedBox(height: 20),
+  //
+  //           // Active subclass card
+  //           if (info != null) ...[
+  //             Container(
+  //               width: double.infinity,
+  //               padding: const EdgeInsets.all(16),
+  //               decoration: BoxDecoration(
+  //                 color: mainColor.withOpacity(0.08),
+  //                 borderRadius: BorderRadius.circular(14),
+  //                 border: Border.all(color: mainColor.withOpacity(0.25)),
+  //               ),
+  //               child: Row(children: [
+  //                 Icon(info.$2, color: mainColor, size: 28),
+  //                 const SizedBox(width: 14),
+  //                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+  //                   const Text('Currently Detected',
+  //                     style: TextStyle(color: Color(0xFF94a3b8), fontSize: 11)),
+  //                   const SizedBox(height: 4),
+  //                   Text(info.$1, style: TextStyle(
+  //                     color: mainColor, fontSize: 18, fontWeight: FontWeight.bold)),
+  //                 ]),
+  //               ]),
+  //             ),
+  //             const SizedBox(height: 16),
+  //           ],
+  //
+  //           // All subclasses list for this main class
+  //           Text(
+  //             isDrowsy ? 'Drowsiness Types' : 'Distraction Types',
+  //             style: const TextStyle(color: Color(0xFF6B7A99),
+  //               fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1.2),
+  //           ),
+  //           const SizedBox(height: 10),
+  //           ...subclassInfo.entries
+  //             .where((e) => isDrowsy
+  //               ? ['yawning','head_droop','eyes_closed'].contains(e.key)
+  //               : !['yawning','head_droop','eyes_closed'].contains(e.key))
+  //             .map((e) {
+  //               final isActive = subclass == e.key;
+  //               return Container(
+  //                 margin: const EdgeInsets.only(bottom: 8),
+  //                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+  //                 decoration: BoxDecoration(
+  //                   color: isActive
+  //                     ? mainColor.withOpacity(0.12)
+  //                     : const Color(0xFF1A2235),
+  //                   borderRadius: BorderRadius.circular(10),
+  //                   border: Border.all(
+  //                     color: isActive ? mainColor.withOpacity(0.4) : const Color(0xFF1E2D45)),
+  //                 ),
+  //                 child: Row(children: [
+  //                   Icon(e.value.$2,
+  //                     color: isActive ? mainColor : const Color(0xFF6B7A99), size: 18),
+  //                   const SizedBox(width: 12),
+  //                   Text(e.value.$1, style: TextStyle(
+  //                     color: isActive ? mainColor : const Color(0xFF94a3b8),
+  //                     fontSize: 14,
+  //                     fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+  //                   )),
+  //                   if (isActive) ...[
+  //                     const Spacer(),
+  //                     Container(
+  //                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+  //                       decoration: BoxDecoration(
+  //                         color: mainColor.withOpacity(0.15),
+  //                         borderRadius: BorderRadius.circular(6),
+  //                       ),
+  //                       child: Text('ACTIVE',
+  //                         style: TextStyle(color: mainColor,
+  //                           fontSize: 9, fontWeight: FontWeight.bold)),
+  //                     ),
+  //                   ],
+  //                 ]),
+  //               );
+  //             }),
+  //         ],
+  //       ),
+  //     ),
+  //   );
+  // }
+  // ═══════════════════════════════════════════════════════════════════════════
 
   // ════════════════════════════════════════════════════════════════════════════
   // SYSTEM LOG
