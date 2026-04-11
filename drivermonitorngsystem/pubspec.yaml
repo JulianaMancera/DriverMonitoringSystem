@@ -57,5 +57,7 @@ flutter:
     - assets/text_logo.png
     - assets/L1_L2_sound.mp3
     - assets/L3_critical_alert.wav
-    - assets/dms_hybridnet.tflite
     - assets/bantay_drive_logo.png
+    - assets/models/t01_spatial_float16.tflite
+    - assets/models/t02_temporal_float16.tflite
+    - assets/config/fusion_config.json
