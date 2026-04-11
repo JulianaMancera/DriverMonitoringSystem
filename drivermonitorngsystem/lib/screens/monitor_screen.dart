@@ -96,13 +96,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // Listen to native PIP state changes via EventChannel.
-    // onPictureInPictureModeChanged in MainActivity fires reliably.
     _pipSubscription = _eventChannel.receiveBroadcastStream().listen((dynamic v) {
       if (mounted) {
         final inPip = v as bool;
         ref.read(isInPipProvider.notifier).state = inPip;
-        // When returning from PIP, resume camera stream
         if (!inPip) {
           _resumeCameraStream();
         }
@@ -148,10 +145,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     switch (state) {
       case AppLifecycleState.inactive:
-        // When going inactive (home pressed), request PIP immediately.
-        // The EventChannel (onPictureInPictureModeChanged) will confirm
-        // and set isInPipProvider accurately. We do NOT pre-set it here
-        // because inactive fires for many non-PIP reasons (e.g. notification pull).
         if (isRecording) {
           await _enterPip();
           await BantayDriveService.startService(
@@ -160,13 +153,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         break;
 
       case AppLifecycleState.paused:
-        // Pause image stream to save resources while fully backgrounded.
         await _pauseCameraStream();
         break;
 
       case AppLifecycleState.resumed:
-        // Coming back to full screen — EventChannel already set isInPipProvider
-        // to false via onPictureInPictureModeChanged. Ensure it's cleared.
         if (mounted) ref.read(isInPipProvider.notifier).state = false;
         await _resumeCameraStream();
         break;
@@ -228,7 +218,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final prefs = PreferencesHelper.instance;
     _prefAlertSensitivity = await prefs.getAlertSensitivity();
     _prefAutoStart        = await prefs.getAutoStart();
-    // Initialize both services in parallel
     final success = await TfliteService.instance.initialize();
     if (mounted) setState(() => _modelLoaded = success);
     await _initCamera();
@@ -344,11 +333,22 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         : 0;
     final alertness = ref.read(alertnessPctProvider);
 
+    final alerts = await DatabaseHelper.instance
+        .getAlertsBySession(_currentSessionId!);
+    double penalty = 0.0;
+    for (final a in alerts) {
+      final level = (a['alert_level'] as int?) ?? 1;
+      if (level == 1)      penalty += 5.0;
+      else if (level == 2) penalty += 10.0;
+      else                 penalty += 20.0;
+    }
+    final safetyScore = (100.0 - penalty).clamp(0.0, 100.0);
+
     await DatabaseHelper.instance.endSession(
       sessionId:    _currentSessionId!,
       durationSec:  durationSec,
       alertnessAvg: alertness,
-      safetyScore:  alertness.clamp(0.0, 100.0),
+      safetyScore:  safetyScore,
     );
 
     _addLogSync('Session Ended', 'INFO');
@@ -493,7 +493,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
     setState(() {
       _systemLogs.add({'time': t, 'message': message, 'type': type});
-      // Cap in-memory log list to prevent unbounded growth on long drives
       if (_systemLogs.length > 100) _systemLogs.removeAt(0);
     });
     if (_currentSessionId != null) {
@@ -517,12 +516,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   Widget build(BuildContext context) {
     final isInPip = ref.watch(isInPipProvider);
 
-    // ── PIP MODE: ultra-minimal view ─────────────────────────────────────────
-    // Only camera feed + state badge + REC badge + optional alert bar/overlay.
-    // Nothing else renders in PIP.
     if (isInPip) return _buildPipView();
 
-    // ── FULL SCREEN MODE ─────────────────────────────────────────────────────
     final isDesktop   = Responsive.isDesktop(context);
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
@@ -534,14 +529,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       color: const Color(0xFF080E1A),
       child: Stack(
         children: [
-          // Main layout
           isDesktop
               ? _buildDesktopLayout()
               : isLandscape
                   ? _buildLandscapeLayout()
                   : _buildPortraitLayout(),
 
-          // L1 / L2 — slide-in banner
           if (showAlert && !isLevel3)
             Positioned(
               top: 0, left: 0, right: 0,
@@ -551,7 +544,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               ),
             ),
 
-          // L3 — full-screen blocking overlay
           if (showAlert && isLevel3)
             Positioned.fill(child: _buildWarningOverlay(alertType)),
         ],
@@ -560,7 +552,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   // ════════════════════════════════════════════════════════════════════════════
-  // PIP VIEW  — camera feed + minimal badges only
+  // PIP VIEW
   // ════════════════════════════════════════════════════════════════════════════
 
   Widget _buildPipView() {
@@ -568,12 +560,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final showAlert   = ref.watch(showAlertBannerProvider);
     final alertType   = ref.watch(alertBannerTypeProvider);
     final isLevel3    = _alertLevel == 3;
-    // Detect orientation so PiP camera fills correctly in both modes
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
     final previewSize = _getPreviewSize(isLandscape);
 
-    // State badge color + label
     late Color stateColor;
     late String stateLabel;
     switch (driverState) {
@@ -591,7 +581,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
 
     return GestureDetector(
-      // Only L3 is dismissible by tap in PIP
       onTap: isLevel3 ? _dismissAlert : null,
       child: ColoredBox(
         color: Colors.black,
@@ -599,7 +588,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           fit: StackFit.expand,
           children: [
 
-            // ── Camera feed ─────────────────────────────────────────────────
             if (_cameraInitialized)
               ClipRect(
                 child: FittedBox(
@@ -623,7 +611,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 ),
               ),
 
-            // ── L3 pulse overlay — tap to dismiss ───────────────────────────
             if (isLevel3)
               AnimatedBuilder(
                 animation: _warningAnimation,
@@ -633,9 +620,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                     onTap: _dismissAlert,
                     child: Container(
                       decoration: BoxDecoration(
-                        color:  Colors.red.withOpacity(0.18 + 0.12 * p),
+                        color:  Colors.red.withValues(alpha: 0.18 + 0.12 * p),
                         border: Border.all(
-                          color: Colors.red.withOpacity(0.5 + 0.4 * p),
+                          color: Colors.red.withValues(alpha: 0.5 + 0.4 * p),
                           width: 4,
                         ),
                       ),
@@ -645,12 +632,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                           children: [
                             Icon(Icons.warning_amber_rounded,
                                 color: Colors.red.shade300, size: 26),
-                            const SizedBox(height: 4),
+                            SizedBox(height: context.rs(4)),
                             Text(
                               alertType,
                               style: TextStyle(
                                 color:      Colors.red.shade200,
-                                fontSize:   10,
+                                fontSize: context.sp(10),
                                 fontWeight: FontWeight.bold,
                                 letterSpacing: 1.2,
                               ),
@@ -659,7 +646,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                             Text(
                               'Tap to dismiss',
                               style: TextStyle(
-                                color:    Colors.white.withOpacity(0.6),
+                                color:    Colors.white.withValues(alpha: 0.6),
                                 fontSize: 8,
                               ),
                             ),
@@ -671,7 +658,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 },
               ),
 
-            // ── REC badge — top-right only ───────────────────────────────────
             if (!isLevel3)
               Positioned(
                 top: 6, right: 6,
@@ -679,7 +665,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   padding: const EdgeInsets.symmetric(
                       horizontal: 5, vertical: 3),
                   decoration: BoxDecoration(
-                    color:        Colors.red.withOpacity(0.88),
+                    color:        Colors.red.withValues(alpha: 0.88),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Row(
@@ -705,9 +691,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 ),
               ),
 
-            // ── Bottom bar — state always shown, alert overrides color ────────
-            // Always visible (not just on alert) so the driver state is always
-            // readable. Alert state uses red; neutral uses a subtle dark bar.
             if (!isLevel3)
               Positioned(
                 bottom: 0, left: 0, right: 0,
@@ -715,8 +698,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   padding: const EdgeInsets.symmetric(
                       horizontal: 6, vertical: 5),
                   color: showAlert
-                      ? Colors.red.withOpacity(0.88)
-                      : stateColor.withOpacity(
+                      ? Colors.red.withValues(alpha: 0.88)
+                      : stateColor.withValues(alpha: 
                           driverState == 'neutral' ? 0.55 : 0.88),
                   child: Text(
                     showAlert
@@ -724,9 +707,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                             ? '⚠ Drowsy Detected'
                             : '⚠ Distraction Detected')
                         : stateLabel,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color:      Colors.white,
-                      fontSize:   9,
+                      fontSize: context.sp(9),
                       fontWeight: FontWeight.bold,
                       letterSpacing: 0.5,
                     ),
@@ -747,17 +730,17 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   Widget _buildPortraitLayout() {
     return SingleChildScrollView(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: EdgeInsets.symmetric(horizontal: MediaQuery.of(context).size.width * 0.04),
         child: Column(
           children: [
-            const SizedBox(height: 8),
+            SizedBox(height: MediaQuery.of(context).size.height * 0.01),
             _buildCameraWithOverlay(
               height:      MediaQuery.of(context).size.height * 0.40,
               isLandscape: false,
             ),
-            const SizedBox(height: 12),
+            SizedBox(height: MediaQuery.of(context).size.height * 0.015),
             _buildMetricsSidebar(isLandscape: false),
-            const SizedBox(height: 16),
+            SizedBox(height: context.rs(16)),
           ],
         ),
       ),
@@ -801,7 +784,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // CAMERA WITH OVERLAY (full-screen mode)
+  // CAMERA WITH OVERLAY
   Widget _buildCameraWithOverlay({
     double? height,
     required bool isLandscape,
@@ -817,8 +800,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         child: SizedBox(
           width:  previewSize.width,
           height: previewSize.height,
-          // Mirror horizontally for right-side dashcam mount so the
-          // preview reads naturally (driver appears on the left of frame).
           child: Transform(
             alignment: Alignment.center,
             transform: Matrix4.diagonal3Values(
@@ -851,7 +832,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 color: (_modelLoaded
                         ? const Color(0xFF10b981)
                         : const Color(0xFFfbbf24))
-                    .withOpacity(0.88),
+                    .withValues(alpha: 0.88),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -863,12 +844,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       color: Colors.white, shape: BoxShape.circle,
                     ),
                   ),
-                  const SizedBox(width: 5),
+                  SizedBox(width: context.rp(5)),
                   Text(
                     _modelLoaded ? 'AI ON' : 'DEMO',
-                    style: const TextStyle(
+                    style: TextStyle(
                       color:      Colors.white,
-                      fontSize:   9,
+                      fontSize: context.sp(9),
                       fontWeight: FontWeight.bold,
                       letterSpacing: 0.8,
                     ),
@@ -878,10 +859,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             ),
           ),
 
-          // Bottom control pill.
-          // LayoutBuilder hides the pill when width < 200px (PiP transition
-          // frames) to prevent the yellow-black overflow stripe. Once the
-          // window is back to full size it renders normally with full tappability.
+          // Bottom control pill
           Positioned(
             bottom: fullscreen ? 20 : 14,
             left: 0, right: 0,
@@ -897,10 +875,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                         padding: const EdgeInsets.symmetric(
                             horizontal: 6, vertical: 6),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF0f172a).withOpacity(0.65),
+                          color: const Color(0xFF0f172a).withValues(alpha: 0.65),
                           borderRadius: BorderRadius.circular(28),
                           border: Border.all(
-                              color: Colors.white.withOpacity(0.08), width: 1),
+                              color: Colors.white.withValues(alpha: 0.08), width: 1),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -924,7 +902,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                             Container(
                               width: 1, height: 28,
                               margin: const EdgeInsets.symmetric(horizontal: 6),
-                              color: Colors.white.withOpacity(0.15),
+                              color: Colors.white.withValues(alpha: 0.15),
                             ),
                             _CameraOverlayButton(
                               icon: isRecording
@@ -968,7 +946,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               blurRadius:  16),
         ],
       ),
-      padding: const EdgeInsets.all(6),
+      padding: EdgeInsets.all(context.rp(6)),
       child: inner,
     );
   }
@@ -983,14 +961,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             children: [
               const Icon(Icons.videocam_off,
                   color: Color(0xFF64748b), size: 48),
-              const SizedBox(height: 12),
+              SizedBox(height: context.rs(12)),
               Text(
                 _cameraError!,
-                style: const TextStyle(
-                    color: Color(0xFF64748b), fontSize: 13),
+                style: TextStyle(
+                    color: const Color(0xFF64748b), fontSize: context.sp(13)),
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 12),
+              SizedBox(height: context.rs(12)),
               TextButton(
                 onPressed: _initCamera,
                 child: const Text('Retry',
@@ -1003,15 +981,15 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
     return Container(
       color: Colors.black,
-      child: const Center(
+      child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircularProgressIndicator(color: Color(0xFF22d3ee)),
-            SizedBox(height: 12),
+            const CircularProgressIndicator(color: Color(0xFF22d3ee)),
+            SizedBox(height: context.rs(12)),
             Text('Initializing camera...',
-                style:
-                    TextStyle(color: Color(0xFF64748b), fontSize: 13)),
+                style: TextStyle(
+                    color: const Color(0xFF64748b), fontSize: context.sp(13))),
           ],
         ),
       ),
@@ -1027,7 +1005,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             end:   Alignment.bottomCenter,
             colors: [
               Colors.transparent,
-              const Color(0xFF0f172a).withOpacity(0.5),
+              const Color(0xFF0f172a).withValues(alpha: 0.5),
             ],
           ),
         ),
@@ -1039,9 +1017,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     return Positioned(
       top: 12, right: 12,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding: EdgeInsets.symmetric(horizontal: context.rp(10), vertical: context.rs(4)),
         decoration: BoxDecoration(
-          color:        Colors.red.withOpacity(0.85),
+          color:        Colors.red.withValues(alpha: 0.85),
           borderRadius: BorderRadius.circular(20),
         ),
         child: Row(
@@ -1053,12 +1031,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 color: Colors.white, shape: BoxShape.circle,
               ),
             ),
-            const SizedBox(width: 6),
-            const Text(
+            SizedBox(width: context.rp(6)),
+            Text(
               'REC',
               style: TextStyle(
                 color:      Colors.white,
-                fontSize:   11,
+                fontSize: context.sp(11),
                 fontWeight: FontWeight.bold,
                 letterSpacing: 1.2,
               ),
@@ -1093,22 +1071,22 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               final pulse = (_warningAnimation.value - 0.8) / 0.2;
               return Container(
                 width: double.infinity,
-                margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                margin: EdgeInsets.fromLTRB(context.rp(12), context.rs(8), context.rp(12), context.rs(4)),
                 decoration: BoxDecoration(
-                  color:        const Color(0xFF1C1C1E).withOpacity(0.96),
+                  color:        const Color(0xFF1C1C1E).withValues(alpha: 0.96),
                   borderRadius: BorderRadius.circular(18),
                   border: Border.all(
-                    color: Colors.red.withOpacity(0.25 + 0.35 * pulse),
+                    color: Colors.red.withValues(alpha: 0.25 + 0.35 * pulse),
                     width: 1.2,
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color:      Colors.black.withOpacity(0.55),
+                      color:      Colors.black.withValues(alpha: 0.55),
                       blurRadius: 28,
                       offset:     const Offset(0, 8),
                     ),
                     BoxShadow(
-                      color:       Colors.red.withOpacity(0.12 + 0.18 * pulse),
+                      color:       Colors.red.withValues(alpha: 0.12 + 0.18 * pulse),
                       blurRadius:  20,
                       spreadRadius: 1,
                       offset:      const Offset(0, 2),
@@ -1136,7 +1114,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                                   boxShadow: [
                                     BoxShadow(
                                       color: Colors.red
-                                          .withOpacity(0.3 + 0.4 * p),
+                                          .withValues(alpha: 0.3 + 0.4 * p),
                                       blurRadius:   14,
                                       spreadRadius: 1,
                                     ),
@@ -1148,7 +1126,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                               );
                             },
                           ),
-                          const SizedBox(width: 12),
+                          SizedBox(width: context.rp(12)),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1161,8 +1139,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                                     Text(
                                       'BANTAY DRIVE',
                                       style: TextStyle(
-                                        color: Colors.white.withOpacity(0.45),
-                                        fontSize:      10,
+                                        color: Colors.white.withValues(alpha: 0.45),
+                                        fontSize: context.sp(10),
                                         fontWeight:    FontWeight.w600,
                                         letterSpacing: 0.8,
                                       ),
@@ -1170,8 +1148,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                                     Text(
                                       'now',
                                       style: TextStyle(
-                                        color: Colors.white.withOpacity(0.35),
-                                        fontSize: 11,
+                                        color: Colors.white.withValues(alpha: 0.35),
+                                        fontSize: context.sp(11),
                                       ),
                                     ),
                                   ],
@@ -1181,9 +1159,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                                   isDrowsy
                                       ? 'Drowsiness Detected'
                                       : 'Distraction Detected',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     color:      Colors.white,
-                                    fontSize:   15,
+                                    fontSize: context.sp(15),
                                     fontWeight: FontWeight.w700,
                                     letterSpacing: 0.2,
                                   ),
@@ -1194,23 +1172,23 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                                       ? 'Stay alert - tap to dismiss'
                                       : 'Focus on the road - tap to dismiss',
                                   style: TextStyle(
-                                    color:    Colors.white.withOpacity(0.5),
-                                    fontSize: 12,
+                                    color:    Colors.white.withValues(alpha: 0.5),
+                                    fontSize: context.sp(12),
                                   ),
                                 ),
                               ],
                             ),
                           ),
-                          const SizedBox(width: 8),
+                          SizedBox(width: context.rp(8)),
                           Container(
                             width: 22, height: 22,
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.1),
+                              color: Colors.white.withValues(alpha: 0.1),
                               shape: BoxShape.circle,
                             ),
                             child: Icon(
                               Icons.close_rounded,
-                              color:   Colors.white.withOpacity(0.4),
+                              color:   Colors.white.withValues(alpha: 0.4),
                               size:    14,
                             ),
                           ),
@@ -1247,12 +1225,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 BackdropFilter(
                   filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
                   child: Container(
-                      color: Colors.red.withOpacity(0.15)),
+                      color: Colors.red.withValues(alpha: 0.15)),
                 ),
                 Container(
                   decoration: BoxDecoration(
                     border: Border.all(
-                      color: Colors.red.withOpacity(0.3 + 0.5 * p),
+                      color: Colors.red.withValues(alpha: 0.3 + 0.5 * p),
                       width: 5,
                     ),
                     gradient: RadialGradient(
@@ -1260,7 +1238,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       radius: 1.2,
                       colors: [
                         Colors.transparent,
-                        Colors.red.withOpacity(0.06 + 0.10 * p),
+                        Colors.red.withValues(alpha: 0.06 + 0.10 * p),
                       ],
                     ),
                   ),
@@ -1272,16 +1250,16 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       Container(
                         width: 88, height: 88,
                         decoration: BoxDecoration(
-                          color:  Colors.red.shade900.withOpacity(0.85),
+                          color:  Colors.red.shade900.withValues(alpha: 0.85),
                           shape:  BoxShape.circle,
                           border: Border.all(
-                            color: Colors.red.shade400.withOpacity(0.6),
+                            color: Colors.red.shade400.withValues(alpha: 0.6),
                             width: 2,
                           ),
                           boxShadow: [
                             BoxShadow(
                               color: Colors.red
-                                  .withOpacity(0.2 + 0.2 * p),
+                                  .withValues(alpha: 0.2 + 0.2 * p),
                               blurRadius:   30,
                               spreadRadius: 4,
                             ),
@@ -1290,11 +1268,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                         child: Icon(Icons.warning_amber_rounded,
                             size: 48, color: Colors.red.shade300),
                       ),
-                      const SizedBox(height: 20),
+                      SizedBox(height: context.rs(20)),
                       Text(
                         isDrowsy ? 'DROWSINESS' : 'DISTRACTION',
                         style: TextStyle(
-                          fontSize:      28,
+                          fontSize: context.sp(28),
                           fontWeight:    FontWeight.w900,
                           color:         Colors.red.shade300,
                           letterSpacing: 4,
@@ -1303,34 +1281,34 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       Text(
                         'DETECTED',
                         style: TextStyle(
-                          fontSize:      18,
+                          fontSize: context.sp(18),
                           fontWeight:    FontWeight.w700,
-                          color:         Colors.red.shade400.withOpacity(0.8),
+                          color:         Colors.red.shade400.withValues(alpha: 0.8),
                           letterSpacing: 6,
                         ),
                       ),
-                      const SizedBox(height: 28),
+                      SizedBox(height: context.rs(28)),
                       Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 24, vertical: 10),
                         decoration: BoxDecoration(
-                          color:        Colors.white.withOpacity(0.08),
+                          color:        Colors.white.withValues(alpha: 0.08),
                           borderRadius: BorderRadius.circular(30),
                           border: Border.all(
-                              color: Colors.white.withOpacity(0.15)),
+                              color: Colors.white.withValues(alpha: 0.15)),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(Icons.touch_app_rounded,
                                 size:  16,
-                                color: Colors.white.withOpacity(0.6)),
-                            const SizedBox(width: 8),
+                                color: Colors.white.withValues(alpha: 0.6)),
+                            SizedBox(width: context.rp(8)),
                             Text(
                               'Tap anywhere to dismiss',
                               style: TextStyle(
-                                fontSize:      13,
-                                color:         Colors.white.withOpacity(0.6),
+                                fontSize: context.sp(13),
+                                color:         Colors.white.withValues(alpha: 0.6),
                                 fontWeight:    FontWeight.w500,
                                 letterSpacing: 0.3,
                               ),
@@ -1348,11 +1326,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                     padding: const EdgeInsets.symmetric(
                         horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
-                      color:        Colors.red.shade800.withOpacity(0.9),
+                      color:        Colors.red.shade800.withValues(alpha: 0.9),
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
                         BoxShadow(
-                          color:      Colors.red.withOpacity(0.4 * pulse),
+                          color:      Colors.red.withValues(alpha: 0.4 * pulse),
                           blurRadius: 10,
                         ),
                       ],
@@ -1367,12 +1345,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                             shape: BoxShape.circle,
                           ),
                         ),
-                        const SizedBox(width: 6),
+                        SizedBox(width: context.rp(6)),
                         Text(
                           'ALARM ACTIVE',
                           style: TextStyle(
                             color:         Colors.red.shade100,
-                            fontSize:      10,
+                            fontSize: context.sp(10),
                             fontWeight:    FontWeight.bold,
                             letterSpacing: 1.0,
                           ),
@@ -1411,7 +1389,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   icon:  Icons.bolt,
                 ),
               ),
-              const SizedBox(width: 12),
+              SizedBox(width: context.rp(12)),
               Expanded(
                 child: GestureDetector(
                   onTap: drowsiness > 0
@@ -1426,7 +1404,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
+              SizedBox(width: context.rp(12)),
               Expanded(
                 child: GestureDetector(
                   onTap: distraction > 0
@@ -1444,7 +1422,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             ],
           ),
         ),
-        const SizedBox(height: 16),
+        SizedBox(height: context.rs(16)),
         _buildSystemLog(),
       ],
     );
@@ -1478,7 +1456,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (_) => Container(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+        padding: EdgeInsets.fromLTRB(context.rp(20), context.rs(12), context.rp(20), context.rs(32)),
         decoration: const BoxDecoration(
           color: Color(0xFF0D1627),
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -1489,7 +1467,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             Center(
               child: Container(
                 width: 40, height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
+                margin: EdgeInsets.only(bottom: context.rs(16)),
                 decoration: BoxDecoration(
                   color: const Color(0xFF1E2D45),
                   borderRadius: BorderRadius.circular(2),
@@ -1498,9 +1476,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             ),
             Row(children: [
               Container(
-                padding: const EdgeInsets.all(10),
+                padding: EdgeInsets.all(context.rp(10)),
                 decoration: BoxDecoration(
-                  color: mainColor.withOpacity(0.12),
+                  color: mainColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
@@ -1508,47 +1486,47 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   color: mainColor, size: 22,
                 ),
               ),
-              const SizedBox(width: 12),
+              SizedBox(width: context.rp(12)),
               Expanded(child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: const TextStyle(
-                    color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700)),
-                  const Text('Tap gauge while active to see details',
-                    style: TextStyle(color: Color(0xFF6B7A99), fontSize: 11)),
+                  Text(title, style: TextStyle(
+                    color: Colors.white, fontSize: context.sp(17), fontWeight: FontWeight.w700)),
+                  Text('Tap gauge while active to see details',
+                    style: TextStyle(color: const Color(0xFF6B7A99), fontSize: context.sp(11))),
                 ],
               )),
             ]),
-            const SizedBox(height: 20),
+            SizedBox(height: context.rs(20)),
             if (info != null) ...[
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(16),
+                padding: EdgeInsets.all(context.rp(16)),
                 decoration: BoxDecoration(
-                  color: mainColor.withOpacity(0.08),
+                  color: mainColor.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: mainColor.withOpacity(0.25)),
+                  border: Border.all(color: mainColor.withValues(alpha: 0.25)),
                 ),
                 child: Row(children: [
                   Icon(info.$2, color: mainColor, size: 28),
-                  const SizedBox(width: 14),
+                  SizedBox(width: context.rp(14)),
                   Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    const Text('Currently Detected',
-                      style: TextStyle(color: Color(0xFF94a3b8), fontSize: 11)),
-                    const SizedBox(height: 4),
+                    Text('Currently Detected',
+                      style: TextStyle(color: const Color(0xFF94a3b8), fontSize: context.sp(11))),
+                    SizedBox(height: context.rs(4)),
                     Text(info.$1, style: TextStyle(
-                      color: mainColor, fontSize: 18, fontWeight: FontWeight.bold)),
+                      color: mainColor, fontSize: context.sp(18), fontWeight: FontWeight.bold)),
                   ]),
                 ]),
               ),
-              const SizedBox(height: 16),
+              SizedBox(height: context.rs(16)),
             ],
             Text(
               isDrowsy ? 'DROWSINESS TYPES' : 'DISTRACTION TYPES',
-              style: const TextStyle(color: Color(0xFF6B7A99),
-                fontSize: 10, fontWeight: FontWeight.w600, letterSpacing: 1.2),
+              style: TextStyle(color: const Color(0xFF6B7A99),
+                fontSize: context.sp(10), fontWeight: FontWeight.w600, letterSpacing: 1.2),
             ),
-            const SizedBox(height: 10),
+            SizedBox(height: context.rs(10)),
             ...subclassInfo.entries
               .where((e) => isDrowsy
                 ? ['yawning','fatigue_head_droop','eyes_closed_perclos'].contains(e.key)
@@ -1556,32 +1534,32 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               .map((e) {
                 final isActive = subclass == e.key;
                 return Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  margin: EdgeInsets.only(bottom: context.rs(8)),
+                  padding: EdgeInsets.symmetric(horizontal: context.rp(14), vertical: context.rs(10)),
                   decoration: BoxDecoration(
-                    color: isActive ? mainColor.withOpacity(0.12) : const Color(0xFF1A2235),
+                    color: isActive ? mainColor.withValues(alpha: 0.12) : const Color(0xFF1A2235),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                      color: isActive ? mainColor.withOpacity(0.4) : const Color(0xFF1E2D45)),
+                      color: isActive ? mainColor.withValues(alpha: 0.4) : const Color(0xFF1E2D45)),
                   ),
                   child: Row(children: [
                     Icon(e.value.$2,
                       color: isActive ? mainColor : const Color(0xFF6B7A99), size: 18),
-                    const SizedBox(width: 12),
+                    SizedBox(width: context.rp(12)),
                     Expanded(child: Text(e.value.$1, style: TextStyle(
                       color: isActive ? mainColor : const Color(0xFF94a3b8),
-                      fontSize: 14,
+                      fontSize: context.sp(14),
                       fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
                     ))),
                     if (isActive) Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      padding: EdgeInsets.symmetric(horizontal: context.rp(8), vertical: context.rs(3)),
                       decoration: BoxDecoration(
-                        color: mainColor.withOpacity(0.15),
+                        color: mainColor.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text('ACTIVE',
                         style: TextStyle(color: mainColor,
-                          fontSize: 9, fontWeight: FontWeight.bold)),
+                          fontSize: context.sp(9), fontWeight: FontWeight.bold)),
                     ),
                   ]),
                 );
@@ -1604,44 +1582,44 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color:      const Color(0xFF0b1120).withOpacity(0.5),
+            color:      const Color(0xFF0b1120).withValues(alpha: 0.5),
             offset:     const Offset(4, 4),
             blurRadius: 8,
           ),
           BoxShadow(
-            color:      const Color(0xFF1e293b).withOpacity(0.5),
+            color:      const Color(0xFF1e293b).withValues(alpha: 0.5),
             offset:     const Offset(-4, -4),
             blurRadius: 8,
           ),
         ],
       ),
-      padding: const EdgeInsets.all(14),
+      padding: EdgeInsets.all(context.rp(14)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize:        MainAxisSize.min,
         children: [
-          const Text(
+          Text(
             'SYSTEM LOG',
             style: TextStyle(
-              color:         Color(0xFF94a3b8),
-              fontSize:      11,
+              color:         const Color(0xFF94a3b8),
+              fontSize: context.sp(11),
               fontWeight:    FontWeight.w600,
               letterSpacing: 1.5,
             ),
           ),
-          const SizedBox(height: 10),
+          SizedBox(height: context.rs(10)),
           if (_systemLogs.isEmpty)
-            const Align(
+            Align(
               alignment: Alignment.topCenter,
               child: Text(
                 'No logs yet. Start recording to begin.',
-                style:     TextStyle(color: Colors.white24, fontSize: 12),
+                style: TextStyle(color: Colors.white24, fontSize: context.sp(12)),
                 textAlign: TextAlign.center,
               ),
             )
           else
             SizedBox(
-              height: 120,
+              height: MediaQuery.of(context).size.height * 0.14,
               child: ListView.builder(
                 physics:   const BouncingScrollPhysics(),
                 itemCount: _systemLogs.length > 20 ? 20 : _systemLogs.length,
@@ -1660,25 +1638,25 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       textColor = const Color(0xFF94a3b8);
                   }
                   return Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
+                    padding: EdgeInsets.only(bottom: context.rs(6)),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           '[${log['time']}]',
-                          style: const TextStyle(
-                            color:      Color(0xFF475569),
-                            fontSize:   10,
+                          style: TextStyle(
+                            color:      const Color(0xFF475569),
+                            fontSize: context.sp(10),
                             fontFamily: 'monospace',
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        SizedBox(width: context.rp(8)),
                         Expanded(
                           child: Text(
                             log['message'],
                             style: TextStyle(
                               color:      textColor,
-                              fontSize:   10,
+                              fontSize: context.sp(10),
                               fontFamily: 'monospace',
                             ),
                           ),
@@ -1715,6 +1693,9 @@ class _MetricGauge extends StatelessWidget {
   Widget build(BuildContext context) {
     final clamped = value.clamp(0.0, 100.0);
     final isMaxed = clamped >= 100.0;
+    final gaugeSize = (MediaQuery.of(context).size.width * 0.20).clamp(60.0, 100.0);
+    final fontSize  = (MediaQuery.of(context).size.width * 0.055).clamp(16.0, 24.0);
+    final pctSize   = (MediaQuery.of(context).size.width * 0.025).clamp(8.0, 12.0);
 
     return Container(
       decoration: BoxDecoration(
@@ -1723,7 +1704,7 @@ class _MetricGauge extends StatelessWidget {
         boxShadow: isMaxed
             ? [
                 BoxShadow(
-                    color:       color.withOpacity(0.30),
+                    color:       color.withValues(alpha: 0.30),
                     blurRadius:  16,
                     spreadRadius: 2),
                 const BoxShadow(
@@ -1750,36 +1731,36 @@ class _MetricGauge extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(icon, size: 13, color: color),
-              const SizedBox(width: 4),
+              SizedBox(width: context.rp(4)),
               Text(
                 label,
-                style: const TextStyle(
-                  color:      Color(0xFF94a3b8),
-                  fontSize:   11,
+                style: TextStyle(
+                  color:      const Color(0xFF94a3b8),
+                  fontSize: context.sp(11),
                   fontWeight: FontWeight.w500,
                 ),
               ),
               if (showTapHint) ...[
-                const SizedBox(width: 4),
+                SizedBox(width: context.rp(4)),
                 Icon(Icons.touch_app_rounded, size: 10,
-                    color: color.withOpacity(0.6)),
+                    color: color.withValues(alpha: 0.6)),
               ],
             ],
           ),
-          const SizedBox(height: 12),
+          SizedBox(height: context.rs(12)),
           SizedBox(
-            width: 80, height: 80,
+            width: gaugeSize, height: gaugeSize,
             child: Stack(
               alignment: Alignment.center,
               children: [
                 SizedBox(
-                  width: 80, height: 80,
+                  width: gaugeSize, height: gaugeSize,
                   child: CircularProgressIndicator(
                     value:           1.0,
                     strokeWidth:     5,
                     backgroundColor: Colors.transparent,
                     valueColor:      AlwaysStoppedAnimation<Color>(
-                        color.withOpacity(0.18)),
+                        color.withValues(alpha: 0.18)),
                     strokeCap: StrokeCap.round,
                   ),
                 ),
@@ -1794,7 +1775,7 @@ class _MetricGauge extends StatelessWidget {
                         '${v.toInt()}',
                         style: TextStyle(
                           color:      color,
-                          fontSize:   22,
+                          fontSize:   fontSize,
                           fontWeight: FontWeight.bold,
                           fontFamily: 'monospace',
                         ),
@@ -1802,8 +1783,8 @@ class _MetricGauge extends StatelessWidget {
                       Text(
                         '%',
                         style: TextStyle(
-                          color:      color.withOpacity(0.7),
-                          fontSize:   10,
+                          color:      color.withValues(alpha: 0.7),
+                          fontSize:   pctSize,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -1841,10 +1822,10 @@ class _CameraOverlayButton extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding:  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        padding:  EdgeInsets.symmetric(horizontal: context.rp(14), vertical: context.rs(8)),
         decoration: BoxDecoration(
           color:        isActive
-              ? activeColor.withOpacity(0.18)
+              ? activeColor.withValues(alpha: 0.18)
               : Colors.transparent,
           borderRadius: BorderRadius.circular(22),
         ),
@@ -1854,12 +1835,12 @@ class _CameraOverlayButton extends StatelessWidget {
             Icon(icon,
                 size:  18,
                 color: isActive ? activeColor : Colors.white60),
-            const SizedBox(width: 6),
+            SizedBox(width: context.rp(6)),
             Text(
               label,
               style: TextStyle(
                 color:      isActive ? activeColor : Colors.white60,
-                fontSize:   12,
+                fontSize: context.sp(12),
                 fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
               ),
             ),

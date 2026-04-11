@@ -63,7 +63,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 
   Widget _buildContent(BuildContext context, Map<String, dynamic> data) {
-    final safetyScore   = data['safety_score']        as double? ?? 0.0;
+    // Default 100.0: a driver with no sessions yet has a perfect score
+    final safetyScore   = data['safety_score']        as double? ?? 100.0;
     final totalDriveHrs = data['total_drive_hrs']      as double? ?? 0.0;
     final alertsLast24h = data['alerts_last_24h']      as int?    ?? 0;
     final safetyStreak  = data['safety_streak_days']   as int?    ?? 0;
@@ -83,9 +84,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       onRefresh: () async => ref.invalidate(dashboardProvider),
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.all(
-          Responsive.responsivePadding(context, mobile: 16, tablet: 24, desktop: 32),
-        ),
+        padding: EdgeInsets.symmetric(horizontal: context.hPad, vertical: context.rs(10)),
         child: Column(
           children: [
             LayoutBuilder(
@@ -122,7 +121,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             ),
             SizedBox(height: Responsive.responsiveSpacing(context, mobile: 24, tablet: 28, desktop: 32)),
             _buildAlertnessHistory(context, dailyScores),
-            SizedBox(height: isMobile ? 16 : 32),
+            SizedBox(height: MediaQuery.of(context).size.height * 0.02),
           ],
         ),
       ),
@@ -188,7 +187,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 
   Widget _buildCircularScoreIndicator(BuildContext context, double score, String label) {
-    final outerSize    = Responsive.responsiveValue(context, mobile: 150.0, tablet: 170.0, desktop: 195.0);
+    final outerSize    = (context.sw * 0.42).clamp(140.0, 220.0);
     final progressSize = Responsive.responsiveValue(context, mobile: 138.0, tablet: 156.0, desktop: 179.0);
     final innerSize    = Responsive.responsiveValue(context, mobile: 115.0, tablet: 130.0, desktop: 147.0);
 
@@ -323,7 +322,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     }
 
     final Color lineColor = isPlaceholder
-        ? const Color(0xFF22d3ee).withOpacity(0.5)
+        ? const Color(0xFF22d3ee).withValues(alpha: 0.5)
         : const Color(0xFF22d3ee);
 
     return Container(
@@ -337,7 +336,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           BoxShadow(color: Color(0xFF1e293b), offset: Offset(-6, -6), blurRadius: 16),
         ],
       ),
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+      padding: EdgeInsets.fromLTRB(context.hPad, context.rs(16), context.hPad, context.rs(12)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -346,12 +345,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const Expanded(
+              Expanded(
                 child: Text(
                   'Safety Score History',
                   style: TextStyle(
-                    color:      Color(0xFFe2e8f0),
-                    fontSize:   19,
+                    color:      const Color(0xFFe2e8f0),
+                    fontSize:   context.sp(17),
                     fontWeight: FontWeight.bold,
                     letterSpacing: 0.1,
                   ),
@@ -360,26 +359,26 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               // Session pill — teal border + teal text, NOT tappable (placeholder)
               IgnorePointer(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                  padding: EdgeInsets.symmetric(horizontal: context.rp(14), vertical: context.rs(7)),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF22d3ee).withOpacity(0.08),
+                    color: const Color(0xFF22d3ee).withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(24),
                     border: Border.all(
-                      color: const Color(0xFF22d3ee).withOpacity(0.65),
+                      color: const Color(0xFF22d3ee).withValues(alpha: 0.65),
                       width: 1.4,
                     ),
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.show_chart_rounded, size: 14, color: Color(0xFF22d3ee)),
-                      SizedBox(width: 6),
+                      const Icon(Icons.show_chart_rounded, size: 14, color: Color(0xFF22d3ee)),
+                      SizedBox(width: context.rp(6)),
                       Text(
                         'Session',
                         style: TextStyle(
-                          fontSize:   12,
+                          fontSize: context.sp(12),
                           fontWeight: FontWeight.w600,
-                          color:      Color(0xFF22d3ee),
+                          color:      const Color(0xFF22d3ee),
                         ),
                       ),
                     ],
@@ -389,17 +388,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             ],
           ),
 
-          const SizedBox(height: 5),
+          SizedBox(height: context.rs(5)),
 
           // ── Subtitle ────────────────────────────────────────────────────
           Text(
             isPlaceholder
                 ? 'Start a session to see your history'
                 : 'Avg safety score per drive day · swipe to explore',
-            style: const TextStyle(color: Color(0xFF475569), fontSize: 12),
+            style: TextStyle(color: Color(0xFF475569), fontSize: context.sp(12)),
           ),
 
-          const SizedBox(height: 18),
+          SizedBox(height: context.rs(18)),
 
           // ── Horizontally scrollable chart ────────────────────────────────
           SizedBox(
@@ -510,10 +509,10 @@ class _AlertnessChartInnerState extends State<_AlertnessChartInner> {
                     final text = widget.xLabels[idx];
                     if (text.isEmpty) return const SizedBox.shrink();
                     return Padding(
-                      padding: const EdgeInsets.only(top: 8),
+                      padding: EdgeInsets.only(top: context.rs(8)),
                       child: Text(
                         text,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color:    Color(0xFF64748b),
                           fontSize: 10.5,
                         ),
@@ -535,9 +534,9 @@ class _AlertnessChartInnerState extends State<_AlertnessChartInner> {
                     if (v < 20 || v > 100) return const SizedBox.shrink();
                     return Text(
                       '$v',
-                      style: const TextStyle(
+                      style: TextStyle(
                         color:    Color(0xFF64748b),
-                        fontSize: 11,
+                        fontSize: Responsive.responsiveFont(context, mobile: 11, tablet: 12, desktop: 13),
                       ),
                     );
                   },
@@ -573,8 +572,8 @@ class _AlertnessChartInnerState extends State<_AlertnessChartInner> {
                   show: true,
                   gradient: LinearGradient(
                     colors: [
-                      widget.lineColor.withOpacity(widget.isPlaceholder ? 0.20 : 0.30),
-                      widget.lineColor.withOpacity(0.0),
+                      widget.lineColor.withValues(alpha: widget.isPlaceholder ? 0.20 : 0.30),
+                      widget.lineColor.withValues(alpha: 0.0),
                     ],
                     begin: Alignment.topCenter,
                     end:   Alignment.bottomCenter,
@@ -598,17 +597,17 @@ class _AlertnessChartInnerState extends State<_AlertnessChartInner> {
                             : '';
                         return LineTooltipItem(
                           '${s.y.toInt()}%\n',
-                          const TextStyle(
+                          TextStyle(
                             color:      Color(0xFF22d3ee),
                             fontWeight: FontWeight.bold,
-                            fontSize:   13,
+                            fontSize: context.sp(13),
                           ),
                           children: [
                             TextSpan(
                               text: label,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 color:      Color(0xFF64748b),
-                                fontSize:   10,
+                                fontSize: context.sp(10),
                                 fontWeight: FontWeight.normal,
                               ),
                             ),

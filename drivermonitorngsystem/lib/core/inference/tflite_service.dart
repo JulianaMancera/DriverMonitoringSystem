@@ -1,5 +1,4 @@
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:camera/camera.dart';
@@ -206,15 +205,15 @@ class TfliteService {
   Future<bool> initialize() async {
     if (_isInitialized) return true;
     try {
-      InterpreterOptions _opts() {
+      InterpreterOptions opts() {
         // NnApiDelegate was removed in newer tflite_flutter versions.
         // tflite_flutter automatically uses the best available delegate
         // (NNAPI/GPU) on Android when threads > 1. CPU fallback is safe.
         return InterpreterOptions()..threads = 2;
       }
 
-      _t01 = await Interpreter.fromAsset(_kT01Asset, options: _opts());
-      _t02 = await Interpreter.fromAsset(_kT02Asset, options: _opts());
+      _t01 = await Interpreter.fromAsset(_kT01Asset, options: opts());
+      _t02 = await Interpreter.fromAsset(_kT02Asset, options: opts());
 
       // float16 variants keep float32 I/O — resize tensors explicitly
       _t01!.resizeInputTensor(0, [1, 224, 224, 3]);

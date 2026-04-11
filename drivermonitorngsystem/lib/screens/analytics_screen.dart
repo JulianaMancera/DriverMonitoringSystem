@@ -86,13 +86,13 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
 
   Widget _buildHeader(int? selectedDays) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+      padding: EdgeInsets.fromLTRB(MediaQuery.of(context).size.width * 0.05, MediaQuery.of(context).size.height * 0.02, MediaQuery.of(context).size.width * 0.05, MediaQuery.of(context).size.height * 0.015),
       child: Container(
-        padding: const EdgeInsets.all(4),
+        padding: EdgeInsets.all(MediaQuery.of(context).size.height * 0.005),
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: const Color(0xFF0f172a),
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(MediaQuery.of(context).size.width * 0.04),
           boxShadow: [
             BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.8), offset: const Offset(4, 4),   blurRadius: 8),
             BoxShadow(color: const Color(0xFF1e293b).withValues(alpha: 0.8), offset: const Offset(-4, -4), blurRadius: 8),
@@ -103,9 +103,9 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               _filterBtn('7 Days',   selectedDays == 7,    () => ref.read(analyticsFilterProvider.notifier).state = 7),
-              const SizedBox(width: 4),
+              SizedBox(width: MediaQuery.of(context).size.width * 0.01),
               _filterBtn('30 Days',  selectedDays == 30,   () => ref.read(analyticsFilterProvider.notifier).state = 30),
-              const SizedBox(width: 4),
+              SizedBox(width: MediaQuery.of(context).size.width * 0.01),
               _filterBtn('All Time', selectedDays == null, () => ref.read(analyticsFilterProvider.notifier).state = null),
             ],
           ),
@@ -117,7 +117,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
   Widget _filterBtn(String label, bool isSelected, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(MediaQuery.of(context).size.width * 0.03),
       child: Container(
         padding: EdgeInsets.symmetric(
           horizontal: Responsive.responsivePadding(context, mobile: 12, tablet: 14, desktop: 16),
@@ -125,7 +125,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
         ),
         decoration: BoxDecoration(
           color: isSelected ? const Color(0xFF1e293b) : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(MediaQuery.of(context).size.width * 0.03),
           boxShadow: isSelected
               ? [BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.6), offset: const Offset(2, 2), blurRadius: 4)]
               : [],
@@ -175,12 +175,12 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
             ),
             SizedBox(height: Responsive.responsiveSpacing(context, mobile: 24, tablet: 28, desktop: 32)),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
+              padding: EdgeInsets.symmetric(horizontal: MediaQuery.of(context).size.width * 0.05),
               child: isMobile || isTablet
                   ? _buildMobileChartsLayout(context, dailyTrends, hourlyDist)
                   : _buildDesktopChartsLayout(context, dailyTrends, hourlyDist),
             ),
-            SizedBox(height: isMobile ? 16 : 32),
+            SizedBox(height: context.rs(14)),
           ],
         ),
       ),
@@ -198,7 +198,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     required int distractionEvents,
   }) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+      padding: EdgeInsets.fromLTRB(MediaQuery.of(context).size.width * 0.05, 0, MediaQuery.of(context).size.width * 0.05, 0),
       child: GridView.count(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
@@ -267,7 +267,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
 
   Widget _buildExpandBadge() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      padding: EdgeInsets.symmetric(horizontal: context.rp(6), vertical: context.rs(3)),
       decoration: BoxDecoration(
         color: const Color(0xFF22d3ee).withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
@@ -280,7 +280,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
   Widget _buildLegendItem(BuildContext context, String label, Color color) {
     return Row(children: [
       Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-      const SizedBox(width: 5),
+      SizedBox(width: context.rp(5)),
       Text(label, style: TextStyle(
         fontSize: Responsive.responsiveFont(context, mobile: 11, tablet: 12, desktop: 13),
         color: const Color(0xFF94a3b8),
@@ -369,10 +369,10 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: context.rs(6)),
             Row(children: [
               _buildLegendItem(context, 'Drowsiness', const Color(0xFFef4444)),
-              const SizedBox(width: 10),
+              SizedBox(width: context.rp(10)),
               _buildLegendItem(context, 'Distraction', const Color(0xFFfbbf24)),
               const Spacer(),
               _buildExpandBadge(),
@@ -423,10 +423,10 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
           children: [
             Row(children: [
               _buildLegendItem(context, 'Drowsiness', const Color(0xFFef4444)),
-              const SizedBox(width: 16),
+              SizedBox(width: context.rp(16)),
               _buildLegendItem(context, 'Distraction', const Color(0xFFfbbf24)),
             ]),
-            const SizedBox(height: 12),
+            SizedBox(height: context.rs(12)),
             SizedBox(
               height: chartH2,
               child: SingleChildScrollView(
@@ -448,15 +448,15 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.only(top: 6),
+              padding: EdgeInsets.only(top: context.rs(6)),
               child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                 const Icon(Icons.swipe_rounded, color: Color(0xFF475569), size: 13),
-                const SizedBox(width: 4),
-                const Text('Swipe to see all dates',
-                    style: TextStyle(color: Color(0xFF475569), fontSize: 10)),
+                SizedBox(width: MediaQuery.of(context).size.width * 0.01),
+                Text('Swipe to see all dates',
+                    style: TextStyle(color: const Color(0xFF475569), fontSize: context.sp(10))),
               ]),
             ),
-            const SizedBox(height: 12),
+            SizedBox(height: context.rs(12)),
             if (dailyTrends.isNotEmpty) _buildLineSummaryRow(parsed),
           ],
         );
@@ -474,9 +474,9 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
         : parsed.drowsySpots.reduce((a, b) => a.y > b.y ? a : b).y.toInt();
     return Row(children: [
       _summaryPill('Total Drowsy',     '$totalDrowsy',    const Color(0xFFef4444)),
-      const SizedBox(width: 8),
+      SizedBox(width: context.rp(8)),
       _summaryPill('Total Distracted', '$totalDistracted', const Color(0xFFfbbf24)),
-      const SizedBox(width: 8),
+      SizedBox(width: context.rp(8)),
       _summaryPill('Peak Day',         '$peak alerts',    const Color(0xFF22d3ee)),
     ]);
   }
@@ -490,19 +490,11 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     required double yInterval,
     required double labelFontSize,
   }) {
-    // FIX: Calculate interval for bottom labels to prevent overlapping
-    // If we have 30 days, show a label roughly every 5 days.
-    double bottomInterval = 1;
-    if (xLabels.length > 14) {
-      bottomInterval = (xLabels.length / 5).floorToDouble(); 
-    }
-
     return LineChart(
       LineChartData(
         clipData: const FlClipData.all(),
         gridData: FlGridData(
-          show: true, 
-          drawVerticalLine: false,
+          show: true, drawVerticalLine: false,
           horizontalInterval: yInterval,
           getDrawingHorizontalLine: (_) => FlLine(
             color: const Color(0xFF1e293b), strokeWidth: 1, dashArray: [3, 3],
@@ -511,34 +503,16 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
         titlesData: FlTitlesData(
           rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
           topTitles:   const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true, 
-              reservedSize: 30, 
-              // FIX: Use the calculated interval here
-              interval: bottomInterval, 
-              getTitlesWidget: (value, meta) {
-                final idx = value.round();
-                if (idx < 0 || idx >= xLabels.length) return const SizedBox.shrink();
-                
-                // Extra safety: only show the label if it lands exactly on the interval
-                if (idx % bottomInterval.toInt() != 0 && idx != xLabels.length - 1) {
-                   return const SizedBox.shrink();
-                }
-
-                return Padding(
-                  padding: const EdgeInsets.only(top: 8.0),
-                  child: Text(
-                    xLabels[idx],
-                    style: TextStyle(
-                      color: const Color(0xFF64748b), 
-                      fontSize: labelFontSize - 1,
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
+          bottomTitles: AxisTitles(sideTitles: SideTitles(
+            showTitles: true, reservedSize: 30, interval: 1,
+            getTitlesWidget: (value, meta) {
+              final idx = value.round();
+              if (idx < 0 || idx >= xLabels.length) return const SizedBox.shrink();
+              return Padding(padding: EdgeInsets.only(top: context.rs(8)),
+                child: Text(xLabels[idx],
+                  style: TextStyle(color: const Color(0xFF64748b), fontSize: labelFontSize - 1)));
+            },
+          )),
           leftTitles: AxisTitles(sideTitles: SideTitles(
             showTitles: true, interval: yInterval, reservedSize: 40,
             getTitlesWidget: (value, meta) {
@@ -551,15 +525,15 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
         borderData: FlBorderData(show: false),
         minX: 0, maxX: maxX, minY: 0, maxY: maxY,
         lineBarsData: [
-          _lineBar(drowsySpots, const Color(0xFFef4444), xLabels.length),
-          _lineBar(distractedSpots, const Color(0xFFfbbf24), xLabels.length),
+          _lineBar(drowsySpots,     const Color(0xFFef4444)),
+          _lineBar(distractedSpots, const Color(0xFFfbbf24)),
         ],
         lineTouchData: LineTouchData(
           handleBuiltInTouches: true,
           touchTooltipData: LineTouchTooltipData(
             getTooltipColor: (_) => const Color(0xFF0f172a),
             tooltipBorderRadius: BorderRadius.circular(12),
-            tooltipPadding: const EdgeInsets.all(8),
+            tooltipPadding: EdgeInsets.all(context.rp(8)),
             getTooltipItems: (spots) => spots.map((s) => LineTooltipItem(
               '${s.y.toInt()} ${s.barIndex == 0 ? "drowsy" : "distracted"}',
               TextStyle(
@@ -573,39 +547,14 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     );
   }
 
-   LineChartBarData _lineBar(List<FlSpot> spots, Color color, int dataCount) {
-    // If data is dense (e.g. 30 days), use smaller dots
-    final double dotRadius = dataCount > 15 ? 2.0 : 4.0;
-    final double strokeWidth = dataCount > 15 ? 2.0 : 3.0;
-
+  LineChartBarData _lineBar(List<FlSpot> spots, Color color) {
     return LineChartBarData(
-      spots: spots, 
-      isCurved: true, 
-      curveSmoothness: 0.35,
-      color: color, 
-      barWidth: strokeWidth, 
-      isStrokeCapRound: true,
-      dotData: FlDotData(
-        show: true,
+      spots: spots, isCurved: spots.length > 2, curveSmoothness: 0.3,
+      color: color, barWidth: 3, isStrokeCapRound: true,
+      dotData: FlDotData(show: true,
         getDotPainter: (_, _, _, _) => FlDotCirclePainter(
-          radius: dotRadius, 
-          color: color, 
-          strokeWidth: 1, 
-          strokeColor: const Color(0xFF0f172a),
-        ),
-      ),
-      belowBarData: BarAreaData(
-        show: true,
-        // Adding a very light gradient helps distinguish the two lines
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            color.withOpacity(0.15),
-            color.withOpacity(0.0),
-          ],
-        ),
-      ),
+          radius: 4, color: color, strokeWidth: 2, strokeColor: const Color(0xFF0f172a))),
+      belowBarData: BarAreaData(show: false),
     );
   }
 
@@ -637,13 +586,13 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(children: [
-              const Expanded(
+              Expanded(
                 child: Text('Hourly Alert Distribution',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFFcbd5e1)),
+                  style: TextStyle(fontSize: context.sp(14), fontWeight: FontWeight.w600, color: Color(0xFFcbd5e1)),
                   maxLines: 1, overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const SizedBox(width: 8),
+              SizedBox(width: context.rp(8)),
               _buildExpandBadge(),
             ]),
             SizedBox(height: Responsive.responsiveSpacing(context, mobile: 16, tablet: 20, desktop: 24)),
@@ -690,11 +639,11 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.only(top: 6, bottom: 12),
+              padding: EdgeInsets.only(top: context.rs(6), bottom: context.rs(12)),
               child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                 const Icon(Icons.swipe_rounded, color: Color(0xFF475569), size: 13),
-                const SizedBox(width: 4),
-                const Text('Swipe to see all hours', style: TextStyle(color: Color(0xFF475569), fontSize: 10)),
+                SizedBox(width: MediaQuery.of(context).size.width * 0.01),
+                Text('Swipe to see all hours', style: TextStyle(color: Color(0xFF475569), fontSize: context.sp(10))),
               ]),
             ),
             if (hourlyDist.isNotEmpty) _buildBarSummaryRow(hourlyDist),
@@ -715,24 +664,24 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     final h12  = peakHour > 12 ? peakHour - 12 : (peakHour == 0 ? 12 : peakHour);
     return Row(children: [
       _summaryPill('Total Alerts', '$total',        const Color(0xFF22d3ee)),
-      const SizedBox(width: 8),
+      SizedBox(width: context.rp(8)),
       _summaryPill('Peak Hour',    '$h12:00 $ampm', const Color(0xFFfbbf24)),
-      const SizedBox(width: 8),
+      SizedBox(width: context.rp(8)),
       _summaryPill('Peak Count',   '$peakCount',    const Color(0xFFef4444)),
     ]);
   }
 
   Widget _summaryPill(String label, String value, Color color) {
     return Expanded(child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      padding: EdgeInsets.symmetric(horizontal: context.rp(10), vertical: context.rs(10)),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(10),
         border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(value, style: TextStyle(color: color, fontSize: 15, fontWeight: FontWeight.bold)),
+        Text(value, style: TextStyle(color: color, fontSize: context.sp(15), fontWeight: FontWeight.bold)),
         const SizedBox(height: 2),
-        Text(label,  style: const TextStyle(color: Color(0xFF64748b), fontSize: 10)),
+        Text(label,  style: TextStyle(color: Color(0xFF64748b), fontSize: context.sp(10))),
       ]),
     ));
   }
@@ -806,7 +755,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
         touchTooltipData: BarTouchTooltipData(
           getTooltipColor: (_) => const Color(0xFF1e293b),
           tooltipBorderRadius: BorderRadius.circular(10),
-          tooltipPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          tooltipPadding: EdgeInsets.symmetric(horizontal: context.rp(10), vertical: context.rs(8)),
           getTooltipItem: (group, _, rod, _) => BarTooltipItem(
             '${rod.toY.toInt()} alert${rod.toY.toInt() == 1 ? '' : 's'}\n${labels[group.x]}',
             TextStyle(color: const Color(0xFF22d3ee), fontWeight: FontWeight.bold, fontSize: labelFontSize)),
@@ -820,7 +769,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
           getTitlesWidget: (value, meta) {
             final idx = value.toInt();
             if (idx < 0 || idx >= labels.length) return const SizedBox.shrink();
-            return Padding(padding: const EdgeInsets.only(top: 8.0),
+            return Padding(padding: EdgeInsets.only(top: context.rs(8)),
               child: Text(labels[idx],
                 style: TextStyle(color: const Color(0xFF64748b), fontSize: labelFontSize - 1)));
           },
@@ -900,14 +849,14 @@ class _ChartModal extends StatelessWidget {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Center(child: Padding(padding: const EdgeInsets.only(top: 12, bottom: 8),
+        Center(child: Padding(padding: EdgeInsets.only(top: context.rs(12), bottom: context.rs(8)),
           child: Container(width: 40, height: 4,
             decoration: BoxDecoration(color: const Color(0xFF1E2D45), borderRadius: BorderRadius.circular(2))))),
-        Padding(padding: const EdgeInsets.fromLTRB(20, 4, 16, 0), child: Row(children: [
+        Padding(padding: EdgeInsets.fromLTRB(context.rp(20), context.rs(4), context.rp(16), context.rs(0)), child: Row(children: [
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title,    style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
+            Text(title,    style: TextStyle(color: Colors.white, fontSize: context.sp(18), fontWeight: FontWeight.w700)),
             const SizedBox(height: 3),
-            Text(subtitle, style: const TextStyle(color: Color(0xFF6B7A99), fontSize: 11)),
+            Text(subtitle, style: TextStyle(color: Color(0xFF6B7A99), fontSize: context.sp(11))),
           ])),
           GestureDetector(onTap: () => Navigator.of(context).pop(),
             child: Container(width: 34, height: 34,
@@ -918,7 +867,7 @@ class _ChartModal extends StatelessWidget {
         Divider(color: const Color(0xFF1E2D45).withValues(alpha: 0.6), height: 20),
           Expanded(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            padding: EdgeInsets.fromLTRB(context.rp(16), context.rs(0), context.rp(16), context.rs(16)),
             child: SizedBox(
               height: chartArea,
               child: chartBuilder(chartArea),
@@ -983,7 +932,7 @@ Widget build(BuildContext context) {
               ],
       ),
       padding: isLandscape
-          ? const EdgeInsets.all(10)   // compact in landscape
+          ? EdgeInsets.all(context.rp(10))   // compact in landscape
           : EdgeInsets.all(            // original in portrait
               Responsive.responsivePadding(context, mobile: 12, tablet: 16, desktop: 20),
             ),
@@ -999,7 +948,7 @@ Widget build(BuildContext context) {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(6),
+                        padding: EdgeInsets.all(context.rp(6)),
                         decoration: BoxDecoration(
                           color: const Color(0xFF1e293b),
                           borderRadius: BorderRadius.circular(8),
@@ -1026,15 +975,15 @@ Widget build(BuildContext context) {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(widget.value,
-                        style: const TextStyle(
-                          fontSize: 20,
+                        style: TextStyle(
+                          fontSize: context.sp(20),
                           fontWeight: FontWeight.bold,
                           color: Color(0xFFe2e8f0),
                         ),
                       ),
                       const SizedBox(height: 2),
                       Text(widget.label,
-                        style: const TextStyle(fontSize: 9, color: Color(0xFF64748b)),
+                        style: TextStyle(fontSize: context.sp(9), color: Color(0xFF64748b)),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),

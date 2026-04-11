@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/responsive.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
@@ -179,7 +180,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withOpacity(0.6),
+      barrierColor: Colors.black.withValues(alpha: 0.6),
       enableDrag: true,
       builder: (_) => _SessionDetailSheet(session: session),
     );
@@ -277,9 +278,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   Widget _buildSearchBar() {
     return Container(
       color: _surface,
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      padding: EdgeInsets.fromLTRB(MediaQuery.of(context).size.width * 0.04, MediaQuery.of(context).size.height * 0.012, MediaQuery.of(context).size.width * 0.04, MediaQuery.of(context).size.height * 0.012),
       child: SizedBox(
-        height: 40,
+        height: MediaQuery.of(context).size.height * 0.05,
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: _surfaceAlt,
@@ -287,13 +288,13 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
           ),
           child: TextField(
             controller: _searchCtrl,
-            style: TextStyle(color: _textPrimary, fontSize: 13),
+            style: TextStyle(color: _textPrimary, fontSize: context.sp(13)),
             textInputAction: TextInputAction.search,
             textAlignVertical: TextAlignVertical.center,
             onSubmitted: (_) => FocusScope.of(context).unfocus(),
             decoration: InputDecoration(
               hintText: 'Search by date, month, or "safe"...',
-              hintStyle: TextStyle(color: _textDim, fontSize: 13),
+              hintStyle: TextStyle(color: _textDim, fontSize: context.sp(13)),
               prefixIcon: Icon(Icons.search_rounded, color: _textDim, size: 18),
               prefixIconConstraints: const BoxConstraints(
                 minWidth: 40,
@@ -339,8 +340,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: isLeft
-                        ? [_surface, _surface.withOpacity(0.0)]
-                        : [_surface.withOpacity(0.0), _surface],
+                        ? [_surface, _surface.withValues(alpha: 0.0)]
+                        : [_surface.withValues(alpha: 0.0), _surface],
                     begin: Alignment.centerLeft,
                     end: Alignment.centerRight,
                   ),
@@ -361,7 +362,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   Widget _buildFilterChips() {
     return Container(
       color: _surface,
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).size.height * 0.012),
       child: Row(
         children: [
 
@@ -377,7 +378,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               // margin on the first chip, so position 0 is always "All".
               child: Row(
                 children: [
-                  const SizedBox(width: 16), // fixed left gutter
+                  SizedBox(width: context.rp(16)), // fixed left gutter
                   ...List.generate(_filters.length, (i) {
                     final on = i == _selectedFilter;
                     return GestureDetector(
@@ -387,21 +388,21 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                       },
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 200),
-                        margin: const EdgeInsets.only(right: 8),
+                        margin: EdgeInsets.only(right: context.rp(8)),
                         padding: const EdgeInsets.symmetric(
                             horizontal: 13, vertical: 5),
                         decoration: BoxDecoration(
-                          color: on ? _cyan.withOpacity(0.15) : _surfaceAlt,
+                          color: on ? _cyan.withValues(alpha: 0.15) : _surfaceAlt,
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
-                            color: on ? _cyan.withOpacity(0.4) : _divider,
+                            color: on ? _cyan.withValues(alpha: 0.4) : _divider,
                           ),
                         ),
                         child: Text(
                           _filters[i],
                           style: TextStyle(
                             color: on ? _cyan : _textDim,
-                            fontSize: 11,
+                            fontSize: Responsive.responsiveFont(context, mobile: 11, tablet: 12, desktop: 13),
                             fontWeight: FontWeight.w600,
                             letterSpacing: 0.5,
                           ),
@@ -430,18 +431,18 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
       onRefresh: _loadSessions,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+        padding: EdgeInsets.fromLTRB(MediaQuery.of(context).size.width * 0.04, MediaQuery.of(context).size.height * 0.005, MediaQuery.of(context).size.width * 0.04, MediaQuery.of(context).size.height * 0.030),
         children: groups.entries.map((entry) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Padding(
-                padding: const EdgeInsets.only(top: 12, bottom: 6),
+                padding: EdgeInsets.only(top: context.rs(12), bottom: context.rs(6)),
                 child: Text(
                   entry.key,
                   style: TextStyle(
                     color: _textDim,
-                    fontSize: 10,
+                    fontSize: context.sp(10),
                     fontWeight: FontWeight.w600,
                     letterSpacing: 1.2,
                   ),
@@ -470,7 +471,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         child: child,
       ),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
+        margin: EdgeInsets.only(bottom: context.rs(10)),
         decoration: BoxDecoration(
           color: _surface,
           borderRadius: BorderRadius.circular(14),
@@ -480,11 +481,11 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
           color: Colors.transparent,
           child: InkWell(
             borderRadius: BorderRadius.circular(14),
-            splashColor: _cyan.withOpacity(0.08),
-            highlightColor: _cyan.withOpacity(0.04),
+            splashColor: _cyan.withValues(alpha: 0.08),
+            highlightColor: _cyan.withValues(alpha: 0.04),
             onTap: () => _openSessionDetail(s),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              padding: EdgeInsets.symmetric(horizontal: context.rp(16), vertical: context.rs(14)),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
@@ -492,10 +493,10 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     width: 48,
                     height: 48,
                     decoration: BoxDecoration(
-                      color: color.withOpacity(0.12),
+                      color: color.withValues(alpha: 0.12),
                       shape: BoxShape.circle,
                       border: Border.all(
-                          color: color.withOpacity(0.3), width: 2),
+                          color: color.withValues(alpha: 0.3), width: 2),
                     ),
                     child: Center(
                       child: Text(
@@ -509,7 +510,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     ),
                   ),
 
-                  const SizedBox(width: 14),
+                  SizedBox(width: context.rp(14)),
 
                   Expanded(
                     child: Column(
@@ -520,16 +521,16 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                           _formatDate(s['started_at']),
                           style: TextStyle(
                             color: _textPrimary,
-                            fontSize: 13,
+                            fontSize: Responsive.responsiveFont(context, mobile: 13, tablet: 14, desktop: 15),
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        const SizedBox(height: 4),
+                        SizedBox(height: context.rs(4)),
                         Row(
                           children: [
                             Text(_formatTime(s['started_at']),
                                 style: TextStyle(
-                                    color: _textDim, fontSize: 11)),
+                                    color: _textDim, fontSize: context.sp(11))),
                             Padding(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 6),
@@ -543,7 +544,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                             ),
                             Text(_formatDuration(duration),
                                 style: TextStyle(
-                                    color: _textDim, fontSize: 11)),
+                                    color: _textDim, fontSize: context.sp(11))),
                           ],
                         ),
                       ],
@@ -555,7 +556,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       _buildAlertBadge(alertCount),
-                      const SizedBox(width: 6),
+                      SizedBox(width: context.rp(6)),
                       Icon(Icons.chevron_right_rounded,
                           color: _textDim, size: 18),
                     ],
@@ -577,23 +578,23 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 
     if (count == 0) {
       color = _green;
-      bg    = _green.withOpacity(0.1);
+      bg    = _green.withValues(alpha: 0.1);
       label = 'Safe';
       icon  = Icons.check_circle_outline_rounded;
     } else if (count <= 2) {
       color = _orange;
-      bg    = _orange.withOpacity(0.1);
+      bg    = _orange.withValues(alpha: 0.1);
       label = '$count alert${count > 1 ? 's' : ''}';
       icon  = Icons.warning_amber_rounded;
     } else {
       color = _red;
-      bg    = _red.withOpacity(0.1);
+      bg    = _red.withValues(alpha: 0.1);
       label = '$count alerts';
       icon  = Icons.warning_rounded;
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: EdgeInsets.symmetric(horizontal: context.rp(8), vertical: context.rs(3)),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(6),
@@ -602,11 +603,11 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, color: color, size: 11),
-          const SizedBox(width: 4),
+          SizedBox(width: context.rp(4)),
           Text(label,
               style: TextStyle(
                   color: color,
-                  fontSize: 10,
+                  fontSize: context.sp(10),
                   fontWeight: FontWeight.w600)),
         ],
       ),
@@ -627,18 +628,18 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.history_rounded, color: _textDim, size: 56),
-              const SizedBox(height: 16),
+              SizedBox(height: context.rs(16)),
               Text('No sessions found',
                   style: TextStyle(
                       color: _textPrimary,
-                      fontSize: 16,
+                      fontSize: Responsive.responsiveFont(context, mobile: 16, tablet: 17, desktop: 18),
                       fontWeight: FontWeight.w600)),
-              const SizedBox(height: 6),
+              SizedBox(height: context.rs(6)),
               Text(
                 _selectedFilter == 0
                     ? 'Start recording to see your drive history.'
                     : 'Try a different filter.',
-                style: TextStyle(color: _textDim, fontSize: 13),
+                style: TextStyle(color: _textDim, fontSize: context.sp(13)),
                 textAlign: TextAlign.center,
               ),
             ],
@@ -796,12 +797,12 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                 top: Radius.circular(24)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.5),
+                color: Colors.black.withValues(alpha: 0.5),
                 blurRadius: 40,
                 offset: const Offset(0, -8),
               ),
               BoxShadow(
-                color: _cyan.withOpacity(0.04),
+                color: _cyan.withValues(alpha: 0.04),
                 blurRadius: 60,
                 spreadRadius: 2,
               ),
@@ -812,7 +813,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
             children: [
 
               Padding(
-                padding: const EdgeInsets.only(top: 12, bottom: 4),
+                padding: EdgeInsets.only(top: context.rs(12), bottom: context.rs(4)),
                 child: Container(
                   width: 40, height: 4,
                   decoration: BoxDecoration(
@@ -823,17 +824,17 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
               ),
 
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 16, 12),
+                padding: EdgeInsets.fromLTRB(context.rp(20), context.rs(8), context.rp(16), context.rs(12)),
                 child: Row(
                   children: [
                     Container(
                       width: 52,
                       height: 52,
                       decoration: BoxDecoration(
-                        color: color.withOpacity(0.12),
+                        color: color.withValues(alpha: 0.12),
                         shape: BoxShape.circle,
                         border: Border.all(
-                            color: color.withOpacity(0.35), width: 2.5),
+                            color: color.withValues(alpha: 0.35), width: 2.5),
                       ),
                       child: Center(
                         child: Text(
@@ -847,7 +848,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                       ),
                     ),
 
-                    const SizedBox(width: 14),
+                    SizedBox(width: context.rp(14)),
 
                     Expanded(
                       child: Column(
@@ -857,7 +858,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                             _formatDate(widget.session['started_at']),
                             style: TextStyle(
                               color: _textPrimary,
-                              fontSize: 16,
+                              fontSize: Responsive.responsiveFont(context, mobile: 16, tablet: 17, desktop: 18),
                               fontWeight: FontWeight.w700,
                             ),
                           ),
@@ -865,13 +866,13 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                           Text(
                             '${_formatTime(widget.session['started_at'])}  →  ${_formatTime(widget.session['ended_at'])}',
                             style: TextStyle(
-                                color: _textDim, fontSize: 12),
+                                color: _textDim, fontSize: context.sp(12)),
                           ),
                           Text(
                             _formatDuration(duration),
                             style: TextStyle(
                                 color: _textMuted,
-                                fontSize: 11,
+                                fontSize: Responsive.responsiveFont(context, mobile: 11, tablet: 12, desktop: 13),
                                 fontWeight: FontWeight.w500),
                           ),
                         ],
@@ -909,16 +910,16 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                             color: Color(0xFF00D4FF)),
                       )
                     : SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+                        padding: EdgeInsets.fromLTRB(context.rp(20), context.rs(16), context.rp(20), context.rs(32)),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             _sectionLabel('STATE BREAKDOWN'),
                             _buildStateBreakdown(),
-                            const SizedBox(height: 20),
+                            SizedBox(height: context.rs(20)),
                             _sectionLabel('ALERT EVENTS'),
                             _buildAlertEvents(),
-                            const SizedBox(height: 20),
+                            SizedBox(height: context.rs(20)),
                             _sectionLabel('SYSTEM LOG'),
                             _buildSystemLog(),
                           ],
@@ -934,12 +935,12 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
 
   Widget _sectionLabel(String label) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).size.height * 0.012),
       child: Text(
         label,
         style: TextStyle(
           color: _textDim,
-          fontSize: 10,
+          fontSize: context.sp(10),
           fontWeight: FontWeight.w600,
           letterSpacing: 1.2,
         ),
@@ -956,14 +957,14 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
 
     if (!hasData) {
       return Container(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(context.rp(16)),
         decoration: BoxDecoration(
           color: _surfaceAlt,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Center(
           child: Text('No state data recorded',
-              style: TextStyle(color: _textDim, fontSize: 13)),
+              style: TextStyle(color: _textDim, fontSize: context.sp(13))),
         ),
       );
     }
@@ -973,7 +974,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     final xPct = (distracted / total * 100).round();
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(context.rp(16)),
       decoration: BoxDecoration(
         color: _surfaceAlt,
         borderRadius: BorderRadius.circular(12),
@@ -996,7 +997,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                     child: Container(
                         height: 10,
                         color: _red,
-                        margin: const EdgeInsets.only(left: 2)),
+                        margin: EdgeInsets.only(left: 2)),
                   ),
                 if (distracted > 0)
                   Flexible(
@@ -1004,18 +1005,18 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                     child: Container(
                         height: 10,
                         color: _orange,
-                        margin: const EdgeInsets.only(left: 2)),
+                        margin: EdgeInsets.only(left: 2)),
                   ),
               ],
             ),
           ),
-          const SizedBox(height: 14),
+          SizedBox(height: context.rs(14)),
           Row(
             children: [
               Expanded(child: _statePill(_cyan, 'Neutral', '$nPct%')),
-              const SizedBox(width: 8),
+              SizedBox(width: context.rp(8)),
               Expanded(child: _statePill(_red, 'Drowsy', '$dPct%')),
-              const SizedBox(width: 8),
+              SizedBox(width: context.rp(8)),
               Expanded(child: _statePill(_orange, 'Distracted', '$xPct%')),
             ],
           ),
@@ -1028,21 +1029,21 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.2), width: 1),
+        border: Border.all(color: color.withValues(alpha: 0.2), width: 1),
       ),
       child: Column(
         children: [
           Text(pct,
               style: TextStyle(
                   color: color,
-                  fontSize: 15,
+                  fontSize: Responsive.responsiveFont(context, mobile: 15, tablet: 16, desktop: 17),
                   fontWeight: FontWeight.w700)),
           const SizedBox(height: 2),
           Text(label,
               style: TextStyle(
-                  color: _textDim, fontSize: 10, fontWeight: FontWeight.w500)),
+                  color: _textDim, fontSize: context.sp(10), fontWeight: FontWeight.w500)),
         ],
       ),
     );
@@ -1051,7 +1052,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
   Widget _buildAlertEvents() {
     if (_alerts.isEmpty) {
       return Container(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(context.rp(16)),
         decoration: BoxDecoration(
           color: _surfaceAlt,
           borderRadius: BorderRadius.circular(12),
@@ -1060,9 +1061,9 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
           children: [
             Icon(Icons.check_circle_outline_rounded,
                 color: _green, size: 18),
-            const SizedBox(width: 10),
+            SizedBox(width: context.rp(10)),
             Text('No alerts triggered — safe drive!',
-                style: TextStyle(color: _green, fontSize: 13)),
+                style: TextStyle(color: _green, fontSize: context.sp(13))),
           ],
         ),
       );
@@ -1095,21 +1096,21 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                       padding: const EdgeInsets.symmetric(
                           horizontal: 7, vertical: 3),
                       decoration: BoxDecoration(
-                        color: color.withOpacity(0.15),
+                        color: color.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(6),
                         border: Border.all(
-                            color: color.withOpacity(0.3), width: 1),
+                            color: color.withValues(alpha: 0.3), width: 1),
                       ),
                       child: Text(
                         _alertLevelLabel(level),
                         style: TextStyle(
                           color: color,
-                          fontSize: 10,
+                          fontSize: context.sp(10),
                           fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
-                    const SizedBox(width: 10),
+                    SizedBox(width: context.rp(10)),
                     Expanded(
                       child: Text(
                         type == 'DROWSY'
@@ -1117,13 +1118,13 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                             : 'Distraction Detected',
                         style: TextStyle(
                           color: _textPrimary,
-                          fontSize: 13,
+                          fontSize: Responsive.responsiveFont(context, mobile: 13, tablet: 14, desktop: 15),
                           fontWeight: FontWeight.w500,
                         ),
                       ),
                     ),
                     Text(time,
-                        style: TextStyle(color: _textDim, fontSize: 11)),
+                        style: TextStyle(color: _textDim, fontSize: context.sp(11))),
                   ],
                 ),
               ),
@@ -1143,13 +1144,13 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
   Widget _buildSystemLog() {
     if (_logs.isEmpty) {
       return Container(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(context.rp(16)),
         decoration: BoxDecoration(
           color: _surfaceAlt,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Text('No log entries.',
-            style: TextStyle(color: _textDim, fontSize: 13)),
+            style: TextStyle(color: _textDim, fontSize: context.sp(13))),
       );
     }
 
@@ -1159,7 +1160,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: _divider, width: 1),
       ),
-      padding: const EdgeInsets.all(12),
+      padding: EdgeInsets.all(context.rp(12)),
       child: Column(
         children: _logs.map((log) {
           final type    = log['log_type'] as String? ?? 'INFO';
@@ -1169,7 +1170,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
           final timeStr = time.length >= 19 ? time.substring(11, 19) : time;
 
           return Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: EdgeInsets.only(bottom: context.rs(8)),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1177,16 +1178,16 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                   '[$timeStr]',
                   style: TextStyle(
                       color: _textDim,
-                      fontSize: 10,
+                      fontSize: context.sp(10),
                       fontFamily: 'monospace'),
                 ),
-                const SizedBox(width: 8),
+                SizedBox(width: context.rp(8)),
                 Expanded(
                   child: Text(
                     message,
                     style: TextStyle(
                         color: color,
-                        fontSize: 10,
+                        fontSize: context.sp(10),
                         fontFamily: 'monospace'),
                   ),
                 ),

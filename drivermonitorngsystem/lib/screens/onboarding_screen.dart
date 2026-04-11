@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/responsive.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Shows only on the very first app launch.
@@ -115,11 +116,11 @@ class _OnboardingScreenState extends State<OnboardingScreen>
               left: 0,
               right: 0,
               child: Container(
-                height: 300,
+                height: MediaQuery.of(context).size.height * 0.32,
                 decoration: BoxDecoration(
                   gradient: RadialGradient(
                     colors: [
-                      const Color(0xFF00D4FF).withOpacity(0.07),
+                      const Color(0xFF00D4FF).withValues(alpha: 0.07),
                       Colors.transparent,
                     ],
                     radius: 0.8,
@@ -134,36 +135,35 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                 children: [
                   // Top bar
                   Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 24, vertical: 16),
+                    padding: EdgeInsets.symmetric(horizontal: context.hPad, vertical: context.rs(14)),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Row(
                           children: [
                             Container(
-                              width: 32,
-                              height: 32,
+                              width: context.ri(28),
+                              height: context.ri(28),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF00D4FF).withOpacity(0.12),
+                                color: const Color(0xFF00D4FF).withValues(alpha: 0.12),
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border.all(
-                                  color: const Color(0xFF00D4FF).withOpacity(0.3),
+                                  color: const Color(0xFF00D4FF).withValues(alpha: 0.3),
                                   width: 1,
                                 ),
                               ),
                               child: const Icon(Icons.show_chart,
                                   size: 18, color: Color(0xFF00D4FF)),
                             ),
-                            const SizedBox(width: 8),
+                            SizedBox(width: context.rp(8)),
                             RichText(
-                              text: const TextSpan(
+                              text: TextSpan(
                                 children: [
                                   TextSpan(
                                     text: 'BANTAY ',
                                     style: TextStyle(
                                       color: Colors.white,
-                                      fontSize: 13,
+                                      fontSize: Responsive.responsiveFont(context, mobile: 13, tablet: 14, desktop: 15),
                                       fontWeight: FontWeight.w700,
                                       letterSpacing: 2,
                                     ),
@@ -172,7 +172,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                                     text: 'DRIVE',
                                     style: TextStyle(
                                       color: Color(0xFF00D4FF),
-                                      fontSize: 13,
+                                      fontSize: Responsive.responsiveFont(context, mobile: 13, tablet: 14, desktop: 15),
                                       fontWeight: FontWeight.w700,
                                       letterSpacing: 2,
                                     ),
@@ -188,8 +188,8 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                             child: Text(
                               'Skip',
                               style: TextStyle(
-                                color: Colors.white.withOpacity(0.35),
-                                fontSize: 14,
+                                color: Colors.white.withValues(alpha: 0.35),
+                                fontSize: Responsive.responsiveFont(context, mobile: 14, tablet: 15, desktop: 16),
                                 letterSpacing: 0.5,
                               ),
                             ),
@@ -221,7 +221,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                         : double.infinity;
 
                     return Padding(
-                      padding: EdgeInsets.fromLTRB(32, 0, 32, bottomPad),
+                      padding: EdgeInsets.fromLTRB(MediaQuery.of(context).size.width * 0.08, 0, MediaQuery.of(context).size.width * 0.08, bottomPad),
                       child: isLandscape
                           // ── LANDSCAPE: dots + button side by side ──────────
                           ? Row(
@@ -234,19 +234,19 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                                     (i) => AnimatedContainer(
                                       duration: const Duration(milliseconds: 280),
                                       curve: Curves.easeInOutCubic,
-                                      margin: const EdgeInsets.symmetric(horizontal: 4),
-                                      width:  i == _currentPage ? 18 : 5,
+                                      margin: EdgeInsets.symmetric(horizontal: context.rp(3)),
+                                      width:  i == _currentPage ? context.wp(0.045) : context.wp(0.012),
                                       height: 5,
                                       decoration: BoxDecoration(
                                         color: i == _currentPage
                                             ? const Color(0xFF00D4FF)
-                                            : Colors.white.withOpacity(0.15),
+                                            : Colors.white.withValues(alpha: 0.15),
                                         borderRadius: BorderRadius.circular(3),
                                       ),
                                     ),
                                   ),
                                 ),
-                                const SizedBox(width: 20),
+                                SizedBox(width: context.rp(20)),
                                 // Button — compact width only
                                 SizedBox(
                                   width:  btnWidth,
@@ -261,7 +261,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                                         borderRadius: BorderRadius.circular(10),
                                         boxShadow: [
                                           BoxShadow(
-                                            color: const Color(0xFF00D4FF).withOpacity(0.20),
+                                            color: const Color(0xFF00D4FF).withValues(alpha: 0.20),
                                             blurRadius: 12,
                                             offset: const Offset(0, 4),
                                           ),
@@ -275,14 +275,14 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                                               _currentPage < _pages.length - 1
                                                   ? 'Next'
                                                   : 'Get Started',
-                                              style: const TextStyle(
+                                              style: TextStyle(
                                                 color: Color(0xFF080E1A),
-                                                fontSize: 13,
+                                                fontSize: Responsive.responsiveFont(context, mobile: 13, tablet: 14, desktop: 15),
                                                 fontWeight: FontWeight.w700,
                                                 letterSpacing: 0.5,
                                               ),
                                             ),
-                                            const SizedBox(width: 6),
+                                            SizedBox(width: context.rp(6)),
                                             Icon(
                                               _currentPage < _pages.length - 1
                                                   ? Icons.arrow_forward_rounded
@@ -309,13 +309,13 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                                     (i) => AnimatedContainer(
                                       duration: const Duration(milliseconds: 280),
                                       curve: Curves.easeInOutCubic,
-                                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                                      margin: EdgeInsets.symmetric(horizontal: context.rp(3)),
                                       width:  i == _currentPage ? 24 : 6,
                                       height: 6,
                                       decoration: BoxDecoration(
                                         color: i == _currentPage
                                             ? const Color(0xFF00D4FF)
-                                            : Colors.white.withOpacity(0.15),
+                                            : Colors.white.withValues(alpha: 0.15),
                                         borderRadius: BorderRadius.circular(3),
                                       ),
                                     ),
@@ -336,7 +336,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                                         borderRadius: BorderRadius.circular(14),
                                         boxShadow: [
                                           BoxShadow(
-                                            color: const Color(0xFF00D4FF).withOpacity(0.25),
+                                            color: const Color(0xFF00D4FF).withValues(alpha: 0.25),
                                             blurRadius: 20,
                                             offset: const Offset(0, 6),
                                           ),
@@ -350,14 +350,14 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                                               _currentPage < _pages.length - 1
                                                   ? 'Next'
                                                   : 'Get Started',
-                                              style: const TextStyle(
+                                              style: TextStyle(
                                                 color: Color(0xFF080E1A),
-                                                fontSize: 16,
+                                                fontSize: Responsive.responsiveFont(context, mobile: 16, tablet: 17, desktop: 18),
                                                 fontWeight: FontWeight.w700,
                                                 letterSpacing: 0.5,
                                               ),
                                             ),
-                                            const SizedBox(width: 8),
+                                            SizedBox(width: context.rp(8)),
                                             Icon(
                                               _currentPage < _pages.length - 1
                                                   ? Icons.arrow_forward_rounded
@@ -482,7 +482,7 @@ class _OnboardingPageWidgetState extends State<_OnboardingPageWidget>
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             gradient: RadialGradient(colors: [
-                              const Color(0xFF00D4FF).withOpacity(0.10),
+                              const Color(0xFF00D4FF).withValues(alpha: 0.10),
                               Colors.transparent,
                             ]),
                           ),
@@ -493,12 +493,12 @@ class _OnboardingPageWidgetState extends State<_OnboardingPageWidget>
                             shape: BoxShape.circle,
                             color: const Color(0xFF0D1627),
                             border: Border.all(
-                              color: const Color(0xFF00D4FF).withOpacity(0.18),
+                              color: const Color(0xFF00D4FF).withValues(alpha: 0.18),
                               width: 1.5,
                             ),
                             boxShadow: [
                               BoxShadow(
-                                color: const Color(0xFF00D4FF).withOpacity(0.08),
+                                color: const Color(0xFF00D4FF).withValues(alpha: 0.08),
                                 blurRadius: 30, spreadRadius: 4,
                               ),
                             ],
@@ -508,7 +508,7 @@ class _OnboardingPageWidgetState extends State<_OnboardingPageWidget>
                           width: iconInner, height: iconInner,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: const Color(0xFF00D4FF).withOpacity(0.12),
+                            color: const Color(0xFF00D4FF).withValues(alpha: 0.12),
                           ),
                           child: Icon(widget.page.icon,
                               size: iconSize, color: const Color(0xFF00D4FF)),
@@ -549,7 +549,7 @@ class _OnboardingPageWidgetState extends State<_OnboardingPageWidget>
                         widget.page.subtitle,
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                          color: Colors.white.withOpacity(0.50),
+                          color: Colors.white.withValues(alpha: 0.50),
                           fontSize: isCompact ? 13 : 15,
                           height: 1.6,
                           letterSpacing: 0.1,
@@ -568,7 +568,7 @@ class _OnboardingPageWidgetState extends State<_OnboardingPageWidget>
                       child: Container(
                         width: 40, height: 2,
                         decoration: BoxDecoration(
-                          color: const Color(0xFF00D4FF).withOpacity(0.5),
+                          color: const Color(0xFF00D4FF).withValues(alpha: 0.5),
                           borderRadius: BorderRadius.circular(1),
                         ),
                       ),
@@ -589,7 +589,7 @@ class _OBGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.white.withOpacity(0.02)
+      ..color = Colors.white.withValues(alpha: 0.02)
       ..strokeWidth = 0.5;
     const spacing = 40.0;
     for (double x = 0; x < size.width; x += spacing) {

@@ -13,6 +13,7 @@ import 'screens/monitor_screen.dart';
 import 'screens/analytics_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/history_screen.dart';
+import 'utils/responsive.dart';
 import 'screens/splash_screen.dart';
 import 'screens/onboarding_screen.dart';
 
@@ -220,7 +221,7 @@ class MainShell extends ConsumerWidget {
               preferredSize: Size.fromHeight(isLandscape ? 46 : 60),
               child: AppBar(
                 backgroundColor: isTransparent
-                    ? const Color(0xFF0D1627).withOpacity(0.55)
+                    ? const Color(0xFF0D1627).withValues(alpha: 0.55)
                     : const Color(0xFF0D1627),
                 elevation:   0,
                 centerTitle: false,
@@ -284,7 +285,7 @@ class MainShell extends ConsumerWidget {
 
                 actions: [
                   Padding(
-                    padding: const EdgeInsets.only(right: 20),
+                    padding: EdgeInsets.only(right: context.rp(20)),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 400),
                       curve:    Curves.easeInOut,
@@ -299,7 +300,7 @@ class MainShell extends ConsumerWidget {
                             ? [
                                 BoxShadow(
                                   color:        const Color(0xFF00FF88)
-                                      .withOpacity(0.6),
+                                      .withValues(alpha: 0.6),
                                   blurRadius:   8,
                                   spreadRadius: 1,
                                 ),
@@ -316,7 +317,7 @@ class MainShell extends ConsumerWidget {
                         preferredSize: const Size.fromHeight(1),
                         child: Container(
                           height: 1,
-                          color:  Colors.white.withOpacity(0.05),
+                          color:  Colors.white.withValues(alpha: 0.05),
                         ),
                       ),
               ),
@@ -399,7 +400,7 @@ class _LandscapeSidebarLayout extends StatelessWidget {
           duration: const Duration(milliseconds: 280),
           curve:    Curves.easeInOutCubic,
           width:    sidebarOpen ? 1 : 0,
-          color:    Colors.white.withOpacity(0.05),
+          color:    Colors.white.withValues(alpha: 0.05),
         ),
         Expanded(
           child: IndexedStack(
@@ -445,12 +446,12 @@ class _LandscapeSidebar extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.only(left: 8, bottom: 12),
+              padding: EdgeInsets.only(left: context.rp(8), bottom: context.rs(12)),
               child: Text(
                 'NAVIGATION',
                 style: TextStyle(
-                  color:         Colors.white.withOpacity(0.3),
-                  fontSize:      10,
+                  color:         Colors.white.withValues(alpha: 0.3),
+                  fontSize: context.sp(10),
                   fontWeight:    FontWeight.w600,
                   letterSpacing: 1.4,
                 ),
@@ -462,7 +463,7 @@ class _LandscapeSidebar extends StatelessWidget {
               final active = i == currentIndex;
 
               return Padding(
-                padding: const EdgeInsets.only(bottom: 4),
+                padding: EdgeInsets.only(bottom: context.rs(4)),
                 child: GestureDetector(
                   onTap: () => onNavTap(i),
                   child: AnimatedContainer(
@@ -472,12 +473,12 @@ class _LandscapeSidebar extends StatelessWidget {
                         horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
                       color: active
-                          ? const Color(0xFF00D4FF).withOpacity(0.12)
+                          ? const Color(0xFF00D4FF).withValues(alpha: 0.12)
                           : Colors.transparent,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                         color: active
-                            ? const Color(0xFF00D4FF).withOpacity(0.25)
+                            ? const Color(0xFF00D4FF).withValues(alpha: 0.25)
                             : Colors.transparent,
                         width: 1,
                       ),
@@ -489,7 +490,7 @@ class _LandscapeSidebar extends StatelessWidget {
                             color: active
                                 ? const Color(0xFF00D4FF)
                                 : Colors.white38),
-                        const SizedBox(width: 12),
+                        SizedBox(width: context.rp(12)),
                         Expanded(
                           child: Text(
                             item.label,
@@ -497,7 +498,7 @@ class _LandscapeSidebar extends StatelessWidget {
                               color: active
                                   ? const Color(0xFF00D4FF)
                                   : Colors.white54,
-                              fontSize:   14,
+                              fontSize: context.sp(14),
                               fontWeight: active
                                   ? FontWeight.w600
                                   : FontWeight.w400,
@@ -548,10 +549,10 @@ class _BottomNav extends StatelessWidget {
         color: const Color(0xFF0D1627),
         border: Border(
             top: BorderSide(
-                color: Colors.white.withOpacity(0.05), width: 1)),
+                color: Colors.white.withValues(alpha: 0.05), width: 1)),
         boxShadow: [
           BoxShadow(
-              color:      Colors.black.withOpacity(0.4),
+              color:      Colors.black.withValues(alpha: 0.4),
               blurRadius: 20,
               offset:     const Offset(0, -4)),
         ],
@@ -580,12 +581,12 @@ class _BottomNav extends StatelessWidget {
                       width:  pillWidth,
                       height: pillHeight,
                       decoration: BoxDecoration(
-                        color:        const Color(0xFF00D4FF).withOpacity(0.13),
+                        color:        const Color(0xFF00D4FF).withValues(alpha: 0.13),
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
                               color:        const Color(0xFF00D4FF)
-                                  .withOpacity(0.15),
+                                  .withValues(alpha: 0.15),
                               blurRadius:   10,
                               spreadRadius: 1),
                         ],
