@@ -9,6 +9,7 @@ import '../utils/responsive.dart';
 // RIVERPOD PROVIDER
 final dashboardProvider =
     FutureProvider<Map<String, dynamic>>((ref) async {
+  // ✅ Watches counter — auto-refreshes when any screen changes data
   ref.watch(dbChangeCounterProvider);
   return await DatabaseHelper.instance.getDashboardSummary();
 });
@@ -27,6 +28,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    // Periodic refresh every 30s to catch live session data
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       ref.invalidate(dashboardProvider);
     });
@@ -63,13 +65,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 
   Widget _buildContent(BuildContext context, Map<String, dynamic> data) {
-    // Default 100.0: a driver with no sessions yet has a perfect score
+    // ✅ Default 100.0 — fresh install shows perfect score, not 0
     final safetyScore   = data['safety_score']        as double? ?? 100.0;
     final totalDriveHrs = data['total_drive_hrs']      as double? ?? 0.0;
     final alertsLast24h = data['alerts_last_24h']      as int?    ?? 0;
     final safetyStreak  = data['safety_streak_days']   as int?    ?? 0;
-    final avgAlertness  = data['avg_alertness_pct']    as double? ?? 0.0;
-    final dailyScores   = (data['daily_safety_scores'] as List<Map<String, dynamic>>?) ?? [];
+    final avgAlertness  = data['avg_alertness_pct']    as double? ?? 100.0;
+    final dailyScores   = (data['daily_safety_scores'] as List?)
+        ?.cast<Map<String, dynamic>>() ?? [];
 
     String scoreLabel = 'EXCELLENT';
     if (safetyScore < 60)      scoreLabel = 'POOR';
@@ -84,7 +87,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       onRefresh: () async => ref.invalidate(dashboardProvider),
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.symmetric(horizontal: context.hPad, vertical: context.rs(10)),
+        padding: EdgeInsets.symmetric(
+            horizontal: context.hPad, vertical: context.rs(10)),
         child: Column(
           children: [
             LayoutBuilder(
@@ -93,7 +97,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   return Column(
                     children: [
                       _buildSafetyScoreCard(context, safetyScore, scoreLabel),
-                      SizedBox(height: Responsive.responsiveSpacing(context, mobile: 24, tablet: 28, desktop: 32)),
+                      SizedBox(height: Responsive.responsiveSpacing(
+                          context, mobile: 24, tablet: 28, desktop: 32)),
                       _buildQuickStatsGrid(context,
                         totalDriveHrs: totalDriveHrs,
                         alertsLast24h: alertsLast24h,
@@ -106,21 +111,26 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(flex: 4, child: _buildSafetyScoreCard(context, safetyScore, scoreLabel)),
-                      SizedBox(width: Responsive.responsiveSpacing(context, mobile: 16, tablet: 24, desktop: 32)),
-                      Expanded(flex: 8, child: _buildQuickStatsGrid(context,
-                        totalDriveHrs: totalDriveHrs,
-                        alertsLast24h: alertsLast24h,
-                        safetyStreak:  safetyStreak,
-                        avgAlertness:  avgAlertness,
-                      )),
+                      Expanded(flex: 4,
+                          child: _buildSafetyScoreCard(
+                              context, safetyScore, scoreLabel)),
+                      SizedBox(width: Responsive.responsiveSpacing(
+                          context, mobile: 16, tablet: 24, desktop: 32)),
+                      Expanded(flex: 8,
+                          child: _buildQuickStatsGrid(context,
+                            totalDriveHrs: totalDriveHrs,
+                            alertsLast24h: alertsLast24h,
+                            safetyStreak:  safetyStreak,
+                            avgAlertness:  avgAlertness,
+                          )),
                     ],
                   );
                 }
               },
             ),
-            SizedBox(height: Responsive.responsiveSpacing(context, mobile: 24, tablet: 28, desktop: 32)),
-            _buildAlertnessHistory(context, dailyScores),
+            SizedBox(height: Responsive.responsiveSpacing(
+                context, mobile: 24, tablet: 28, desktop: 32)),
+            _buildSafetyScoreHistory(context, dailyScores),
             SizedBox(height: MediaQuery.of(context).size.height * 0.02),
           ],
         ),
@@ -128,18 +138,22 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  // SAFETY SCORE CARD
-  Widget _buildSafetyScoreCard(BuildContext context, double score, String label) {
+  // ── SAFETY SCORE CARD ──────────────────────────────────────────────────────
+  Widget _buildSafetyScoreCard(
+      BuildContext context, double score, String label) {
     final isMobile = Responsive.isMobile(context);
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.circular(
-          Responsive.responsiveBorderRadius(context, mobile: 20, tablet: 22, desktop: 24),
+          Responsive.responsiveBorderRadius(
+              context, mobile: 20, tablet: 22, desktop: 24),
         ),
         boxShadow: const [
-          BoxShadow(color: Color(0xFF0b1120), offset: Offset(6, 6),   blurRadius: 16),
-          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-6, -6), blurRadius: 16),
+          BoxShadow(
+              color: Color(0xFF0b1120), offset: Offset(6, 6), blurRadius: 16),
+          BoxShadow(
+              color: Color(0xFF1e293b), offset: Offset(-6, -6), blurRadius: 16),
         ],
       ),
       child: Stack(
@@ -147,12 +161,16 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           Positioned(
             top: 0, left: 0, right: 0,
             child: Container(
-              height: Responsive.responsiveValue(context, mobile: 6.0, tablet: 7.0, desktop: 8.0),
+              height: Responsive.responsiveValue(
+                  context, mobile: 6.0, tablet: 7.0, desktop: 8.0),
               decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: [Color(0xFF22d3ee), Color(0xFF3b82f6)]),
+                gradient: const LinearGradient(
+                    colors: [Color(0xFF22d3ee), Color(0xFF3b82f6)]),
                 borderRadius: BorderRadius.only(
-                  topLeft:  Radius.circular(Responsive.responsiveBorderRadius(context, mobile: 20, tablet: 22, desktop: 24)),
-                  topRight: Radius.circular(Responsive.responsiveBorderRadius(context, mobile: 20, tablet: 22, desktop: 24)),
+                  topLeft: Radius.circular(Responsive.responsiveBorderRadius(
+                      context, mobile: 20, tablet: 22, desktop: 24)),
+                  topRight: Radius.circular(Responsive.responsiveBorderRadius(
+                      context, mobile: 20, tablet: 22, desktop: 24)),
                 ),
               ),
             ),
@@ -160,7 +178,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           Center(
             child: Padding(
               padding: EdgeInsets.all(
-                Responsive.responsivePadding(context, mobile: isMobile ? 48 : 60, tablet: 55, desktop: 87),
+                Responsive.responsivePadding(context,
+                    mobile: isMobile ? 48 : 60, tablet: 55, desktop: 87),
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -170,12 +189,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     'SAFETY SCORE',
                     style: TextStyle(
                       color: const Color(0xFF94a3b8),
-                      fontSize: Responsive.responsiveFont(context, mobile: 18, tablet: 20, desktop: 24),
+                      fontSize: Responsive.responsiveFont(
+                          context, mobile: 18, tablet: 20, desktop: 24),
                       fontWeight: FontWeight.w500,
                       letterSpacing: 1.5,
                     ),
                   ),
-                  SizedBox(height: Responsive.responsiveSpacing(context, mobile: 24, tablet: 28, desktop: 32)),
+                  SizedBox(height: Responsive.responsiveSpacing(
+                      context, mobile: 24, tablet: 28, desktop: 32)),
                   _buildCircularScoreIndicator(context, score, label),
                 ],
               ),
@@ -186,10 +207,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  Widget _buildCircularScoreIndicator(BuildContext context, double score, String label) {
-    final outerSize    = (context.sw * 0.42).clamp(140.0, 220.0);
-    final progressSize = Responsive.responsiveValue(context, mobile: 138.0, tablet: 156.0, desktop: 179.0);
-    final innerSize    = Responsive.responsiveValue(context, mobile: 115.0, tablet: 130.0, desktop: 147.0);
+  Widget _buildCircularScoreIndicator(
+      BuildContext context, double score, String label) {
+    final outerSize =
+        (context.sw * 0.42).clamp(140.0, 220.0);
+    final progressSize = Responsive.responsiveValue(
+        context, mobile: 138.0, tablet: 156.0, desktop: 179.0);
+    final innerSize = Responsive.responsiveValue(
+        context, mobile: 115.0, tablet: 130.0, desktop: 147.0);
 
     return SizedBox(
       width: outerSize, height: outerSize,
@@ -202,8 +227,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               color: const Color(0xFF0f172a),
               shape: BoxShape.circle,
               boxShadow: [
-                BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.8), offset: const Offset(6, 6),   blurRadius: 12),
-                BoxShadow(color: const Color(0xFF1e293b).withValues(alpha: 0.8), offset: const Offset(-6, -6), blurRadius: 12),
+                BoxShadow(
+                    color: const Color(0xFF0b1120).withValues(alpha: 0.8),
+                    offset: const Offset(6, 6),
+                    blurRadius: 12),
+                BoxShadow(
+                    color: const Color(0xFF1e293b).withValues(alpha: 0.8),
+                    offset: const Offset(-6, -6),
+                    blurRadius: 12),
               ],
             ),
           ),
@@ -211,9 +242,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             width: progressSize, height: progressSize,
             child: CircularProgressIndicator(
               value: score / 100,
-              strokeWidth: Responsive.responsiveValue(context, mobile: 6.0, tablet: 7.0, desktop: 8.0),
+              strokeWidth: Responsive.responsiveValue(
+                  context, mobile: 6.0, tablet: 7.0, desktop: 8.0),
               backgroundColor: const Color(0xFF1e293b),
-              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF22d3ee)),
+              valueColor: const AlwaysStoppedAnimation<Color>(
+                  Color(0xFF22d3ee)),
               strokeCap: StrokeCap.round,
             ),
           ),
@@ -223,8 +256,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               color: Color(0xFF0f172a),
               shape: BoxShape.circle,
               boxShadow: [
-                BoxShadow(color: Color(0xFF0b1120), offset: Offset(6, 6),   blurRadius: 12),
-                BoxShadow(color: Color(0xFF1e293b), offset: Offset(-6, -6), blurRadius: 12),
+                BoxShadow(
+                    color: Color(0xFF0b1120),
+                    offset: Offset(6, 6),
+                    blurRadius: 12),
+                BoxShadow(
+                    color: Color(0xFF1e293b),
+                    offset: Offset(-6, -6),
+                    blurRadius: 12),
               ],
             ),
             child: Column(
@@ -233,16 +272,19 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 Text(
                   score.toStringAsFixed(0),
                   style: TextStyle(
-                    fontSize: Responsive.responsiveFont(context, mobile: 38, tablet: 42, desktop: 48),
+                    fontSize: Responsive.responsiveFont(
+                        context, mobile: 38, tablet: 42, desktop: 48),
                     fontWeight: FontWeight.bold,
                     color: const Color(0xFF22d3ee),
                   ),
                 ),
-                SizedBox(height: Responsive.responsiveSpacing(context, mobile: 2, desktop: 4)),
+                SizedBox(height: Responsive.responsiveSpacing(
+                    context, mobile: 2, desktop: 4)),
                 Text(
                   label,
                   style: TextStyle(
-                    fontSize: Responsive.responsiveFont(context, mobile: 9, tablet: 9.5, desktop: 10),
+                    fontSize: Responsive.responsiveFont(
+                        context, mobile: 9, tablet: 9.5, desktop: 10),
                     color: const Color(0xFF64748b),
                     letterSpacing: 1,
                   ),
@@ -255,7 +297,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  // QUICK STATS GRID
+  // ── QUICK STATS GRID ───────────────────────────────────────────────────────
   Widget _buildQuickStatsGrid(
     BuildContext context, {
     required double totalDriveHrs,
@@ -267,38 +309,66 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       crossAxisCount: 2,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing:  Responsive.responsiveSpacing(context, mobile: 12, tablet: 14, desktop: 16),
-      crossAxisSpacing: Responsive.responsiveSpacing(context, mobile: 12, tablet: 14, desktop: 16),
-      childAspectRatio: Responsive.responsiveValue(context, mobile: 1.0, tablet: 1.4, desktop: 2.1),
+      mainAxisSpacing: Responsive.responsiveSpacing(
+          context, mobile: 12, tablet: 14, desktop: 16),
+      crossAxisSpacing: Responsive.responsiveSpacing(
+          context, mobile: 12, tablet: 14, desktop: 16),
+      childAspectRatio: Responsive.responsiveValue(
+          context, mobile: 1.0, tablet: 1.4, desktop: 2.1),
       children: [
-        _StatCard(icon: Icons.access_time_outlined,          label: 'Total Drive Time', value: '${totalDriveHrs.toStringAsFixed(1)} hrs', subtext: 'Last 30 days',                                    accent: false),
-        _StatCard(icon: Icons.shield_outlined,                label: 'Alert Triggered',  value: '$alertsLast24h',                           subtext: 'Last 24 hours',                                   accent: true),
-        _StatCard(icon: Icons.local_fire_department_outlined, label: 'Safety Streak',    value: '$safetyStreak days',                        subtext: safetyStreak > 0 ? 'No incidents' : 'Stay alert!', accent: false),
-        _StatCard(icon: Icons.trending_up,                    label: 'Avg Alertness',    value: '${avgAlertness.toStringAsFixed(0)}%',        subtext: 'Last 7 days',                                     accent: false),
+        _StatCard(
+            icon: Icons.access_time_outlined,
+            label: 'Total Drive Time',
+            value: '${totalDriveHrs.toStringAsFixed(1)} hrs',
+            subtext: 'Last 30 days',
+            accent: false),
+        _StatCard(
+            icon: Icons.shield_outlined,
+            label: 'Alert Triggered',
+            value: '$alertsLast24h',
+            subtext: 'Last 24 hours',
+            accent: true),
+        _StatCard(
+            icon: Icons.local_fire_department_outlined,
+            label: 'Safety Streak',
+            value: '$safetyStreak days',
+            subtext: safetyStreak > 0 ? 'No incidents' : 'Stay alert!',
+            accent: false),
+        _StatCard(
+            icon: Icons.trending_up,
+            label: 'Avg Alertness',
+            value: '${avgAlertness.toStringAsFixed(0)}%',
+            subtext: 'Last 7 days',
+            accent: false),
       ],
     );
   }
 
-  // ── ALERTNESS HISTORY ──────────────────────────────────────────────────────
-  Widget _buildAlertnessHistory(
+  // ── SAFETY SCORE HISTORY ───────────────────────────────────────────────────
+  Widget _buildSafetyScoreHistory(
     BuildContext context,
     List<Map<String, dynamic>> dailyScores,
   ) {
-    final bool hasData = dailyScores.length >= 2;
+    // ✅ FIX: was `>= 2` — showed placeholder even after 1 real session.
+    //         Now shows real data as soon as there is ANY completed session.
+    final bool hasData = dailyScores.isNotEmpty;
 
     final List<FlSpot> spots;
     final List<String> xLabels;
-    final bool         isPlaceholder;
+    final bool isPlaceholder;
 
     if (hasData) {
       spots   = [];
       xLabels = [];
       for (int i = 0; i < dailyScores.length; i++) {
-        final score = (dailyScores[i]['avg_score'] as double? ?? 0.0).clamp(0.0, 100.0);
+        final score =
+            (dailyScores[i]['avg_score'] as double? ?? 0.0).clamp(0.0, 100.0);
         final day   = dailyScores[i]['day'] as String? ?? '';
         final parts = day.split('-');
-        const mo = ['','Jan','Feb','Mar','Apr','May','Jun',
-                       'Jul','Aug','Sep','Oct','Nov','Dec'];
+        const mo = [
+          '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+        ];
         final label = parts.length == 3
             ? '${mo[int.tryParse(parts[1]) ?? 0]} ${int.tryParse(parts[2]) ?? 0}'
             : day;
@@ -307,16 +377,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       }
       isPlaceholder = false;
     } else {
-      // Placeholder — mirrors screenshot shape
+      // Placeholder shown only when there are zero completed sessions
       spots = const [
-        FlSpot(0,  95), FlSpot(1,  96), FlSpot(2,  95), FlSpot(3,  96),
-        FlSpot(4,  95), FlSpot(5,  96), FlSpot(6,  95), FlSpot(7,  96),
-        FlSpot(8,  95), FlSpot(9,  97), FlSpot(10, 67), FlSpot(11, 48),
+        FlSpot(0, 95), FlSpot(1, 96), FlSpot(2, 95), FlSpot(3, 96),
+        FlSpot(4, 95), FlSpot(5, 96), FlSpot(6, 95), FlSpot(7, 96),
+        FlSpot(8, 95), FlSpot(9, 97), FlSpot(10, 67), FlSpot(11, 48),
         FlSpot(12, 57), FlSpot(13, 42), FlSpot(14, 53), FlSpot(15, 49),
         FlSpot(16, 55),
       ];
       xLabels = const [
-        'Mar 14','','','','','','Mar 20','','','Mar 27','','Apr 2','','','','','Apr 6',
+        'Mar 14', '', '', '', '', '', 'Mar 20', '', '', 'Mar 27',
+        '', 'Apr 2', '', '', '', '', 'Apr 6',
       ];
       isPlaceholder = true;
     }
@@ -329,19 +400,23 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.circular(
-          Responsive.responsiveBorderRadius(context, mobile: 20, tablet: 22, desktop: 24),
+          Responsive.responsiveBorderRadius(
+              context, mobile: 20, tablet: 22, desktop: 24),
         ),
         boxShadow: const [
-          BoxShadow(color: Color(0xFF0b1120), offset: Offset(6, 6),   blurRadius: 16),
-          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-6, -6), blurRadius: 16),
+          BoxShadow(
+              color: Color(0xFF0b1120), offset: Offset(6, 6), blurRadius: 16),
+          BoxShadow(
+              color: Color(0xFF1e293b), offset: Offset(-6, -6), blurRadius: 16),
         ],
       ),
-      padding: EdgeInsets.fromLTRB(context.hPad, context.rs(16), context.hPad, context.rs(12)),
+      padding: EdgeInsets.fromLTRB(
+          context.hPad, context.rs(16), context.hPad, context.rs(12)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
 
-          // ── Header ──────────────────────────────────────────────────────
+          // Header
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -349,17 +424,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 child: Text(
                   'Safety Score History',
                   style: TextStyle(
-                    color:      const Color(0xFFe2e8f0),
-                    fontSize:   context.sp(17),
+                    color: const Color(0xFFe2e8f0),
+                    fontSize: context.sp(17),
                     fontWeight: FontWeight.bold,
                     letterSpacing: 0.1,
                   ),
                 ),
               ),
-              // Session pill — teal border + teal text, NOT tappable (placeholder)
               IgnorePointer(
                 child: Container(
-                  padding: EdgeInsets.symmetric(horizontal: context.rp(14), vertical: context.rs(7)),
+                  padding: EdgeInsets.symmetric(
+                      horizontal: context.rp(14), vertical: context.rs(7)),
                   decoration: BoxDecoration(
                     color: const Color(0xFF22d3ee).withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(24),
@@ -371,14 +446,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.show_chart_rounded, size: 14, color: Color(0xFF22d3ee)),
+                      const Icon(Icons.show_chart_rounded,
+                          size: 14, color: Color(0xFF22d3ee)),
                       SizedBox(width: context.rp(6)),
                       Text(
                         'Session',
                         style: TextStyle(
                           fontSize: context.sp(12),
                           fontWeight: FontWeight.w600,
-                          color:      const Color(0xFF22d3ee),
+                          color: const Color(0xFF22d3ee),
                         ),
                       ),
                     ],
@@ -390,20 +466,21 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
           SizedBox(height: context.rs(5)),
 
-          // ── Subtitle ────────────────────────────────────────────────────
+          // Subtitle — tells user if they're seeing real data or placeholder
           Text(
             isPlaceholder
-                ? 'Start a session to see your history'
+                ? 'Complete a session to see your score history'
                 : 'Avg safety score per drive day · swipe to explore',
-            style: TextStyle(color: Color(0xFF475569), fontSize: context.sp(12)),
+            style: TextStyle(
+                color: const Color(0xFF475569), fontSize: context.sp(12)),
           ),
 
           SizedBox(height: context.rs(18)),
 
-          // ── Horizontally scrollable chart ────────────────────────────────
+          // Chart
           SizedBox(
             height: 245,
-            child: _AlertnessChartInner(
+            child: _SafetyScoreChartInner(
               spots:         spots,
               xLabels:       xLabels,
               isPlaceholder: isPlaceholder,
@@ -416,17 +493,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 }
 
-// ── Horizontally-scrollable chart ─────────────────────────────────────────────
-// Each day gets a fixed pixel slot so labels never crowd, and the user can
-// swipe left/right to explore all 30 days. Auto-scrolls to the latest date.
-// Y-axis is fixed: minY = 15, maxY = 105  →  labels 20, 30 … 90, 100 visible.
-class _AlertnessChartInner extends StatefulWidget {
-  final List<FlSpot>  spots;
-  final List<String>  xLabels;
-  final bool          isPlaceholder;
-  final Color         lineColor;
+// ── SAFETY SCORE CHART (horizontally scrollable) ──────────────────────────────
+class _SafetyScoreChartInner extends StatefulWidget {
+  final List<FlSpot> spots;
+  final List<String> xLabels;
+  final bool         isPlaceholder;
+  final Color        lineColor;
 
-  const _AlertnessChartInner({
+  const _SafetyScoreChartInner({
     required this.spots,
     required this.xLabels,
     required this.isPlaceholder,
@@ -434,25 +508,21 @@ class _AlertnessChartInner extends StatefulWidget {
   });
 
   @override
-  State<_AlertnessChartInner> createState() => _AlertnessChartInnerState();
+  State<_SafetyScoreChartInner> createState() => _SafetyScoreChartInnerState();
 }
 
-class _AlertnessChartInnerState extends State<_AlertnessChartInner> {
+class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
   final ScrollController _sc = ScrollController();
 
-  // Pixels per day point — wide enough so "Mar 14" labels never touch
   static const double _pointSpacing = 42.0;
   static const double _yAxisWidth   = 38.0;
   static const double _rightPad     = 16.0;
-
-  // Fixed Y bounds so 20 and 100 always appear as axis labels
-  static const double _chartMin = 15.0;   // just below 20 so the label fits
-  static const double _chartMax = 105.0;  // just above 100 so the label fits
+  static const double _chartMin     = 15.0;
+  static const double _chartMax     = 105.0;
 
   @override
   void initState() {
     super.initState();
-    // Auto-scroll to the most-recent (rightmost) day after first layout
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_sc.hasClients && _sc.position.maxScrollExtent > 0) {
         _sc.jumpTo(_sc.position.maxScrollExtent);
@@ -468,10 +538,28 @@ class _AlertnessChartInnerState extends State<_AlertnessChartInner> {
 
   @override
   Widget build(BuildContext context) {
+    // ✅ For a single data point, we need at least 2 x-positions for fl_chart
+    //    so we duplicate the single point at x=0 and x=1 with a ghost label.
+    final List<FlSpot>  spots;
+    final List<String>  labels;
+    final double        maxX;
+
+    if (widget.spots.length == 1) {
+      // Single session: show as a flat line from left edge to the dot
+      spots  = [
+        FlSpot(0, widget.spots[0].y),
+        FlSpot(1, widget.spots[0].y),
+      ];
+      labels = ['', widget.xLabels[0]];
+      maxX   = 1;
+    } else {
+      spots  = widget.spots;
+      labels = widget.xLabels;
+      maxX   = (widget.spots.length - 1).toDouble().clamp(1.0, double.infinity);
+    }
+
     final double chartW =
-        _yAxisWidth + (widget.spots.length * _pointSpacing) + _rightPad;
-    final double maxX =
-        (widget.spots.length - 1).toDouble().clamp(1.0, double.infinity);
+        _yAxisWidth + (spots.length * _pointSpacing) + _rightPad;
 
     return SingleChildScrollView(
       controller:      _sc,
@@ -492,10 +580,10 @@ class _AlertnessChartInnerState extends State<_AlertnessChartInner> {
               ),
             ),
             titlesData: FlTitlesData(
-              rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-              topTitles:   const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-
-              // X-axis — every label stored in xLabels; blanks are skipped
+              rightTitles: const AxisTitles(
+                  sideTitles: SideTitles(showTitles: false)),
+              topTitles: const AxisTitles(
+                  sideTitles: SideTitles(showTitles: false)),
               bottomTitles: AxisTitles(
                 sideTitles: SideTitles(
                   showTitles:   true,
@@ -503,57 +591,51 @@ class _AlertnessChartInnerState extends State<_AlertnessChartInner> {
                   interval:     1,
                   getTitlesWidget: (value, meta) {
                     final idx = value.toInt();
-                    if (idx < 0 || idx >= widget.xLabels.length) {
+                    if (idx < 0 || idx >= labels.length) {
                       return const SizedBox.shrink();
                     }
-                    final text = widget.xLabels[idx];
+                    final text = labels[idx];
                     if (text.isEmpty) return const SizedBox.shrink();
                     return Padding(
                       padding: EdgeInsets.only(top: context.rs(8)),
                       child: Text(
                         text,
-                        style: TextStyle(
-                          color:    Color(0xFF64748b),
-                          fontSize: 10.5,
-                        ),
+                        style: const TextStyle(
+                            color: Color(0xFF64748b), fontSize: 10.5),
                       ),
                     );
                   },
                 ),
               ),
-
-              // Y-axis — 10-unit ticks; 20 and 100 are intentionally included
               leftTitles: AxisTitles(
                 sideTitles: SideTitles(
                   showTitles:   true,
                   interval:     10,
                   reservedSize: _yAxisWidth,
                   getTitlesWidget: (value, meta) {
-                    // Only render the values we actually want: 20 → 100
                     final v = value.toInt();
                     if (v < 20 || v > 100) return const SizedBox.shrink();
                     return Text(
                       '$v',
                       style: TextStyle(
-                        color:    Color(0xFF64748b),
-                        fontSize: Responsive.responsiveFont(context, mobile: 11, tablet: 12, desktop: 13),
+                        color:    const Color(0xFF64748b),
+                        fontSize: Responsive.responsiveFont(
+                            context, mobile: 11, tablet: 12, desktop: 13),
                       ),
                     );
                   },
                 ),
               ),
             ),
-
             borderData: FlBorderData(show: false),
             minX: 0,
             maxX: maxX,
             minY: _chartMin,
             maxY: _chartMax,
-
             lineBarsData: [
               LineChartBarData(
-                spots:            widget.spots,
-                isCurved:         true,
+                spots:            spots,
+                isCurved:         spots.length > 2,
                 curveSmoothness:  0.3,
                 color:            widget.lineColor,
                 barWidth:         2.5,
@@ -572,7 +654,8 @@ class _AlertnessChartInnerState extends State<_AlertnessChartInner> {
                   show: true,
                   gradient: LinearGradient(
                     colors: [
-                      widget.lineColor.withValues(alpha: widget.isPlaceholder ? 0.20 : 0.30),
+                      widget.lineColor.withValues(
+                          alpha: widget.isPlaceholder ? 0.20 : 0.30),
                       widget.lineColor.withValues(alpha: 0.0),
                     ],
                     begin: Alignment.topCenter,
@@ -581,7 +664,6 @@ class _AlertnessChartInnerState extends State<_AlertnessChartInner> {
                 ),
               ),
             ],
-
             lineTouchData: widget.isPlaceholder
                 ? const LineTouchData(enabled: false)
                 : LineTouchData(
@@ -592,22 +674,22 @@ class _AlertnessChartInnerState extends State<_AlertnessChartInner> {
                           horizontal: 12, vertical: 8),
                       getTooltipItems: (touchedSpots) =>
                           touchedSpots.map((s) {
-                        final label = s.x.toInt() < widget.xLabels.length
-                            ? widget.xLabels[s.x.toInt()]
-                            : '';
+                        final idx = s.x.toInt();
+                        final label =
+                            idx < labels.length ? labels[idx] : '';
                         return LineTooltipItem(
                           '${s.y.toInt()}%\n',
                           TextStyle(
-                            color:      Color(0xFF22d3ee),
+                            color:      const Color(0xFF22d3ee),
                             fontWeight: FontWeight.bold,
-                            fontSize: context.sp(13),
+                            fontSize:   context.sp(13),
                           ),
                           children: [
                             TextSpan(
                               text: label,
                               style: TextStyle(
-                                color:      Color(0xFF64748b),
-                                fontSize: context.sp(10),
+                                color:      const Color(0xFF64748b),
+                                fontSize:   context.sp(10),
                                 fontWeight: FontWeight.normal,
                               ),
                             ),
@@ -623,15 +705,17 @@ class _AlertnessChartInnerState extends State<_AlertnessChartInner> {
   }
 }
 
-// REUSABLE STAT CARD
+// ── REUSABLE STAT CARD ────────────────────────────────────────────────────────
 class _StatCard extends StatelessWidget {
   final IconData icon;
   final String   label, value, subtext;
   final bool     accent;
 
   const _StatCard({
-    required this.icon,   required this.label,
-    required this.value,  required this.subtext,
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.subtext,
     required this.accent,
   });
 
@@ -643,15 +727,19 @@ class _StatCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.circular(
-          Responsive.responsiveBorderRadius(context, mobile: 16, tablet: 18, desktop: 20),
+          Responsive.responsiveBorderRadius(
+              context, mobile: 16, tablet: 18, desktop: 20),
         ),
         boxShadow: const [
-          BoxShadow(color: Color(0xFF0b1120), offset: Offset(3, 3),   blurRadius: 8),
-          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-3, -3), blurRadius: 8),
+          BoxShadow(
+              color: Color(0xFF0b1120), offset: Offset(3, 3), blurRadius: 8),
+          BoxShadow(
+              color: Color(0xFF1e293b), offset: Offset(-3, -3), blurRadius: 8),
         ],
       ),
       padding: EdgeInsets.all(
-        Responsive.responsivePadding(context, mobile: 16, tablet: 18, desktop: 20),
+        Responsive.responsivePadding(
+            context, mobile: 16, tablet: 18, desktop: 20),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -661,37 +749,45 @@ class _StatCard extends StatelessWidget {
             children: [
               Container(
                 padding: EdgeInsets.all(
-                  Responsive.responsivePadding(context, mobile: 8, tablet: 9, desktop: 10),
+                  Responsive.responsivePadding(
+                      context, mobile: 8, tablet: 9, desktop: 10),
                 ),
                 decoration: BoxDecoration(
                   color: accent
                       ? const Color(0xFF22d3ee).withValues(alpha: 0.1)
                       : const Color(0xFF1e293b),
                   borderRadius: BorderRadius.circular(
-                    Responsive.responsiveBorderRadius(context, mobile: 10, tablet: 11, desktop: 12),
+                    Responsive.responsiveBorderRadius(
+                        context, mobile: 10, tablet: 11, desktop: 12),
                   ),
                 ),
                 child: Icon(
                   icon,
-                  size:  Responsive.responsiveIconSize(context, mobile: 20, tablet: 21, desktop: 22),
-                  color: accent ? const Color(0xFF22d3ee) : const Color(0xFF64748b),
+                  size: Responsive.responsiveIconSize(
+                      context, mobile: 20, tablet: 21, desktop: 22),
+                  color: accent
+                      ? const Color(0xFF22d3ee)
+                      : const Color(0xFF64748b),
                 ),
               ),
               if (accent)
                 Padding(
                   padding: EdgeInsets.only(
-                    left: Responsive.responsiveSpacing(context, mobile: 10, tablet: 11, desktop: 12),
+                    left: Responsive.responsiveSpacing(
+                        context, mobile: 10, tablet: 11, desktop: 12),
                   ),
                   child: Container(
-                    width:  Responsive.responsiveValue(context, mobile: 7.0, tablet: 7.5, desktop: 8.0),
-                    height: Responsive.responsiveValue(context, mobile: 7.0, tablet: 7.5, desktop: 8.0),
+                    width: Responsive.responsiveValue(
+                        context, mobile: 7.0, tablet: 7.5, desktop: 8.0),
+                    height: Responsive.responsiveValue(
+                        context, mobile: 7.0, tablet: 7.5, desktop: 8.0),
                     decoration: BoxDecoration(
                       color: const Color(0xFF22d3ee),
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color:       const Color(0xFF22d3ee).withValues(alpha: 0.4),
-                          blurRadius:  8,
+                          color: const Color(0xFF22d3ee).withValues(alpha: 0.4),
+                          blurRadius:   8,
                           spreadRadius: 2,
                         ),
                       ],
@@ -704,27 +800,29 @@ class _StatCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(label,
-                style: TextStyle(
-                  color:      const Color(0xFF64748b),
-                  fontSize:   Responsive.responsiveFont(context, mobile: 12, tablet: 12.5, desktop: 13),
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              SizedBox(height: Responsive.responsiveSpacing(context, mobile: 4, tablet: 5, desktop: 6)),
+                  style: TextStyle(
+                    color: const Color(0xFF64748b),
+                    fontSize: Responsive.responsiveFont(
+                        context, mobile: 12, tablet: 12.5, desktop: 13),
+                    fontWeight: FontWeight.w500,
+                  )),
+              SizedBox(height: Responsive.responsiveSpacing(
+                  context, mobile: 4, tablet: 5, desktop: 6)),
               Text(value,
-                style: TextStyle(
-                  fontSize:   Responsive.responsiveFont(context, mobile: 22, tablet: 24, desktop: 26),
-                  fontWeight: FontWeight.bold,
-                  color:      const Color(0xFFe2e8f0),
-                ),
-              ),
-              SizedBox(height: Responsive.responsiveSpacing(context, mobile: 2, tablet: 3, desktop: 4)),
+                  style: TextStyle(
+                    fontSize: Responsive.responsiveFont(
+                        context, mobile: 22, tablet: 24, desktop: 26),
+                    fontWeight: FontWeight.bold,
+                    color: const Color(0xFFe2e8f0),
+                  )),
+              SizedBox(height: Responsive.responsiveSpacing(
+                  context, mobile: 2, tablet: 3, desktop: 4)),
               Text(subtext,
-                style: TextStyle(
-                  fontSize: Responsive.responsiveFont(context, mobile: 10, tablet: 10.5, desktop: 11),
-                  color:    const Color(0xFF475569),
-                ),
-              ),
+                  style: TextStyle(
+                    fontSize: Responsive.responsiveFont(
+                        context, mobile: 10, tablet: 10.5, desktop: 11),
+                    color: const Color(0xFF475569),
+                  )),
             ],
           ),
         ],

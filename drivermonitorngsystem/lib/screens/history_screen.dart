@@ -81,15 +81,18 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   }
 
   // DATA
-  Future<void> _loadSessions() async {
+    Future<void> _loadSessions() async {
     setState(() => _isLoading = true);
     final sessions = await DatabaseHelper.instance.getAllSessions();
-    final enriched = <Map<String, dynamic>>[];
-    for (final s in sessions) {
-      final alerts = await DatabaseHelper.instance
-          .getAlertsBySession(s['id'] as int);
-      enriched.add({...s, 'alert_count': alerts.length});
-    }
+    
+    // ✅ Batch query instead of N+1 per session
+    final alertCounts = await DatabaseHelper.instance.getAllSessionAlertCounts();
+    
+    final enriched = sessions.map((s) => {
+      ...s,
+      'alert_count': alertCounts[s['id'] as int] ?? 0,
+    }).toList();
+
     if (mounted) {
       setState(() {
         _sessions  = enriched;

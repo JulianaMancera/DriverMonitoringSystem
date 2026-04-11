@@ -1,19 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:volume_controller/volume_controller.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core/database/database_helper.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
+import 'package:bantaydrive/core/database/db_change_notifier.dart';
 import 'dart:async';
 
-class SettingsScreen extends StatefulWidget {
+class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
 
   @override
-  State<SettingsScreen> createState() => _SettingsScreenState();
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+// ✅ CHANGE 2: State<SettingsScreen> → ConsumerState<SettingsScreen>
+class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool   _isLoading        = true;
   double _alertVolume      = 0.8;
   int    _alertSensitivity = 1;
@@ -31,10 +34,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   StreamSubscription<double>? _volumeSubscription;
 
-  // ScrollController to programmatically scroll the list
   final ScrollController _scrollController = ScrollController();
-
-  // GlobalKey to find the authors tile position
   final GlobalKey _authorsKey = GlobalKey();
 
   @override
@@ -70,12 +70,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  /// Called when the authors ExpansionTile is expanded.
-  /// Waits for the animation to finish, then scrolls so the
-  /// expanded content is fully visible.
   void _onAuthorsExpanded(bool expanded) {
     if (!expanded) return;
-    // Wait for the expansion animation (~300 ms) to complete
     Future.delayed(const Duration(milliseconds: 320), () {
       if (!mounted) return;
       final ctx = _authorsKey.currentContext;
@@ -509,7 +505,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         iconColor: _cyan,
         onExpansionChanged: _onAuthorsExpanded,
         children: [
-           _githubLink(
+          _githubLink(
             name: 'Juliana Mancera',
             username: 'JulianaMancera',
             url: 'https://github.com/JulianaMancera',
@@ -586,7 +582,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     child: Icon(icon, color: color, size: 18),
   );
 
-  // SNACKBAR 
+  // ── SNACKBAR ───────────────────────────────────────────────────────────────
+
   void _showSnackbar(BuildContext context, String message,
       {required bool isError}) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -601,7 +598,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ));
   }
 
-  //  ACTION HANDLERS
+  // ── ACTION HANDLERS ────────────────────────────────────────────────────────
+
   void _onClearHistory(BuildContext context) {
     showDialog(
       context: context,
@@ -633,6 +631,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onPressed: () async {
               Navigator.pop(context);
               await DatabaseHelper.instance.clearAllData();
+              // ✅ CHANGE 3: Increment counter so all watching screens
+              // (HistoryScreen, DashboardScreen, AnalyticsScreen) auto-refresh
+              ref.read(dbChangeCounterProvider.notifier).state++;
               if (context.mounted) {
                 _showSnackbar(context, 'All history cleared.',
                     isError: false);
