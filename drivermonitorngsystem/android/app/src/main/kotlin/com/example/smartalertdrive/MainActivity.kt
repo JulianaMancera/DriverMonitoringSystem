@@ -2,6 +2,7 @@ package com.example.smartalertdrive
 
 import android.app.PictureInPictureParams
 import android.content.res.Configuration
+import android.graphics.Rect
 import android.os.Build
 import android.util.Rational
 import io.flutter.embedding.android.FlutterActivity
@@ -20,7 +21,6 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        // Method channel — Flutter calls native
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -37,7 +37,6 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
-        // Event channel — native pushes PiP state changes to Flutter
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, EVENT_CHANNEL)
             .setStreamHandler(object : EventChannel.StreamHandler {
                 override fun onListen(arguments: Any?, sink: EventChannel.EventSink?) {
@@ -49,44 +48,56 @@ class MainActivity : FlutterActivity() {
             })
     }
 
-    // Called when user presses HOME button — enters PiP if recording
+    // ── Home button pressed ───────────────────────────────────────────────────
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         if (isRecording) {
             val isLandscape = resources.configuration.orientation ==
-                android.content.res.Configuration.ORIENTATION_LANDSCAPE
+                Configuration.ORIENTATION_LANDSCAPE
             enterPipMode(isLandscape)
         }
     }
 
-    // Called when BACK is pressed — enter PiP instead of closing the activity
-    // while recording. This is the native-side guard that catches back presses
-    // that bypass Flutter's PopScope (e.g. gesture navigation on some ROMs).
+    // ── Back pressed while recording → enter PiP instead of closing ──────────
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if (isRecording && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val isLandscape = resources.configuration.orientation ==
-                android.content.res.Configuration.ORIENTATION_LANDSCAPE
+                Configuration.ORIENTATION_LANDSCAPE
             val entered = enterPipMode(isLandscape)
-            if (entered) return   // PiP entered — don't close the activity
+            if (entered) return
         }
         super.onBackPressed()
     }
 
-    // Called by Android when PiP mode changes — reliably fires every time
+    // ── PiP state change — fires reliably on every PiP enter/exit ────────────
+    // FIX: now sends a typed Map instead of a raw Boolean.
+    // The old code sent `pipEventSink?.success(isInPictureInPictureMode)` which
+    // is a raw Boolean. The Flutter listener does `if (!mounted || raw is! Map)`
+    // so a raw Boolean was silently dropped — Flutter never knew PiP had started,
+    // so it kept rendering the full screen layout inside the PiP window.
     override fun onPictureInPictureModeChanged(
         isInPictureInPictureMode: Boolean,
         newConfig: Configuration
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         runOnUiThread {
-            pipEventSink?.success(isInPictureInPictureMode)
+            pipEventSink?.success(
+                mapOf("type" to "pip", "value" to isInPictureInPictureMode)
+            )
+            // Send orientation immediately on PiP entry so Flutter can set up
+            // the preview dimensions before the first frame renders.
+            if (isInPictureInPictureMode) {
+                val ori = if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE)
+                    "landscape" else "portrait"
+                pipEventSink?.success(
+                    mapOf("type" to "orientation", "value" to ori)
+                )
+            }
         }
     }
 
-    // Called whenever the device rotates — including while already in PiP.
-    // We update the PiP aspect ratio live so the window reshapes to match
-    // the new orientation (portrait ↔ landscape) without needing to re-enter PiP.
+    // ── Device rotates while already in PiP ───────────────────────────────────
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
@@ -94,42 +105,50 @@ class MainActivity : FlutterActivity() {
             try {
                 val isLandscape = newConfig.orientation ==
                     Configuration.ORIENTATION_LANDSCAPE
-                // 1. Reshape the PiP window to match new orientation
                 val ratio = if (isLandscape) Rational(16, 9) else Rational(9, 16)
-                val params = PictureInPictureParams.Builder()
-                    .setAspectRatio(ratio)
-                    .build()
-                setPictureInPictureParams(params)
-                // 2. Tell Flutter the new orientation so the camera preview
-                //    SizedBox can swap its width/height dimensions to match.
-                //    We reuse the existing EventChannel with a string prefix
-                //    so Flutter can distinguish orientation events from pip events.
+                setPictureInPictureParams(
+                    PictureInPictureParams.Builder().setAspectRatio(ratio).build()
+                )
+                // FIX: typed Map — was previously raw String "orientation:landscape"
+                // which Flutter's listener (expecting a Map) also silently dropped.
                 runOnUiThread {
                     pipEventSink?.success(
-                        if (isLandscape) "orientation:landscape"
-                        else             "orientation:portrait"
+                        mapOf(
+                            "type"  to "orientation",
+                            "value" to if (isLandscape) "landscape" else "portrait"
+                        )
                     )
                 }
-            } catch (e: Exception) {
-                // Ignore — device may not support params update mid-PiP
-            }
+            } catch (_: Exception) { }
         }
     }
 
+    // ── Enter PiP ─────────────────────────────────────────────────────────────
+    // FIX: added setSourceRectHint (Android 12+) so the OS zooms only the
+    // camera card area into the PiP window, not the entire Flutter screen.
+    // Portrait  → top ~42% of screen height, full width (camera card region)
+    // Landscape → full screen (camera fills the whole landscape layout)
     private fun enterPipMode(isLandscape: Boolean = false): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
         return try {
-            // Dynamically match the aspect ratio to the device's current orientation
-            // so the PiP window fills correctly whether the driver is using the phone
-            // in portrait (9:16) or landscape (16:9) — e.g. when using Spotify landscape.
-            val ratio = if (isLandscape) Rational(16, 9) else Rational(9, 16)
-            val params = PictureInPictureParams.Builder()
-                .setAspectRatio(ratio)
-                .build()
-            enterPictureInPictureMode(params)
+            val ratio   = if (isLandscape) Rational(16, 9) else Rational(9, 16)
+            val builder = PictureInPictureParams.Builder().setAspectRatio(ratio)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val dm   = resources.displayMetrics
+                val w    = dm.widthPixels
+                val h    = dm.heightPixels
+                val hint = if (isLandscape)
+                    Rect(0, 0, w, h)
+                else
+                    Rect(0, 0, w, (h * 0.42f).toInt())
+                builder.setSourceRectHint(hint)
+            }
+
+            enterPictureInPictureMode(builder.build())
             true
         } catch (e: Exception) {
             false
         }
     }
-}
+}   

@@ -1,112 +1,125 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_riverpod/legacy.dart'; 
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
 import '../utils/responsive.dart';
+// FIX #11: import the sidebar width constant so both files use the same value
+import '../constants/layout_constants.dart';
 
-// PROVIDERS
+// ─── PROVIDERS ────────────────────────────────────────────────────────────────
 final analyticsFilterProvider = StateProvider<int?>((ref) => 7);
 
-final analyticsDataProvider =
-    FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
+final analyticsDataProvider = FutureProvider.autoDispose<Map<String, dynamic>>((
+  ref,
+) async {
   ref.watch(dbChangeCounterProvider);
   final days = ref.watch(analyticsFilterProvider);
-  final data = await DatabaseHelper.instance.getAnalyticsSummary(days: days);
-  return data;
+  return DatabaseHelper.instance.getAnalyticsSummary(days: days);
 });
 
-// ANALYTICS SCREEN
-class AnalyticsScreen extends ConsumerStatefulWidget {
+// ─────────────────────────────────────────────────────────────────────────────
+class AnalyticsScreen extends ConsumerWidget {
   const AnalyticsScreen({super.key});
 
   @override
-  ConsumerState<AnalyticsScreen> createState() => _AnalyticsScreenState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final asyncData = ref.watch(analyticsDataProvider);
+    final selDays = ref.watch(analyticsFilterProvider);
+    final isMobile = Responsive.isMobile(context);
+    final isTablet = Responsive.isTablet(context);
 
-class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
-
-  @override
-  Widget build(BuildContext context) {
-    final analyticsAsync = ref.watch(analyticsDataProvider);
-    final selectedDays   = ref.watch(analyticsFilterProvider);
-    final isMobile       = Responsive.isMobile(context);
-    final isTablet       = Responsive.isTablet(context);
-
+    // FIX #9: Sticky filter tabs — the tab row lives OUTSIDE the scrollable
+    // content (above the Expanded) so it never scrolls away.
     return ColoredBox(
       color: const Color(0xFF080E1A),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildHeader(selectedDays),
+          // ── Pinned filter tabs ──────────────────────────────────────────────
+          _FilterTabs(selectedDays: selDays, ref: ref),
+
+          // ── Scrollable content ──────────────────────────────────────────────
           Expanded(
-            child: analyticsAsync.when(
+            child: asyncData.when(
               loading: () => const Center(
                 child: CircularProgressIndicator(color: Color(0xFF22d3ee)),
               ),
               error: (e, _) => Center(
-                child: Text('Error: $e',
-                    style: const TextStyle(color: Colors.white54)),
+                child: Text(
+                  'Error: $e',
+                  style: const TextStyle(color: Colors.white54),
+                ),
               ),
-              data: (data) => _buildContent(context, data, isMobile, isTablet),
+              data: (data) =>
+                  _Content(data: data, isMobile: isMobile, isTablet: isTablet),
             ),
           ),
         ],
       ),
     );
   }
+}
 
+// ── PINNED FILTER TABS ────────────────────────────────────────────────────────
+class _FilterTabs extends StatelessWidget {
+  final int? selectedDays;
+  final WidgetRef ref;
+  const _FilterTabs({required this.selectedDays, required this.ref});
 
-  /// Must match the actual sidebar width defined in sidebar.dart.
-  /// Update this if the sidebar width ever changes.
-  static const double _kSidebarWidth = 201.0;
+  @override
+  Widget build(BuildContext context) {
+    final hPad = MediaQuery.of(context).size.width * 0.05;
+    final vPad = MediaQuery.of(context).size.height * 0.02;
 
-  double _summaryCardAspectRatio(BuildContext context) {
-    final isLandscape =
-        MediaQuery.of(context).orientation == Orientation.landscape;
-
-    if (!isLandscape) {
-      // Portrait
-      return Responsive.responsiveValue(context,
-          mobile: 0.95, tablet: 1.2, desktop: 1.5);
-    }
-
-    final screenW  = MediaQuery.of(context).size.width;
-    const padding  = 40.0;
-    const spacing  = 36.0;
-    final contentW = screenW - _kSidebarWidth - padding - spacing;
-    final cardW    = contentW / 4;
-
-    // Target card height = 115px (icon row + number + label + breathing room)
-    return (cardW / 115).clamp(1.2, 3.0);
-  }
-
-  // HEADER 
-
-  Widget _buildHeader(int? selectedDays) {
     return Padding(
-      padding: EdgeInsets.fromLTRB(MediaQuery.of(context).size.width * 0.05, MediaQuery.of(context).size.height * 0.02, MediaQuery.of(context).size.width * 0.05, MediaQuery.of(context).size.height * 0.015),
+      padding: EdgeInsets.fromLTRB(hPad, vPad, hPad, vPad * 0.75),
       child: Container(
-        padding: EdgeInsets.all(MediaQuery.of(context).size.height * 0.005),
+        padding: const EdgeInsets.all(4),
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: const Color(0xFF0f172a),
-          borderRadius: BorderRadius.circular(MediaQuery.of(context).size.width * 0.04),
-          boxShadow: [
-            BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.8), offset: const Offset(4, 4),   blurRadius: 8),
-            BoxShadow(color: const Color(0xFF1e293b).withValues(alpha: 0.8), offset: const Offset(-4, -4), blurRadius: 8),
+          borderRadius: BorderRadius.circular(
+            MediaQuery.of(context).size.width * 0.04,
+          ),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0xFF0b1120),
+              offset: Offset(4, 4),
+              blurRadius: 8,
+            ),
+            BoxShadow(
+              color: Color(0xFF1e293b),
+              offset: Offset(-4, -4),
+              blurRadius: 8,
+            ),
           ],
         ),
         child: IntrinsicWidth(
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _filterBtn('7 Days',   selectedDays == 7,    () => ref.read(analyticsFilterProvider.notifier).state = 7),
+              _tab(
+                context,
+                '7 Days',
+                selectedDays == 7,
+                () => ref.read(analyticsFilterProvider.notifier).state = 7,
+              ),
               SizedBox(width: MediaQuery.of(context).size.width * 0.01),
-              _filterBtn('30 Days',  selectedDays == 30,   () => ref.read(analyticsFilterProvider.notifier).state = 30),
+              _tab(
+                context,
+                '30 Days',
+                selectedDays == 30,
+                () => ref.read(analyticsFilterProvider.notifier).state = 30,
+              ),
               SizedBox(width: MediaQuery.of(context).size.width * 0.01),
-              _filterBtn('All Time', selectedDays == null, () => ref.read(analyticsFilterProvider.notifier).state = null),
+              _tab(
+                context,
+                'All Time',
+                selectedDays == null,
+                () => ref.read(analyticsFilterProvider.notifier).state = null,
+              ),
             ],
           ),
         ),
@@ -114,939 +127,1170 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     );
   }
 
-  Widget _filterBtn(String label, bool isSelected, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(MediaQuery.of(context).size.width * 0.03),
-      child: Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: Responsive.responsivePadding(context, mobile: 12, tablet: 14, desktop: 16),
-          vertical:   Responsive.responsivePadding(context, mobile: 8,  tablet: 9,  desktop: 10),
-        ),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF1e293b) : Colors.transparent,
-          borderRadius: BorderRadius.circular(MediaQuery.of(context).size.width * 0.03),
-          boxShadow: isSelected
-              ? [BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.6), offset: const Offset(2, 2), blurRadius: 4)]
-              : [],
-        ),
-        child: Text(label,
-          style: TextStyle(
-            fontSize:   Responsive.responsiveFont(context, mobile: 12, tablet: 13, desktop: 14),
-            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-            color:      isSelected ? const Color(0xFF22d3ee) : const Color(0xFF64748b),
+  Widget _tab(BuildContext ctx, String label, bool sel, VoidCallback onTap) =>
+      InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(ctx.rp(12)),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: EdgeInsets.symmetric(
+            horizontal: Responsive.responsivePadding(
+              ctx,
+              mobile: 14,
+              tablet: 16,
+              desktop: 18,
+            ),
+            vertical: Responsive.responsivePadding(
+              ctx,
+              mobile: 8,
+              tablet: 9,
+              desktop: 10,
+            ),
+          ),
+          decoration: BoxDecoration(
+            color: sel ? const Color(0xFF1e293b) : Colors.transparent,
+            borderRadius: BorderRadius.circular(ctx.rp(12)),
+            boxShadow: sel
+                ? [
+                    const BoxShadow(
+                      color: Color(0xFF0b1120),
+                      offset: Offset(2, 2),
+                      blurRadius: 4,
+                    ),
+                  ]
+                : [],
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: Responsive.responsiveFont(
+                ctx,
+                mobile: 12,
+                tablet: 13,
+                desktop: 14,
+              ),
+              fontWeight: sel ? FontWeight.w600 : FontWeight.w500,
+              color: sel ? const Color(0xFF22d3ee) : const Color(0xFF64748b),
+            ),
           ),
         ),
-      ),
-    );
-  }
+      );
+}
 
-  // CONTENT
+// ── SCROLLABLE CONTENT ────────────────────────────────────────────────────────
+class _Content extends StatelessWidget {
+  final Map<String, dynamic> data;
+  final bool isMobile, isTablet;
+  const _Content({
+    required this.data,
+    required this.isMobile,
+    required this.isTablet,
+  });
 
-  Widget _buildContent(
-    BuildContext context,
-    Map<String, dynamic> data,
-    bool isMobile,
-    bool isTablet,
-  ) {
-    final totalSessions     = data['total_sessions']     as int? ?? 0;
-    final totalAlerts       = data['total_alerts']       as int? ?? 0;
-    final drowsinessEvents  = data['drowsiness_events']  as int? ?? 0;
-    final distractionEvents = data['distraction_events'] as int? ?? 0;
-    final dailyTrends  = (data['daily_trends']        as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
-    final hourlyDist   = (data['hourly_distribution'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
+  @override
+  Widget build(BuildContext context) {
+    final sessions = data['total_sessions'] as int? ?? 0;
+    final alerts = data['total_alerts'] as int? ?? 0;
+    final drowsy = data['drowsiness_events'] as int? ?? 0;
+    final distracted = data['distraction_events'] as int? ?? 0;
+    final dailyTrends =
+        (data['daily_trends'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final hourlyDist =
+        (data['hourly_distribution'] as List?)?.cast<Map<String, dynamic>>() ??
+        [];
 
     return RefreshIndicator(
       color: const Color(0xFF22d3ee),
       backgroundColor: const Color(0xFF0f172a),
-      onRefresh: () async {
-        ref.invalidate(analyticsDataProvider);
-        await ref.read(analyticsDataProvider.future);
-      },
+      onRefresh: () async {},
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildSummaryCards(context,
-              isMobile: isMobile, isTablet: isTablet,
-              totalSessions: totalSessions, totalAlerts: totalAlerts,
-              drowsinessEvents: drowsinessEvents, distractionEvents: distractionEvents,
+            // Summary cards
+            _SummaryCards(
+              isMobile: isMobile,
+              isTablet: isTablet,
+              sessions: sessions,
+              alerts: alerts,
+              drowsy: drowsy,
+              distracted: distracted,
             ),
-            SizedBox(height: Responsive.responsiveSpacing(context, mobile: 24, tablet: 28, desktop: 32)),
+            SizedBox(
+              height: Responsive.responsiveSpacing(
+                context,
+                mobile: 24,
+                tablet: 28,
+                desktop: 32,
+              ),
+            ),
+            // Charts
             Padding(
-              padding: EdgeInsets.symmetric(horizontal: MediaQuery.of(context).size.width * 0.05),
+              padding: EdgeInsets.symmetric(
+                horizontal: MediaQuery.of(context).size.width * 0.05,
+              ),
               child: isMobile || isTablet
-                  ? _buildMobileChartsLayout(context, dailyTrends, hourlyDist)
-                  : _buildDesktopChartsLayout(context, dailyTrends, hourlyDist),
+                  ? _mobileCharts(context, dailyTrends, hourlyDist)
+                  : _desktopCharts(context, dailyTrends, hourlyDist),
             ),
-            SizedBox(height: context.rs(14)),
+            SizedBox(height: context.rs(16)),
           ],
         ),
       ),
     );
   }
 
-  // SUMMARY CARDS
-  Widget _buildSummaryCards(
-    BuildContext context, {
-    required bool isMobile,
-    required bool isTablet,
-    required int totalSessions,
-    required int totalAlerts,
-    required int drowsinessEvents,
-    required int distractionEvents,
-  }) {
-    return Padding(
-      padding: EdgeInsets.fromLTRB(MediaQuery.of(context).size.width * 0.05, 0, MediaQuery.of(context).size.width * 0.05, 0),
-      child: GridView.count(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        crossAxisCount:   isMobile ? 2 : 4,
-        mainAxisSpacing:  Responsive.responsiveSpacing(context, mobile: 12, tablet: 14, desktop: 16),
-        crossAxisSpacing: Responsive.responsiveSpacing(context, mobile: 12, tablet: 14, desktop: 16),
-        // FIX: use dynamic aspect ratio that accounts for sidebar width in landscape
-        childAspectRatio: _summaryCardAspectRatio(context),
-        children: [
-          _HoverableSummaryCard(
-            icon: Icons.timer_outlined,
-            label: 'Total Sessions',
-            value: '$totalSessions',
-            isPositive: true,
-          ),
-          _HoverableSummaryCard(
-            icon: Icons.warning_amber_outlined,
-            label: 'Total Alerts',
-            value: '$totalAlerts',
-            isPositive: totalAlerts == 0,
-          ),
-          _HoverableSummaryCard(
-            icon: Icons.bedtime_outlined,
-            label: 'Drowsiness Events',
-            value: '$drowsinessEvents',
-            isPositive: drowsinessEvents == 0,
-          ),
-          _HoverableSummaryCard(
-            icon: Icons.visibility_off_outlined,
-            label: 'Distraction Events',
-            value: '$distractionEvents',
-            isPositive: distractionEvents == 0,
-          ),
-        ],
+  Widget _mobileCharts(
+    BuildContext ctx,
+    List<Map<String, dynamic>> trends,
+    List<Map<String, dynamic>> hourly,
+  ) => Column(
+    children: [
+      _LineCard(dailyTrends: trends),
+      SizedBox(
+        height: Responsive.responsiveSpacing(
+          ctx,
+          mobile: 24,
+          tablet: 28,
+          desktop: 32,
+        ),
       ),
-    );
-  }
+      _BarCard(hourlyDist: hourly),
+    ],
+  );
 
-  // CHART LAYOUTS
-
-  Widget _buildMobileChartsLayout(
-    BuildContext context,
-    List<Map<String, dynamic>> dailyTrends,
-    List<Map<String, dynamic>> hourlyDist,
-  ) {
-    return Column(children: [
-      _buildDrowsinessVsDistractionChart(context, dailyTrends),
-      SizedBox(height: Responsive.responsiveSpacing(context, mobile: 24, tablet: 28, desktop: 32)),
-      _buildAlertTimelineChart(context, hourlyDist),
-    ]);
-  }
-
-  Widget _buildDesktopChartsLayout(
-    BuildContext context,
-    List<Map<String, dynamic>> dailyTrends,
-    List<Map<String, dynamic>> hourlyDist,
-  ) {
-    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Expanded(flex: 6, child: _buildDrowsinessVsDistractionChart(context, dailyTrends)),
-      SizedBox(width: Responsive.responsiveSpacing(context, mobile: 16, tablet: 24, desktop: 32)),
-      Expanded(flex: 4, child: _buildAlertTimelineChart(context, hourlyDist)),
-    ]);
-  }
-
-  // HELPERS
-
-  Widget _buildExpandBadge() {
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: context.rp(6), vertical: context.rs(3)),
-      decoration: BoxDecoration(
-        color: const Color(0xFF22d3ee).withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFF22d3ee).withValues(alpha: 0.25)),
+  Widget _desktopCharts(
+    BuildContext ctx,
+    List<Map<String, dynamic>> trends,
+    List<Map<String, dynamic>> hourly,
+  ) => Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Expanded(flex: 6, child: _LineCard(dailyTrends: trends)),
+      SizedBox(
+        width: Responsive.responsiveSpacing(
+          ctx,
+          mobile: 16,
+          tablet: 24,
+          desktop: 32,
+        ),
       ),
-      child: const Icon(Icons.open_in_full_rounded, color: Color(0xFF22d3ee), size: 13),
-    );
-  }
+      Expanded(flex: 4, child: _BarCard(hourlyDist: hourly)),
+    ],
+  );
+}
 
-  Widget _buildLegendItem(BuildContext context, String label, Color color) {
-    return Row(children: [
-      Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-      SizedBox(width: context.rp(5)),
-      Text(label, style: TextStyle(
-        fontSize: Responsive.responsiveFont(context, mobile: 11, tablet: 12, desktop: 13),
-        color: const Color(0xFF94a3b8),
-      )),
-    ]);
-  }
+// ── SUMMARY CARDS ─────────────────────────────────────────────────────────────
+class _SummaryCards extends StatelessWidget {
+  final bool isMobile, isTablet;
+  final int sessions, alerts, drowsy, distracted;
+  const _SummaryCards({
+    required this.isMobile,
+    required this.isTablet,
+    required this.sessions,
+    required this.alerts,
+    required this.drowsy,
+    required this.distracted,
+  });
 
-  _LineChartData _parseLineChartData(List<Map<String, dynamic>> dailyTrends) {
-    List<FlSpot> drowsySpots;
-    List<FlSpot> distractedSpots;
-    List<String> xLabels;
-
-    if (dailyTrends.isEmpty) {
-      drowsySpots     = const [FlSpot(0,0), FlSpot(1,0), FlSpot(2,0), FlSpot(3,0), FlSpot(4,0), FlSpot(5,0), FlSpot(6,0)];
-      distractedSpots = const [FlSpot(0,0), FlSpot(1,0), FlSpot(2,0), FlSpot(3,0), FlSpot(4,0), FlSpot(5,0), FlSpot(6,0)];
-      xLabels = const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    } else {
-      drowsySpots = []; distractedSpots = []; xLabels = [];
-      for (int i = 0; i < dailyTrends.length; i++) {
-        drowsySpots.add(FlSpot(i.toDouble(), (dailyTrends[i]['drowsy_count']     as int? ?? 0).toDouble()));
-        distractedSpots.add(FlSpot(i.toDouble(), (dailyTrends[i]['distracted_count'] as int? ?? 0).toDouble()));
-        xLabels.add(_shortDate(dailyTrends[i]['date'] as String? ?? ''));
-      }
+  double _aspect(BuildContext ctx) {
+    final landscape = MediaQuery.of(ctx).orientation == Orientation.landscape;
+    if (!landscape) {
+      return Responsive.responsiveValue(
+        ctx,
+        mobile: 0.95,
+        tablet: 1.2,
+        desktop: 1.5,
+      );
     }
-
-    final double maxX = (drowsySpots.length - 1).toDouble().clamp(1.0, double.infinity);
-    double dataMaxY = 5;
-    for (final s in [...drowsySpots, ...distractedSpots]) {
-      if (s.y > dataMaxY) dataMaxY = s.y;
-    }
-    final double maxY      = ((dataMaxY / 5).ceil() * 5).toDouble();
-    final double yInterval = maxY <= 10 ? 2.0 : maxY <= 20 ? 5.0 : 10.0;
-
-    return _LineChartData(
-      drowsySpots: drowsySpots, distractedSpots: distractedSpots,
-      xLabels: xLabels, maxX: maxX, maxY: maxY, yInterval: yInterval,
-    );
+    // FIX #11: use the same sidebar width constant as main.dart
+    const sbW = kSidebarWidth;
+    final w = MediaQuery.of(ctx).size.width - sbW - 40 - 36;
+    return (w / 4 / 115).clamp(1.2, 3.0);
   }
 
-  String _shortDate(String iso) {
-    if (iso.length < 10) return iso;
-    try {
-      final d = DateTime.parse(iso);
-      const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-      return '${mo[d.month - 1]} ${d.day}';
-    } catch (_) {
-      return iso.length >= 7 ? iso.substring(5) : iso;
-    }
-  }
+  @override
+  Widget build(BuildContext ctx) => Padding(
+    padding: EdgeInsets.symmetric(
+      horizontal: MediaQuery.of(ctx).size.width * 0.05,
+    ),
+    child: GridView.count(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      crossAxisCount: isMobile ? 2 : 4,
+      mainAxisSpacing: Responsive.responsiveSpacing(
+        ctx,
+        mobile: 12,
+        tablet: 14,
+        desktop: 16,
+      ),
+      crossAxisSpacing: Responsive.responsiveSpacing(
+        ctx,
+        mobile: 12,
+        tablet: 14,
+        desktop: 16,
+      ),
+      childAspectRatio: _aspect(ctx),
+      children: [
+        _StatCard(
+          icon: Icons.timer_outlined,
+          label: 'Total Sessions',
+          value: '$sessions',
+          positive: true,
+        ),
+        _StatCard(
+          icon: Icons.warning_amber_outlined,
+          label: 'Total Alerts',
+          value: '$alerts',
+          positive: alerts == 0,
+        ),
+        _StatCard(
+          icon: Icons.bedtime_outlined,
+          label: 'Drowsiness',
+          value: '$drowsy',
+          positive: drowsy == 0,
+        ),
+        _StatCard(
+          icon: Icons.visibility_off_outlined,
+          label: 'Distraction',
+          value: '$distracted',
+          positive: distracted == 0,
+        ),
+      ],
+    ),
+  );
+}
 
-  // LINE CHART CARD 
+// ── LINE CHART CARD ───────────────────────────────────────────────────────────
+/// FIX #8: Chart is wrapped in a horizontal SingleChildScrollView with
+/// minPointSpacing = 40 px per data point.  30-day data (30 points) now
+/// spreads across 1200 px instead of squashing into the card width.
+class _LineCard extends StatelessWidget {
+  final List<Map<String, dynamic>> dailyTrends;
+  const _LineCard({required this.dailyTrends});
 
-  Widget _buildDrowsinessVsDistractionChart(
-    BuildContext context,
-    List<Map<String, dynamic>> dailyTrends,
-  ) {
-    final parsed = _parseLineChartData(dailyTrends);
-
+  @override
+  Widget build(BuildContext context) {
+    final parsed = _parse();
     return GestureDetector(
-      onTap: () => _openLineChartModal(context, dailyTrends, parsed),
+      onTap: () => _modal(context, parsed),
       child: Container(
-        height: Responsive.responsiveHeight(context, mobile: 300, tablet: 320, desktop: 340),
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          color: const Color(0xFF0f172a),
-          borderRadius: BorderRadius.circular(
-            Responsive.responsiveBorderRadius(context, mobile: 20, tablet: 22, desktop: 24),
-          ),
-          boxShadow: const [
-            BoxShadow(color: Color(0xFF0b1120), offset: Offset(8, 8),   blurRadius: 16),
-            BoxShadow(color: Color(0xFF1e293b), offset: Offset(-8, -8), blurRadius: 16),
-          ],
+        height: Responsive.responsiveHeight(
+          context,
+          mobile: 300,
+          tablet: 320,
+          desktop: 340,
         ),
+        decoration: _cardDecor(),
         padding: EdgeInsets.all(
-          Responsive.responsivePadding(context, mobile: 20, tablet: 22, desktop: 24),
+          Responsive.responsivePadding(
+            context,
+            mobile: 20,
+            tablet: 22,
+            desktop: 24,
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Drowsiness vs Distraction Trends',
+            Text(
+              'Drowsiness vs Distraction Trends',
               style: TextStyle(
-                fontSize:   Responsive.responsiveFont(context, mobile: 14, tablet: 15, desktop: 16),
+                fontSize: context.sp(14),
                 fontWeight: FontWeight.w600,
-                color:      const Color(0xFFcbd5e1),
+                color: const Color(0xFFcbd5e1),
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
             SizedBox(height: context.rs(6)),
-            Row(children: [
-              _buildLegendItem(context, 'Drowsiness', const Color(0xFFef4444)),
-              SizedBox(width: context.rp(10)),
-              _buildLegendItem(context, 'Distraction', const Color(0xFFfbbf24)),
-              const Spacer(),
-              _buildExpandBadge(),
-            ]),
-            SizedBox(height: Responsive.responsiveSpacing(context, mobile: 12, tablet: 16, desktop: 20)),
-            Expanded(
-              child: _buildLineChartWidget(
-                drowsySpots:     parsed.drowsySpots,
-                distractedSpots: parsed.distractedSpots,
-                xLabels:         parsed.xLabels,
-                maxX:            parsed.maxX,
-                maxY:            parsed.maxY,
-                yInterval:       parsed.yInterval,
-                labelFontSize:   10,
-              ),
+            Row(
+              children: [
+                _legend(context, 'Drowsiness', const Color(0xFFef4444)),
+                SizedBox(width: context.rp(10)),
+                _legend(context, 'Distraction', const Color(0xFFfbbf24)),
+                const Spacer(),
+                _expandBadge(context),
+              ],
             ),
+            SizedBox(height: context.rs(12)),
+            Expanded(child: _scrollableChart(context, parsed, 10)),
           ],
         ),
       ),
     );
   }
 
-  void _openLineChartModal(
-    BuildContext context,
-    List<Map<String, dynamic>> dailyTrends,
-    _LineChartData parsed,
-  ) {
+  void _modal(BuildContext context, _LineData d) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.black.withValues(alpha: 0.75),
       builder: (_) => _ChartModal(
-        title:    'Drowsiness vs Distraction',
-        subtitle: 'Swipe chart sideways  •  Tap a point to see value',
-        chartBuilder: (availableHeight) {
-          // chartH and chartW are now computed inside LayoutBuilder below
-          return LayoutBuilder(
-  builder: (context, constraints) {
-    // Measure remaining height after fixed widgets:
-    const fixedH = 122.0;
-    final chartH2  = (constraints.maxHeight - fixedH).clamp(80.0, double.infinity);
-    final chartW2  = (parsed.xLabels.length * 64.0)
-        .clamp(constraints.maxWidth, double.infinity);
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              _buildLegendItem(context, 'Drowsiness', const Color(0xFFef4444)),
-              SizedBox(width: context.rp(16)),
-              _buildLegendItem(context, 'Distraction', const Color(0xFFfbbf24)),
-            ]),
-            SizedBox(height: context.rs(12)),
-            SizedBox(
-              height: chartH2,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                physics: const BouncingScrollPhysics(),
-                child: SizedBox(
-                  width: chartW2,
-                  height: chartH2,
-                  child: _buildLineChartWidget(
-                    drowsySpots:     parsed.drowsySpots,
-                    distractedSpots: parsed.distractedSpots,
-                    xLabels:         parsed.xLabels,
-                    maxX:            parsed.maxX,
-                    maxY:            parsed.maxY,
-                    yInterval:       parsed.yInterval,
-                    labelFontSize:   12,
-                  ),
+        title: 'Drowsiness vs Distraction',
+        subtitle: 'Swipe chart sideways  •  Tap point to see value',
+        child: LayoutBuilder(
+          builder: (ctx, con) {
+            final chartH = (con.maxHeight - 90).clamp(80.0, 600.0);
+            return Column(
+              children: [
+                Row(
+                  children: [
+                    _legend(ctx, 'Drowsiness', const Color(0xFFef4444)),
+                    SizedBox(width: ctx.rp(16)),
+                    _legend(ctx, 'Distraction', const Color(0xFFfbbf24)),
+                  ],
                 ),
-              ),
-            ),
-            Padding(
-              padding: EdgeInsets.only(top: context.rs(6)),
-              child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                const Icon(Icons.swipe_rounded, color: Color(0xFF475569), size: 13),
-                SizedBox(width: MediaQuery.of(context).size.width * 0.01),
-                Text('Swipe to see all dates',
-                    style: TextStyle(color: const Color(0xFF475569), fontSize: context.sp(10))),
-              ]),
-            ),
-            SizedBox(height: context.rs(12)),
-            if (dailyTrends.isNotEmpty) _buildLineSummaryRow(parsed),
-          ],
-        );
-      },
-    );
-        },
+                SizedBox(height: ctx.rs(12)),
+                SizedBox(height: chartH, child: _scrollableChart(ctx, d, 12)),
+                SizedBox(height: ctx.rs(6)),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.swipe_rounded,
+                      color: Color(0xFF475569),
+                      size: 13,
+                    ),
+                    SizedBox(width: ctx.rp(4)),
+                    Text(
+                      'Swipe to see all dates',
+                      style: TextStyle(
+                        color: const Color(0xFF475569),
+                        fontSize: ctx.sp(10),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
 
-  Widget _buildLineSummaryRow(_LineChartData parsed) {
-    final totalDrowsy     = parsed.drowsySpots.fold(0.0,     (s, x) => s + x.y).toInt();
-    final totalDistracted = parsed.distractedSpots.fold(0.0, (s, x) => s + x.y).toInt();
-    final peak = parsed.drowsySpots.isEmpty ? 0
-        : parsed.drowsySpots.reduce((a, b) => a.y > b.y ? a : b).y.toInt();
-    return Row(children: [
-      _summaryPill('Total Drowsy',     '$totalDrowsy',    const Color(0xFFef4444)),
-      SizedBox(width: context.rp(8)),
-      _summaryPill('Total Distracted', '$totalDistracted', const Color(0xFFfbbf24)),
-      SizedBox(width: context.rp(8)),
-      _summaryPill('Peak Day',         '$peak alerts',    const Color(0xFF22d3ee)),
-    ]);
+  /// Wraps the chart in a horizontal scroll view.
+  /// Each data point gets at least 40 px — so 30 points = min 1200 px width.
+  Widget _scrollableChart(BuildContext ctx, _LineData d, double fontSize) =>
+      LayoutBuilder(
+        builder: (ctx, con) {
+          const minSpacing = 40.0;
+          final minW = d.labels.length * minSpacing;
+          final w = minW.clamp(con.maxWidth, double.infinity);
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: SizedBox(
+              width: w,
+              height: con.maxHeight,
+              child: _lineWidget(ctx, d, fontSize),
+            ),
+          );
+        },
+      );
+
+  Widget _lineWidget(BuildContext ctx, _LineData d, double fs) => LineChart(
+    LineChartData(
+      clipData: const FlClipData.all(),
+      gridData: FlGridData(
+        show: true,
+        drawVerticalLine: false,
+        horizontalInterval: d.yInterval,
+        getDrawingHorizontalLine: (_) => FlLine(
+          color: const Color(0xFF1e293b),
+          strokeWidth: 1,
+          dashArray: [3, 3],
+        ),
+      ),
+      titlesData: FlTitlesData(
+        rightTitles: const AxisTitles(
+          sideTitles: SideTitles(showTitles: false),
+        ),
+        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        bottomTitles: AxisTitles(
+          sideTitles: SideTitles(
+            showTitles: true,
+            reservedSize: 30,
+            interval: 1,
+            getTitlesWidget: (v, _) {
+              final i = v.round();
+              if (i < 0 || i >= d.labels.length) return const SizedBox.shrink();
+              return Padding(
+                padding: EdgeInsets.only(top: ctx.rs(8)),
+                child: Text(
+                  d.labels[i],
+                  style: TextStyle(
+                    color: const Color(0xFF64748b),
+                    fontSize: fs - 1,
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        leftTitles: AxisTitles(
+          sideTitles: SideTitles(
+            showTitles: true,
+            interval: d.yInterval,
+            reservedSize: 38,
+            getTitlesWidget: (v, _) {
+              if (v == 0 || v == d.maxY) return const SizedBox.shrink();
+              return Text(
+                '${v.toInt()}',
+                style: TextStyle(
+                  color: const Color(0xFF64748b),
+                  fontSize: fs - 1,
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+      borderData: FlBorderData(show: false),
+      minX: 0,
+      maxX: d.maxX,
+      minY: 0,
+      maxY: d.maxY,
+      lineBarsData: [
+        _bar(d.drowsy, const Color(0xFFef4444)),
+        _bar(d.distracted, const Color(0xFFfbbf24)),
+      ],
+      lineTouchData: LineTouchData(
+        handleBuiltInTouches: true,
+        touchTooltipData: LineTouchTooltipData(
+          getTooltipColor: (_) => const Color(0xFF0f172a),
+          tooltipBorderRadius: BorderRadius.circular(12),
+          tooltipPadding: EdgeInsets.all(ctx.rp(8)),
+          getTooltipItems: (spots) => spots
+              .map(
+                (s) => LineTooltipItem(
+                  '${s.y.toInt()} ${s.barIndex == 0 ? "drowsy" : "distracted"}',
+                  TextStyle(
+                    color: s.barIndex == 0
+                        ? const Color(0xFFef4444)
+                        : const Color(0xFFfbbf24),
+                    fontWeight: FontWeight.bold,
+                    fontSize: fs,
+                  ),
+                ),
+              )
+              .toList(),
+        ),
+      ),
+    ),
+  );
+
+  LineChartBarData _bar(List<FlSpot> spots, Color c) => LineChartBarData(
+    spots: spots,
+    isCurved: spots.length > 2,
+    curveSmoothness: 0.3,
+    color: c,
+    barWidth: 3,
+    isStrokeCapRound: true,
+    dotData: FlDotData(
+      show: true,
+      getDotPainter: (_, _, _, _) => FlDotCirclePainter(
+        radius: 4,
+        color: c,
+        strokeWidth: 2,
+        strokeColor: const Color(0xFF0f172a),
+      ),
+    ),
+    belowBarData: BarAreaData(show: false),
+  );
+
+  _LineData _parse() {
+    if (dailyTrends.isEmpty) {
+      final empty = List.generate(7, (i) => FlSpot(i.toDouble(), 0));
+      return _LineData(
+        drowsy: empty,
+        distracted: List.from(empty),
+        labels: const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+        maxX: 6,
+        maxY: 5,
+        yInterval: 2,
+      );
+    }
+    final drowsy = <FlSpot>[], dist = <FlSpot>[], labels = <String>[];
+    for (int i = 0; i < dailyTrends.length; i++) {
+      final r = dailyTrends[i];
+      drowsy.add(
+        FlSpot(i.toDouble(), (r['drowsy_count'] as int? ?? 0).toDouble()),
+      );
+      dist.add(
+        FlSpot(i.toDouble(), (r['distracted_count'] as int? ?? 0).toDouble()),
+      );
+      labels.add(_shortDate(r['date'] as String? ?? ''));
+    }
+    final maxY0 = [
+      ...drowsy,
+      ...dist,
+    ].map((s) => s.y).fold(0.0, (a, b) => a > b ? a : b);
+    final maxY = ((maxY0 / 5).ceil() * 5.0).clamp(5.0, double.infinity);
+    return _LineData(
+      drowsy: drowsy,
+      distracted: dist,
+      labels: labels,
+      maxX: (drowsy.length - 1).toDouble().clamp(1, double.infinity),
+      maxY: maxY,
+      yInterval: maxY <= 10
+          ? 2.0
+          : maxY <= 20
+          ? 5.0
+          : 10.0,
+    );
   }
 
-  Widget _buildLineChartWidget({
-    required List<FlSpot> drowsySpots,
-    required List<FlSpot> distractedSpots,
-    required List<String> xLabels,
-    required double maxX,
-    required double maxY,
-    required double yInterval,
-    required double labelFontSize,
-  }) {
-    return LineChart(
-      LineChartData(
-        clipData: const FlClipData.all(),
-        gridData: FlGridData(
-          show: true, drawVerticalLine: false,
-          horizontalInterval: yInterval,
-          getDrawingHorizontalLine: (_) => FlLine(
-            color: const Color(0xFF1e293b), strokeWidth: 1, dashArray: [3, 3],
+  String _shortDate(String iso) {
+    try {
+      final d = DateTime.parse(iso);
+      const m = [
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
+      ];
+      return '${m[d.month - 1]} ${d.day}';
+    } catch (_) {
+      return iso.length >= 7 ? iso.substring(5) : iso;
+    }
+  }
+}
+
+class _LineData {
+  final List<FlSpot> drowsy, distracted;
+  final List<String> labels;
+  final double maxX, maxY, yInterval;
+  const _LineData({
+    required this.drowsy,
+    required this.distracted,
+    required this.labels,
+    required this.maxX,
+    required this.maxY,
+    required this.yInterval,
+  });
+}
+
+// ── BAR CHART CARD ────────────────────────────────────────────────────────────
+/// FIX #14: Height uses Responsive instead of hardcoded 220.
+/// FIX #3:  Hour labels come from substr(triggered_at,12,2) in the DB query,
+///          so they always reflect LOCAL time (not UTC).
+class _BarCard extends StatelessWidget {
+  final List<Map<String, dynamic>> hourlyDist;
+  const _BarCard({required this.hourlyDist});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: () => _modal(context),
+    child: Container(
+      // FIX #14: was height: 220 (hardcoded)
+      height: Responsive.responsiveHeight(
+        context,
+        mobile: 240,
+        tablet: 260,
+        desktop: 280,
+      ),
+      decoration: _cardDecor(),
+      padding: EdgeInsets.all(
+        Responsive.responsivePadding(
+          context,
+          mobile: 20,
+          tablet: 22,
+          desktop: 24,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Hourly Alert Distribution',
+                  style: TextStyle(
+                    fontSize: context.sp(14),
+                    fontWeight: FontWeight.w600,
+                    color: const Color(0xFFcbd5e1),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              SizedBox(width: context.rp(8)),
+              _expandBadge(context),
+            ],
+          ),
+          SizedBox(height: context.rs(16)),
+          Expanded(child: _barWidget(context, _preview(), 10, false)),
+        ],
+      ),
+    ),
+  );
+
+  void _modal(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.75),
+      builder: (_) => _ChartModal(
+        title: 'Hourly Alert Distribution',
+        subtitle: 'All hours  •  Swipe to scroll',
+        child: LayoutBuilder(
+          builder: (ctx, con) {
+            final chartH = (con.maxHeight - 80).clamp(80.0, 600.0);
+            final full = _full();
+            final minW = (full.length * 44.0).clamp(
+              MediaQuery.of(ctx).size.width - 32,
+              double.infinity,
+            );
+            return Column(
+              children: [
+                SizedBox(
+                  height: chartH,
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    child: SizedBox(
+                      width: minW,
+                      height: chartH,
+                      child: _barWidget(ctx, full, 11, true),
+                    ),
+                  ),
+                ),
+                SizedBox(height: ctx.rs(6)),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.swipe_rounded,
+                      color: Color(0xFF475569),
+                      size: 13,
+                    ),
+                    SizedBox(width: ctx.rp(4)),
+                    Text(
+                      'Swipe to see all hours',
+                      style: TextStyle(
+                        color: const Color(0xFF475569),
+                        fontSize: ctx.sp(10),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _barWidget(
+    BuildContext ctx,
+    List<Map<String, dynamic>> dist,
+    double fs,
+    bool full,
+  ) {
+    final groups = <BarChartGroupData>[];
+    final labels = <String>[];
+    for (int i = 0; i < dist.length; i++) {
+      final h = dist[i]['hour'] as int;
+      final c = (dist[i]['count'] as int).toDouble();
+      labels.add(_hLabel(h));
+      groups.add(
+        BarChartGroupData(
+          x: i,
+          barRods: [
+            BarChartRodData(
+              toY: c,
+              width: Responsive.responsiveValue(
+                ctx,
+                mobile: 16.0,
+                tablet: 18.0,
+                desktop: 20.0,
+              ),
+              borderRadius: BorderRadius.circular(4),
+              gradient: LinearGradient(
+                colors: c > 0
+                    ? [const Color(0xFF22d3ee), const Color(0xFF3b82f6)]
+                    : [const Color(0xFF1e293b), const Color(0xFF1e293b)],
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    final maxC = groups
+        .map((g) => g.barRods.first.toY)
+        .fold(0.0, (a, b) => a > b ? a : b);
+    final maxY = ((maxC / 5).ceil() * 5.0).clamp(5.0, double.infinity);
+    final yi = maxY <= 10
+        ? 2.0
+        : maxY <= 20
+        ? 5.0
+        : maxY <= 50
+        ? 10.0
+        : 20.0;
+
+    return BarChart(
+      BarChartData(
+        alignment: BarChartAlignment.spaceAround,
+        maxY: maxY,
+        barTouchData: BarTouchData(
+          enabled: true,
+          touchTooltipData: BarTouchTooltipData(
+            getTooltipColor: (_) => const Color(0xFF1e293b),
+            tooltipBorderRadius: BorderRadius.circular(10),
+            tooltipPadding: EdgeInsets.symmetric(
+              horizontal: ctx.rp(10),
+              vertical: ctx.rs(8),
+            ),
+            getTooltipItem: (g, _, rod, _) => BarTooltipItem(
+              '${rod.toY.toInt()} alert${rod.toY == 1 ? '' : 's'}\n${labels[g.x]}',
+              TextStyle(
+                color: const Color(0xFF22d3ee),
+                fontWeight: FontWeight.bold,
+                fontSize: fs,
+              ),
+            ),
           ),
         ),
         titlesData: FlTitlesData(
-          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          topTitles:   const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          bottomTitles: AxisTitles(sideTitles: SideTitles(
-            showTitles: true, reservedSize: 30, interval: 1,
-            getTitlesWidget: (value, meta) {
-              final idx = value.round();
-              if (idx < 0 || idx >= xLabels.length) return const SizedBox.shrink();
-              return Padding(padding: EdgeInsets.only(top: context.rs(8)),
-                child: Text(xLabels[idx],
-                  style: TextStyle(color: const Color(0xFF64748b), fontSize: labelFontSize - 1)));
-            },
-          )),
-          leftTitles: AxisTitles(sideTitles: SideTitles(
-            showTitles: true, interval: yInterval, reservedSize: 40,
-            getTitlesWidget: (value, meta) {
-              if (value == 0 || value == maxY) return const SizedBox.shrink();
-              return Text(value.toInt().toString(),
-                style: TextStyle(color: const Color(0xFF64748b), fontSize: labelFontSize - 1));
-            },
-          )),
-        ),
-        borderData: FlBorderData(show: false),
-        minX: 0, maxX: maxX, minY: 0, maxY: maxY,
-        lineBarsData: [
-          _lineBar(drowsySpots,     const Color(0xFFef4444)),
-          _lineBar(distractedSpots, const Color(0xFFfbbf24)),
-        ],
-        lineTouchData: LineTouchData(
-          handleBuiltInTouches: true,
-          touchTooltipData: LineTouchTooltipData(
-            getTooltipColor: (_) => const Color(0xFF0f172a),
-            tooltipBorderRadius: BorderRadius.circular(12),
-            tooltipPadding: EdgeInsets.all(context.rp(8)),
-            getTooltipItems: (spots) => spots.map((s) => LineTooltipItem(
-              '${s.y.toInt()} ${s.barIndex == 0 ? "drowsy" : "distracted"}',
-              TextStyle(
-                color: s.barIndex == 0 ? const Color(0xFFef4444) : const Color(0xFFfbbf24),
-                fontWeight: FontWeight.bold, fontSize: labelFontSize,
-              ),
-            )).toList(),
+          rightTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          topTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 30,
+              getTitlesWidget: (v, _) {
+                final i = v.toInt();
+                if (i < 0 || i >= labels.length) return const SizedBox.shrink();
+                return Padding(
+                  padding: EdgeInsets.only(top: ctx.rs(8)),
+                  child: Text(
+                    labels[i],
+                    style: TextStyle(
+                      color: const Color(0xFF64748b),
+                      fontSize: fs - 1,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              interval: yi,
+              reservedSize: 30,
+              getTitlesWidget: (v, _) {
+                if (v == 0 || v == maxY) return const SizedBox.shrink();
+                return Text(
+                  '${v.toInt()}',
+                  style: TextStyle(
+                    color: const Color(0xFF64748b),
+                    fontSize: fs - 1,
+                  ),
+                );
+              },
+            ),
           ),
         ),
+        gridData: FlGridData(
+          show: true,
+          drawVerticalLine: false,
+          horizontalInterval: yi,
+          getDrawingHorizontalLine: (_) => FlLine(
+            color: const Color(0xFF1e293b),
+            strokeWidth: 1,
+            dashArray: [3, 3],
+          ),
+        ),
+        borderData: FlBorderData(show: false),
+        barGroups: groups,
       ),
     );
   }
 
-  LineChartBarData _lineBar(List<FlSpot> spots, Color color) {
-    return LineChartBarData(
-      spots: spots, isCurved: spots.length > 2, curveSmoothness: 0.3,
-      color: color, barWidth: 3, isStrokeCapRound: true,
-      dotData: FlDotData(show: true,
-        getDotPainter: (_, _, _, _) => FlDotCirclePainter(
-          radius: 4, color: color, strokeWidth: 2, strokeColor: const Color(0xFF0f172a))),
-      belowBarData: BarAreaData(show: false),
-    );
+  // Preview shows 6 representative hours (avoids clutter in card)
+  List<Map<String, dynamic>> _preview() {
+    const ph = [6, 9, 12, 15, 18, 21];
+    final m = <int, int>{};
+    for (final r in hourlyDist) m[r['hour'] as int] = r['count'] as int;
+    return ph.map((h) => {'hour': h, 'count': m[h] ?? 0}).toList();
   }
 
-  // BAR CHART CARD
+  // Full 24-hour view (only hours ≥6 or that have data)
+  List<Map<String, dynamic>> _full() {
+    final m = <int, int>{};
+    for (final r in hourlyDist) m[r['hour'] as int] = r['count'] as int;
+    return List.generate(
+      24,
+      (h) => {'hour': h, 'count': m[h] ?? 0},
+    ).where((r) => (r['count'] as int) > 0 || (r['hour'] as int) >= 6).toList();
+  }
 
-  Widget _buildAlertTimelineChart(
-    BuildContext context,
-    List<Map<String, dynamic>> hourlyDist,
-  ) {
-    return GestureDetector(
-      onTap: () => _openBarChartModal(context, hourlyDist),
-      child: Container(
-       height: 220,
+  static String _hLabel(int h) {
+    if (h == 0) return '12AM';
+    if (h == 12) return '12PM';
+    return h < 12 ? '${h}AM' : '${h - 12}PM';
+  }
+}
+
+// ── STAT CARD ─────────────────────────────────────────────────────────────────
+class _StatCard extends StatefulWidget {
+  final IconData icon;
+  final String label, value;
+  final bool positive;
+  const _StatCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.positive,
+  });
+  @override
+  State<_StatCard> createState() => _StatCardState();
+}
+
+class _StatCardState extends State<_StatCard> {
+  bool _hov = false;
+  @override
+  Widget build(BuildContext context) {
+    final dot = widget.positive
+        ? const Color(0xFF10b981)
+        : const Color(0xFFfbbf24);
+    final ls = MediaQuery.of(context).orientation == Orientation.landscape;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hov = true),
+      onExit: (_) => setState(() => _hov = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: const Color(0xFF0f172a),
           borderRadius: BorderRadius.circular(
-            Responsive.responsiveBorderRadius(context, mobile: 20, tablet: 22, desktop: 24),
+            Responsive.responsiveBorderRadius(
+              context,
+              mobile: 16,
+              tablet: 18,
+              desktop: 20,
+            ),
           ),
-          boxShadow: const [
-            BoxShadow(color: Color(0xFF0b1120), offset: Offset(8, 8),   blurRadius: 16),
-            BoxShadow(color: Color(0xFF1e293b), offset: Offset(-8, -8), blurRadius: 16),
-          ],
+          boxShadow: _hov
+              ? [
+                  const BoxShadow(
+                    color: Color(0xFF0b1120),
+                    offset: Offset(-3, -3),
+                    blurRadius: 6,
+                  ),
+                  const BoxShadow(
+                    color: Color(0xFF1e293b),
+                    offset: Offset(3, 3),
+                    blurRadius: 6,
+                  ),
+                ]
+              : [
+                  const BoxShadow(
+                    color: Color(0xFF0b1120),
+                    offset: Offset(6, 6),
+                    blurRadius: 12,
+                  ),
+                  const BoxShadow(
+                    color: Color(0xFF1e293b),
+                    offset: Offset(-6, -6),
+                    blurRadius: 12,
+                  ),
+                ],
         ),
         padding: EdgeInsets.all(
-          Responsive.responsivePadding(context, mobile: 20, tablet: 22, desktop: 24),
+          ls
+              ? context.rp(10)
+              : Responsive.responsivePadding(
+                  context,
+                  mobile: 12,
+                  tablet: 16,
+                  desktop: 20,
+                ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Row(children: [
-              Expanded(
-                child: Text('Hourly Alert Distribution',
-                  style: TextStyle(fontSize: context.sp(14), fontWeight: FontWeight.w600, color: Color(0xFFcbd5e1)),
-                  maxLines: 1, overflow: TextOverflow.ellipsis,
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  padding: EdgeInsets.all(
+                    ls
+                        ? context.rp(6)
+                        : Responsive.responsivePadding(
+                            context,
+                            mobile: 8,
+                            tablet: 9,
+                            desktop: 10,
+                          ),
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1e293b),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    widget.icon,
+                    size: ls
+                        ? 14
+                        : Responsive.responsiveIconSize(
+                            context,
+                            mobile: 18,
+                            tablet: 20,
+                            desktop: 24,
+                          ),
+                    color: const Color(0xFF22d3ee),
+                  ),
                 ),
-              ),
-              SizedBox(width: context.rp(8)),
-              _buildExpandBadge(),
-            ]),
-            SizedBox(height: Responsive.responsiveSpacing(context, mobile: 16, tablet: 20, desktop: 24)),
-            Expanded(
-              child: _buildBarChartWidget(
-                hourlyDist:    _previewHourDist(hourlyDist),
-                labelFontSize: 10,
-                showAllHours:  false,
-              ),
+                Container(
+                  width: ls ? 8 : 10,
+                  height: ls ? 8 : 10,
+                  decoration: BoxDecoration(
+                    color: dot,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: dot.withValues(alpha: 0.6),
+                        blurRadius: ls ? 6 : 8,
+                        spreadRadius: ls ? 1 : 2,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.value,
+                  style: TextStyle(
+                    fontSize: ls
+                        ? context.sp(20)
+                        : Responsive.responsiveFont(
+                            context,
+                            mobile: 24,
+                            tablet: 28,
+                            desktop: 32,
+                          ),
+                    fontWeight: FontWeight.bold,
+                    color: const Color(0xFFe2e8f0),
+                  ),
+                ),
+                SizedBox(
+                  height: ls
+                      ? 2
+                      : Responsive.responsiveSpacing(
+                          context,
+                          mobile: 4,
+                          tablet: 5,
+                          desktop: 6,
+                        ),
+                ),
+                Text(
+                  widget.label,
+                  style: TextStyle(
+                    fontSize: ls
+                        ? context.sp(9)
+                        : Responsive.responsiveFont(
+                            context,
+                            mobile: 10,
+                            tablet: 11,
+                            desktop: 13,
+                          ),
+                    color: const Color(0xFF64748b),
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
             ),
           ],
         ),
       ),
     );
   }
-
-  void _openBarChartModal(BuildContext context, List<Map<String, dynamic>> hourlyDist) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withValues(alpha: 0.75),
-      builder: (_) => _ChartModal(
-        title:    'Hourly Alert Distribution',
-        subtitle: 'All hours with alert data  •  Swipe to scroll',
-        chartBuilder: (availableHeight) {
-          const reservedForExtras = 114.0;
-          final chartH  = (availableHeight - reservedForExtras).clamp(160.0, double.infinity);
-          final fullDist = _fullHourDist(hourlyDist);
-          final screenW  = MediaQuery.of(context).size.width - 32;
-          final chartW   = (fullDist.length * 44.0).clamp(screenW, double.infinity);
-
-          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            SizedBox(
-              height: chartH,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                physics: const BouncingScrollPhysics(),
-                child: SizedBox(width: chartW, height: chartH,
-                  child: _buildBarChartWidget(
-                    hourlyDist: fullDist, labelFontSize: 11, showAllHours: true,
-                  ),
-                ),
-              ),
-            ),
-            Padding(
-              padding: EdgeInsets.only(top: context.rs(6), bottom: context.rs(12)),
-              child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                const Icon(Icons.swipe_rounded, color: Color(0xFF475569), size: 13),
-                SizedBox(width: MediaQuery.of(context).size.width * 0.01),
-                Text('Swipe to see all hours', style: TextStyle(color: Color(0xFF475569), fontSize: context.sp(10))),
-              ]),
-            ),
-            if (hourlyDist.isNotEmpty) _buildBarSummaryRow(hourlyDist),
-          ]);
-        },
-      ),
-    );
-  }
-
-  Widget _buildBarSummaryRow(List<Map<String, dynamic>> hourlyDist) {
-    int total = 0; int peakHour = 0; int peakCount = 0;
-    for (final row in hourlyDist) {
-      final h = row['hour'] as int; final c = row['count'] as int;
-      total += c;
-      if (c > peakCount) { peakCount = c; peakHour = h; }
-    }
-    final ampm = peakHour >= 12 ? 'PM' : 'AM';
-    final h12  = peakHour > 12 ? peakHour - 12 : (peakHour == 0 ? 12 : peakHour);
-    return Row(children: [
-      _summaryPill('Total Alerts', '$total',        const Color(0xFF22d3ee)),
-      SizedBox(width: context.rp(8)),
-      _summaryPill('Peak Hour',    '$h12:00 $ampm', const Color(0xFFfbbf24)),
-      SizedBox(width: context.rp(8)),
-      _summaryPill('Peak Count',   '$peakCount',    const Color(0xFFef4444)),
-    ]);
-  }
-
-  Widget _summaryPill(String label, String value, Color color) {
-    return Expanded(child: Container(
-      padding: EdgeInsets.symmetric(horizontal: context.rp(10), vertical: context.rs(10)),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withValues(alpha: 0.2)),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(value, style: TextStyle(color: color, fontSize: context.sp(15), fontWeight: FontWeight.bold)),
-        const SizedBox(height: 2),
-        Text(label,  style: TextStyle(color: Color(0xFF64748b), fontSize: context.sp(10))),
-      ]),
-    ));
-  }
-
-  // BAR CHART HELPERS
-
-  List<Map<String, dynamic>> _previewHourDist(List<Map<String, dynamic>> hourlyDist) {
-    const previewHours = [6, 9, 12, 15, 18, 21];
-    final map = <int, int>{};
-    for (final r in hourlyDist) {
-      map[r['hour'] as int] = r['count'] as int;
-    }
-    return previewHours.map((h) => {'hour': h, 'count': map[h] ?? 0}).toList();
-  }
-
-  List<Map<String, dynamic>> _fullHourDist(List<Map<String, dynamic>> hourlyDist) {
-    final map = <int, int>{};
-    for (final r in hourlyDist) {
-      map[r['hour'] as int] = r['count'] as int;
-    }
-    final result = <Map<String, dynamic>>[];
-    for (int h = 0; h < 24; h++) {
-      final c = map[h] ?? 0;
-      if (c > 0 || h >= 6) result.add({'hour': h, 'count': c});
-    }
-    return result;
-  }
-
-  String _hourLabel(int h) {
-    if (h == 0)  return '12AM';
-    if (h == 12) return '12PM';
-    return h < 12 ? '${h}AM' : '${h - 12}PM';
-  }
-
-  Widget _buildBarChartWidget({
-    required List<Map<String, dynamic>> hourlyDist,
-    required double labelFontSize,
-    required bool showAllHours,
-  }) {
-    const previewLabels = ['6AM', '9AM', '12PM', '3PM', '6PM', '9PM'];
-    const previewHours  = [6, 9, 12, 15, 18, 21];
-
-    final List<BarChartGroupData> barGroups;
-    final List<String> labels;
-
-    if (!showAllHours) {
-      final map = <int, int>{};
-      for (final r in hourlyDist) {
-        map[r['hour'] as int] = r['count'] as int;
-      }
-      labels    = previewLabels;
-      barGroups = List.generate(previewHours.length, (i) =>
-          _buildBarGroup(context, i, (map[previewHours[i]] ?? 0).toDouble()));
-    } else {
-      labels    = hourlyDist.map((r) => _hourLabel(r['hour'] as int)).toList();
-      barGroups = List.generate(hourlyDist.length, (i) =>
-          _buildBarGroup(context, i, (hourlyDist[i]['count'] as int).toDouble()));
-    }
-
-    double dataMaxY = 5;
-    for (final g in barGroups) {
-      if (g.barRods.first.toY > dataMaxY) dataMaxY = g.barRods.first.toY;
-    }
-    final double maxY      = ((dataMaxY / 5).ceil() * 5).toDouble();
-    final double yInterval = maxY <= 10 ? 2.0 : maxY <= 20 ? 5.0 : maxY <= 50 ? 10.0 : 20.0;
-
-    return BarChart(BarChartData(
-      alignment: BarChartAlignment.spaceAround,
-      maxY: maxY,
-      barTouchData: BarTouchData(enabled: true,
-        touchTooltipData: BarTouchTooltipData(
-          getTooltipColor: (_) => const Color(0xFF1e293b),
-          tooltipBorderRadius: BorderRadius.circular(10),
-          tooltipPadding: EdgeInsets.symmetric(horizontal: context.rp(10), vertical: context.rs(8)),
-          getTooltipItem: (group, _, rod, _) => BarTooltipItem(
-            '${rod.toY.toInt()} alert${rod.toY.toInt() == 1 ? '' : 's'}\n${labels[group.x]}',
-            TextStyle(color: const Color(0xFF22d3ee), fontWeight: FontWeight.bold, fontSize: labelFontSize)),
-        ),
-      ),
-      titlesData: FlTitlesData(
-        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-        topTitles:   const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-        bottomTitles: AxisTitles(sideTitles: SideTitles(
-          showTitles: true, reservedSize: 30,
-          getTitlesWidget: (value, meta) {
-            final idx = value.toInt();
-            if (idx < 0 || idx >= labels.length) return const SizedBox.shrink();
-            return Padding(padding: EdgeInsets.only(top: context.rs(8)),
-              child: Text(labels[idx],
-                style: TextStyle(color: const Color(0xFF64748b), fontSize: labelFontSize - 1)));
-          },
-        )),
-        leftTitles: AxisTitles(sideTitles: SideTitles(
-          showTitles: true, reservedSize: 30, interval: yInterval,
-          getTitlesWidget: (value, meta) {
-            if (value == 0 || value == maxY) return const SizedBox.shrink();
-            return Text(value.toInt().toString(),
-              style: TextStyle(color: const Color(0xFF64748b), fontSize: labelFontSize - 1));
-          },
-        )),
-      ),
-      gridData: FlGridData(show: true, drawVerticalLine: false, horizontalInterval: yInterval,
-        getDrawingHorizontalLine: (_) => FlLine(
-          color: const Color(0xFF1e293b), strokeWidth: 1, dashArray: [3, 3])),
-      borderData: FlBorderData(show: false),
-      barGroups: barGroups,
-    ));
-  }
-
-  BarChartGroupData _buildBarGroup(BuildContext context, int x, double y) {
-    return BarChartGroupData(x: x, barRods: [
-      BarChartRodData(
-        toY: y,
-        width: Responsive.responsiveValue(context, mobile: 16.0, tablet: 18.0, desktop: 20.0),
-        borderRadius: BorderRadius.circular(4),
-        gradient: LinearGradient(
-          colors: y > 0
-              ? [const Color(0xFF22d3ee), const Color(0xFF3b82f6)]
-              : [const Color(0xFF1e293b), const Color(0xFF1e293b)],
-          begin: Alignment.bottomCenter, end: Alignment.topCenter,
-        ),
-      ),
-    ]);
-  }
 }
 
-// DATA CLASS
-class _LineChartData {
-  final List<FlSpot> drowsySpots, distractedSpots;
-  final List<String> xLabels;
-  final double maxX, maxY, yInterval;
-  const _LineChartData({
-    required this.drowsySpots, required this.distractedSpots,
-    required this.xLabels, required this.maxX,
-    required this.maxY, required this.yInterval,
-  });
-}
-
-// CHART MODAL
+// ── CHART MODAL ───────────────────────────────────────────────────────────────
 class _ChartModal extends StatelessWidget {
   final String title, subtitle;
-  final Widget Function(double availableHeight) chartBuilder;
-
+  final Widget child;
   const _ChartModal({
     required this.title,
     required this.subtitle,
-    required this.chartBuilder,
+    required this.child,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isLandscape  =
-    MediaQuery.of(context).orientation == Orientation.landscape;
-    // In landscape, screen height is smaller so use more of it
-    // and reduce the header to give chart more room
-    final sheetHeight  = MediaQuery.of(context).size.height *
-        (isLandscape ? 0.95 : 0.85);
-    final headerHeight = isLandscape ? 100.0 : 136.0;
-    final chartArea    = sheetHeight - headerHeight;
+    final landscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
+    final h = MediaQuery.of(context).size.height * (landscape ? 0.95 : 0.85);
 
     return Container(
-      height: sheetHeight,
+      height: h,
       decoration: const BoxDecoration(
         color: Color(0xFF0D1627),
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Center(child: Padding(padding: EdgeInsets.only(top: context.rs(12), bottom: context.rs(8)),
-          child: Container(width: 40, height: 4,
-            decoration: BoxDecoration(color: const Color(0xFF1E2D45), borderRadius: BorderRadius.circular(2))))),
-        Padding(padding: EdgeInsets.fromLTRB(context.rp(20), context.rs(4), context.rp(16), context.rs(0)), child: Row(children: [
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title,    style: TextStyle(color: Colors.white, fontSize: context.sp(18), fontWeight: FontWeight.w700)),
-            const SizedBox(height: 3),
-            Text(subtitle, style: TextStyle(color: Color(0xFF6B7A99), fontSize: context.sp(11))),
-          ])),
-          GestureDetector(onTap: () => Navigator.of(context).pop(),
-            child: Container(width: 34, height: 34,
-              decoration: BoxDecoration(color: const Color(0xFF1A2235), shape: BoxShape.circle,
-                border: Border.all(color: const Color(0xFF1E2D45))),
-              child: const Icon(Icons.close_rounded, color: Color(0xFF94A3B8), size: 18))),
-        ])),
-        Divider(color: const Color(0xFF1E2D45).withValues(alpha: 0.6), height: 20),
-          Expanded(
-          child: SingleChildScrollView(
-            padding: EdgeInsets.fromLTRB(context.rp(16), context.rs(0), context.rp(16), context.rs(16)),
-            child: SizedBox(
-              height: chartArea,
-              child: chartBuilder(chartArea),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Padding(
+              padding: EdgeInsets.only(
+                top: context.rs(12),
+                bottom: context.rs(8),
+              ),
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E2D45),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
             ),
           ),
-        ),
-      ]),
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              context.rp(20),
+              context.rs(4),
+              context.rp(16),
+              0,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: context.sp(18),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          color: const Color(0xFF6B7A99),
+                          fontSize: context.sp(11),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1A2235),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: const Color(0xFF1E2D45)),
+                    ),
+                    child: const Icon(
+                      Icons.close_rounded,
+                      color: Color(0xFF94A3B8),
+                      size: 18,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Divider(
+            color: const Color(0xFF1E2D45).withValues(alpha: 0.6),
+            height: 20,
+          ),
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                context.rp(16),
+                0,
+                context.rp(16),
+                context.rs(16),
+              ),
+              child: child,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
-// HOVERABLE SUMMARY CARD
-class _HoverableSummaryCard extends StatefulWidget {
-  final IconData icon;
-  final String label, value;
-  final bool isPositive;
+// ── SHARED HELPERS ────────────────────────────────────────────────────────────
+BoxDecoration _cardDecor() => const BoxDecoration(
+  color: Color(0xFF0f172a),
+  borderRadius: BorderRadius.all(Radius.circular(20)),
+  boxShadow: [
+    BoxShadow(color: Color(0xFF0b1120), offset: Offset(8, 8), blurRadius: 16),
+    BoxShadow(color: Color(0xFF1e293b), offset: Offset(-8, -8), blurRadius: 16),
+  ],
+);
 
-  const _HoverableSummaryCard({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.isPositive,
-  });
-
-  @override
-  State<_HoverableSummaryCard> createState() => _HoverableSummaryCardState();
-}
-
-class _HoverableSummaryCardState extends State<_HoverableSummaryCard> {
-  bool isHovered = false;
-
-  @override
-Widget build(BuildContext context) {
-  final dotColor = widget.isPositive
-      ? const Color(0xFF10b981)
-      : const Color(0xFFfbbf24);
-  final isLandscape =
-      MediaQuery.of(context).orientation == Orientation.landscape;
-
-  // Landscape: compact layout to fit smaller card height
-  // Portrait:  original layout unchanged
-  return MouseRegion(
-    onEnter: (_) => setState(() => isHovered = true),
-    onExit:  (_) => setState(() => isHovered = false),
-    child: AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeInOut,
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(
-          Responsive.responsiveBorderRadius(context, mobile: 16, tablet: 18, desktop: 20),
+Widget _legend(BuildContext ctx, String label, Color c) => Row(
+  children: [
+    Container(
+      width: 10,
+      height: 10,
+      decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+    ),
+    SizedBox(width: ctx.rp(5)),
+    Text(
+      label,
+      style: TextStyle(
+        fontSize: Responsive.responsiveFont(
+          ctx,
+          mobile: 11,
+          tablet: 12,
+          desktop: 13,
         ),
-        boxShadow: isHovered
-            ? [
-                BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.8), offset: const Offset(-3, -3), blurRadius: 6),
-                BoxShadow(color: const Color(0xFF1e293b).withValues(alpha: 0.8), offset: const Offset(3, 3),   blurRadius: 6),
-              ]
-            : const [
-                BoxShadow(color: Color(0xFF0b1120), offset: Offset(6, 6),   blurRadius: 12),
-                BoxShadow(color: Color(0xFF1e293b), offset: Offset(-6, -6), blurRadius: 12),
-              ],
+        color: const Color(0xFF94a3b8),
       ),
-      padding: isLandscape
-          ? EdgeInsets.all(context.rp(10))   // compact in landscape
-          : EdgeInsets.all(            // original in portrait
-              Responsive.responsivePadding(context, mobile: 12, tablet: 16, desktop: 20),
-            ),
-      child: isLandscape
-          // ── LANDSCAPE: compact ──────────────────────────────────────
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                mainAxisSize: MainAxisSize.max,
-                children: [
-                  // Icon + dot row — stays at top
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Container(
-                        padding: EdgeInsets.all(context.rp(6)),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1e293b),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(widget.icon, size: 14, color: const Color(0xFF22d3ee)),
-                      ),
-                      Container(
-                        width: 8, height: 8,
-                        decoration: BoxDecoration(
-                          color: dotColor,
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: dotColor.withValues(alpha: 0.6),
-                              blurRadius: 6, spreadRadius: 1,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  // Value + label — pinned to bottom
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(widget.value,
-                        style: TextStyle(
-                          fontSize: context.sp(20),
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFFe2e8f0),
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(widget.label,
-                        style: TextStyle(fontSize: context.sp(9), color: Color(0xFF64748b)),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ],
-              )
-          //PORTRAIT
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Container(
-                      padding: EdgeInsets.all(
-                        Responsive.responsivePadding(context, mobile: 8, tablet: 9, desktop: 10),
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1e293b),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(widget.icon,
-                        size:  Responsive.responsiveIconSize(context, mobile: 18, tablet: 20, desktop: 24),
-                        color: const Color(0xFF22d3ee)),
-                    ),
-                    Container(
-                      width: 10, height: 10,
-                      decoration: BoxDecoration(
-                        color: dotColor,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(color: dotColor.withValues(alpha: 0.6), blurRadius: 8, spreadRadius: 2),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(widget.value,
-                      style: TextStyle(
-                        fontSize:   Responsive.responsiveFont(context, mobile: 24, tablet: 28, desktop: 32),
-                        fontWeight: FontWeight.bold,
-                        color:      const Color(0xFFe2e8f0),
-                      ),
-                    ),
-                    SizedBox(height: Responsive.responsiveSpacing(context, mobile: 4, tablet: 5, desktop: 6)),
-                    Text(widget.label,
-                      style: TextStyle(
-                        fontSize: Responsive.responsiveFont(context, mobile: 10, tablet: 11, desktop: 13),
-                        color:    const Color(0xFF64748b),
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ],
-            ),
-        ),
-      );
-    }
-  }
+    ),
+  ],
+);
+
+Widget _expandBadge(BuildContext ctx) => Container(
+  padding: EdgeInsets.symmetric(horizontal: ctx.rp(6), vertical: ctx.rs(3)),
+  decoration: BoxDecoration(
+    color: const Color(0xFF22d3ee).withValues(alpha: 0.1),
+    borderRadius: BorderRadius.circular(8),
+    border: Border.all(color: const Color(0xFF22d3ee).withValues(alpha: 0.25)),
+  ),
+  child: const Icon(
+    Icons.open_in_full_rounded,
+    color: Color(0xFF22d3ee),
+    size: 13,
+  ),
+);

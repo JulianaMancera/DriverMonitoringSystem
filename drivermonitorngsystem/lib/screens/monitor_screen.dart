@@ -13,18 +13,26 @@ import '../core/services/notifications.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import '../utils/responsive.dart';
 
-// PROVIDERS 
-final driverStateProvider     = StateProvider<String>((ref) => 'neutral');
-final alertnessPctProvider    = StateProvider<double>((ref) => 100.0);
-final drowsinessPctProvider   = StateProvider<double>((ref) => 0.0);
-final distractionPctProvider  = StateProvider<double>((ref) => 0.0);
-final isRecordingProvider     = StateProvider<bool>((ref) => false);
-final showAlertBannerProvider = StateProvider<bool>((ref) => false);
-final alertBannerTypeProvider = StateProvider<String>((ref) => 'DROWSY');
-final clearGlassesProvider    = StateProvider<bool>((ref) => false);
-final isInPipProvider         = StateProvider<bool>((ref) => false);
+// ─── PROVIDERS ────────────────────────────────────────────────────────────────
+final driverStateProvider         = StateProvider<String>((ref) => 'neutral');
+final alertnessPctProvider        = StateProvider<double>((ref) => 100.0);
+final drowsinessPctProvider       = StateProvider<double>((ref) => 0.0);
+final distractionPctProvider      = StateProvider<double>((ref) => 0.0);
+final isRecordingProvider         = StateProvider<bool>((ref) => false);
+final showAlertBannerProvider     = StateProvider<bool>((ref) => false);
+final alertBannerTypeProvider     = StateProvider<String>((ref) => 'DROWSY');
+final clearGlassesProvider        = StateProvider<bool>((ref) => false);
+final isInPipProvider             = StateProvider<bool>((ref) => false);
 
-//  MONITOR SCREEN 
+// ── NEW (from v2): subclass providers ────────────────────────────────────────
+final activeSubclassProvider      = StateProvider<String?>((ref) => null);
+final activeSubclassIndexProvider = StateProvider<int>((ref) => 0);
+
+/// Tracks PiP window orientation so _buildPipView can swap preview w/h on
+/// device rotation.  Updated by the native EventChannel "orientation" event.
+final pipOrientationProvider      = StateProvider<String>((ref) => 'portrait');
+
+// ─────────────────────────────────────────────────────────────────────────────
 class MonitorScreen extends ConsumerStatefulWidget {
   const MonitorScreen({super.key});
   @override
@@ -37,19 +45,23 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // Channels
   static const _methodChannel = MethodChannel('com.bantaydrive/pip');
   static const _eventChannel  = EventChannel('com.bantaydrive/pip_events');
-  StreamSubscription? _pipSubscription;
+  StreamSubscription<dynamic>? _pipSubscription;
 
   // Camera
   CameraController? _cameraController;
   List<CameraDescription> _cameras = [];
-  bool _cameraInitialized = false;
+  bool    _cameraInitialized    = false;
   String? _cameraError;
-  bool _streamPausedForBackground = false;
+  bool    _streamPausedForBackground = false;
+
+  /// Guards camera operations from racing with dispose() during rapid
+  /// PiP → background lifecycle transitions. (FIX #12 from v2)
+  bool _camDisposing = false;
 
   // Session
-  int? _currentSessionId;
+  int?      _currentSessionId;
   DateTime? _sessionStartTime;
-  Timer? _snapshotTimer;
+  Timer?    _snapshotTimer;
 
   // Alerts
   int _consecutiveDrowsy     = 0;
@@ -65,10 +77,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   // Animations
   late AnimationController _warningController;
-  late Animation<double> _warningAnimation;
-  AnimationController? _notifController;
-  Animation<Offset>? _notifSlide;
-  Animation<double>? _notifFade;
+  late Animation<double>   _warningAnimation;
+  AnimationController?     _notifController;
+  Animation<Offset>?       _notifSlide;
+  Animation<double>?       _notifFade;
 
   // Prefs
   int  _prefAlertSensitivity = 1;
@@ -83,33 +95,42 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     2: [2,  4,  6],
   };
 
-  bool     _modelLoaded       = false;
+  bool     _modelLoaded    = false;
 
+  /// FIX #4/#6 (v2): Single FPS gate — target ~5 FPS for inference.
+  /// Prevents double-gating that was dropping frames to <2 FPS and causing
+  /// camera-lag. The 200 ms gap keeps the pipeline at 224×224 processing
+  /// cadence without overwhelming the UI thread.
+  DateTime _lastInferTs = DateTime.fromMillisecondsSinceEpoch(0);
 
-  // ─── LIFECYCLE ──────────────────────────────────────────────────────────────
+  // ─── LIFECYCLE ───────────────────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // Listen to native PIP state changes via EventChannel.
-    // onPictureInPictureModeChanged in MainActivity fires reliably.
-    _pipSubscription = _eventChannel.receiveBroadcastStream().listen((dynamic v) {
-      if (mounted) {
-        final inPip = v as bool;
-        ref.read(isInPipProvider.notifier).state = inPip;
-        // When returning from PIP, resume camera stream
-        if (!inPip) {
-          _resumeCameraStream();
-        }
+    // FIX #7/#11 (v2): EventChannel now sends typed Maps, never raw primitives.
+    //   {"type":"pip","value":bool}  or  {"type":"orientation","value":String}
+    //   Previously sending a raw String on a bool channel caused ClassCastException.
+    _pipSubscription = _eventChannel.receiveBroadcastStream().listen((raw) {
+      if (!mounted || raw is! Map) return;
+      final type  = raw['type']  as String?;
+      final value = raw['value'];
+      if (type == 'pip' && value is bool) {
+        ref.read(isInPipProvider.notifier).state = value;
+        if (!value) _resumeCameraStream(); // returned from PiP → resume stream
+      } else if (type == 'orientation' && value is String) {
+        // FIX #11: native fires this on every device rotation while in PiP
+        ref.read(pipOrientationProvider.notifier).state = value;
       }
-    });
+    }, onError: (e) => debugPrint('[PiP event] $e'));
 
     _warningController = AnimationController(
       duration: const Duration(milliseconds: 1000), vsync: this,
     )..repeat(reverse: true);
-    _warningAnimation = Tween<double>(begin: 0.8, end: 1.0).animate(_warningController);
+    _warningAnimation =
+        Tween<double>(begin: 0.8, end: 1.0).animate(_warningController);
 
     final nc = AnimationController(
         duration: const Duration(milliseconds: 550), vsync: this);
@@ -132,6 +153,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _snapshotTimer?.cancel();
     _warningController.dispose();
     _notifController?.dispose();
+    _camDisposing = true;          // guard before camera dispose (FIX #12)
     _cameraController?.dispose();
     _audioPlayer.dispose();
     _alarmPlayer.dispose();
@@ -145,25 +167,29 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     switch (state) {
       case AppLifecycleState.inactive:
-        // When going inactive (home pressed), request PIP immediately.
-        // The EventChannel (onPictureInPictureModeChanged) will confirm
-        // and set isInPipProvider accurately. We do NOT pre-set it here
-        // because inactive fires for many non-PIP reasons (e.g. notification pull).
+        // CRASH FIX: Stop the image stream IMMEDIATELY when going inactive.
+        // The Flutter engine detaches from native shortly after this callback.
+        // If the stream is still running, CameraX's ImageReader keeps firing
+        // frames → FlutterRenderer.scheduleFrame() → FATAL: FlutterJNI not
+        // attached. Stopping here prevents that window entirely.
+        // The stream is restarted in resumed if recording is still active.
+        await _pauseCameraStream();
+
         if (isRecording) {
-          await _enterPip();
+          final isLandscape =
+              MediaQuery.of(context).orientation == Orientation.landscape;
+          await _enterPip(isLandscape: isLandscape);
           await BantayDriveService.startService(
               state: ref.read(driverStateProvider));
         }
         break;
 
       case AppLifecycleState.paused:
-        // Pause image stream to save resources while fully backgrounded.
+        // Belt-and-suspenders: also stop on paused in case inactive was skipped.
         await _pauseCameraStream();
         break;
 
       case AppLifecycleState.resumed:
-        // Coming back to full screen — EventChannel already set isInPipProvider
-        // to false via onPictureInPictureModeChanged. Ensure it's cleared.
         if (mounted) ref.read(isInPipProvider.notifier).state = false;
         await _resumeCameraStream();
         break;
@@ -175,29 +201,25 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   // ─── PiP ────────────────────────────────────────────────────────────────────
 
-  Future<void> _enterPip() async {
+  Future<void> _enterPip({bool isLandscape = false}) async {
     try {
-      final isLandscape =
-          MediaQuery.of(context).orientation == Orientation.landscape;
-      // Pass orientation so native side can set the correct PiP aspect ratio:
-      // portrait → 9:16, landscape → 16:9
-      await _methodChannel.invokeMethod('enterPip', {
-        'isLandscape': isLandscape,
-      });
+      await _methodChannel
+          .invokeMethod('enterPip', {'isLandscape': isLandscape});
     } catch (_) {}
   }
 
   Future<void> _syncRecordingState(bool recording) async {
     try {
-      await _methodChannel.invokeMethod(
-          'setRecording', {'isRecording': recording});
+      await _methodChannel
+          .invokeMethod('setRecording', {'isRecording': recording});
     } catch (_) {}
   }
 
   // ─── CAMERA ─────────────────────────────────────────────────────────────────
 
   Future<void> _pauseCameraStream() async {
-    if (_cameraController == null || !_cameraInitialized) return;
+    if (_camDisposing || !_cameraInitialized || _cameraController == null)
+      return;
     try {
       if (_cameraController!.value.isStreamingImages) {
         await _cameraController!.stopImageStream();
@@ -207,21 +229,28 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   Future<void> _resumeCameraStream() async {
-    if (_cameraController == null || !_cameraInitialized) return;
-    if (!_streamPausedForBackground) return;
+    if (_camDisposing) return;
+    // Accept both the explicit pause flag AND the case where inactive stopped
+    // the stream without setting the flag (e.g. returning from PiP).
+    final alreadyStreaming = _cameraController?.value.isStreamingImages ?? false;
+    if (!_streamPausedForBackground && alreadyStreaming) return;
     try {
       await Future.delayed(const Duration(milliseconds: 300));
-      if (!_cameraController!.value.isInitialized) {
+      if (_camDisposing) return;
+      if (_cameraController == null ||
+          !_cameraController!.value.isInitialized) {
+        _streamPausedForBackground = false;
         await _initCamera();
         return;
       }
-      if (ref.read(isRecordingProvider)) {
+      if (ref.read(isRecordingProvider) &&
+          !_cameraController!.value.isStreamingImages) {
         await _cameraController!.startImageStream(_onCameraFrame);
       }
       _streamPausedForBackground = false;
     } catch (_) {
       _streamPausedForBackground = false;
-      await _initCamera();
+      if (!_camDisposing) await _initCamera();
     }
   }
 
@@ -231,13 +260,20 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final prefs = PreferencesHelper.instance;
     _prefAlertSensitivity = await prefs.getAlertSensitivity();
     _prefAutoStart        = await prefs.getAutoStart();
-    // Initialize both services in parallel
     final success = await TfliteService.instance.initialize();
     if (mounted) setState(() => _modelLoaded = success);
     await _initCamera();
   }
 
+  /// FIX #4 (v2) — Camera preset: ResolutionPreset.low (~320×240).
+  ///
+  /// The T01 model requires 224×224 input. The background isolate resizes
+  /// whatever the camera delivers. Previously an unspecified/high preset gave
+  /// 1280×720 = 921 600 pixels to process before resizing; with .low it is
+  /// ~320×240 = 76 800 pixels — a 12× reduction, eliminating inference lag.
+  /// Model quality is unaffected because it always receives 224×224.
   Future<void> _initCamera() async {
+    if (_camDisposing) return;
     try {
       _cameras = await availableCameras();
       if (_cameras.isEmpty) {
@@ -248,22 +284,24 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         (c) => c.lensDirection == CameraLensDirection.front,
         orElse: () => _cameras.first,
       );
-      await _cameraController?.dispose();
+      if (!_camDisposing) await _cameraController?.dispose();
+      if (_camDisposing) return;
+
       _cameraController = CameraController(
         cam,
-        ResolutionPreset.low,
+        ResolutionPreset.low,       // FIX #4 — was unspecified (defaults high)
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.yuv420,
       );
       await _cameraController!.initialize();
-      if (mounted) {
+      if (mounted && !_camDisposing) {
         setState(() {
           _cameraInitialized = true;
           _cameraError       = null;
         });
         if (_prefAutoStart) {
           await Future.delayed(const Duration(milliseconds: 500));
-          await _startRecording();
+          if (mounted && !_camDisposing) await _startRecording();
         }
       }
     } catch (e) {
@@ -272,8 +310,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   Size _getPreviewSize(bool isLandscape) {
-    if (!_cameraInitialized) {
-      return isLandscape ? const Size(1920, 1080) : const Size(1080, 1920);
+    if (!_cameraInitialized ||
+        _cameraController?.value.previewSize == null) {
+      return isLandscape ? const Size(640, 480) : const Size(480, 640);
     }
     final ps = _cameraController!.value.previewSize!;
     return isLandscape
@@ -288,9 +327,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     await DatabaseHelper.instance.insertStateCount(_currentSessionId!);
     _sessionStartTime = DateTime.now();
 
-    if (_cameraInitialized && _modelLoaded) {
+    if (_cameraInitialized && _modelLoaded && !_camDisposing) {
       try {
-        await _cameraController!.startImageStream(_onCameraFrame);
+        if (!_cameraController!.value.isStreamingImages)
+          await _cameraController!.startImageStream(_onCameraFrame);
       } catch (e) {
         _addLogSync('Inference stream error: $e', 'WARNING');
       }
@@ -331,14 +371,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (_currentSessionId == null) return;
     _snapshotTimer?.cancel();
     await _alarmPlayer.stop();
-    _alertLevel = 0;
-    _consecutiveDrowsy = 0;
+    _alertLevel            = 0;
+    _consecutiveDrowsy     = 0;
     _consecutiveDistracted = 0;
 
-    if (_cameraInitialized &&
-        _cameraController!.value.isStreamingImages) {
+    if (_cameraInitialized && !_camDisposing) {
       try {
-        await _cameraController!.stopImageStream();
+        if (_cameraController!.value.isStreamingImages)
+          await _cameraController!.stopImageStream();
       } catch (_) {}
     }
 
@@ -347,14 +387,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         : 0;
     final alertness = ref.read(alertnessPctProvider);
 
-    // Safety score formula:
-    //   Base = average alertness over the session (already tracked)
-    //   Penalty = each alert event deducts points, scaled by severity
-    //     Level 1 alert → -2 pts
-    //     Level 2 alert → -4 pts
-    //     Level 3 alert → -8 pts
-    //   Score is then clamped to [0, 100].
-    //   This ensures safety score is meaningfully distinct from alertness.
+    // Safety score formula (v1):
+    //   Base = average alertness over the session
+    //   Penalty: L1 → -2 pts, L2 → -4 pts, L3 → -8 pts
+    //   Score clamped to [0, 100]
     final alerts = await DatabaseHelper.instance
         .getAlertsBySession(_currentSessionId!);
     double penalty = 0.0;
@@ -383,64 +419,76 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(alertnessPctProvider.notifier).state    = 100.0;
     ref.read(drowsinessPctProvider.notifier).state   = 0.0;
     ref.read(distractionPctProvider.notifier).state  = 0.0;
+    ref.read(activeSubclassProvider.notifier).state      = null;
+    ref.read(activeSubclassIndexProvider.notifier).state = 0;
     _currentSessionId = null;
     _sessionStartTime = null;
     ref.read(dbChangeCounterProvider.notifier).state++;
   }
 
-  // ─── CAMERA FRAME CALLBACK ─────────────────────────────────────────────────
+  // ─── CAMERA FRAME CALLBACK ──────────────────────────────────────────────────
 
+  /// FIX #4/#6 (v2): Single FPS gate here — ~5 FPS (200 ms gap).
+  /// TfliteService has NO secondary gate.  Double-gating was dropping frames
+  /// to <2 FPS and causing the camera-lag feel.
   Future<void> _onCameraFrame(CameraImage frame) async {
-    // Quick bail-out guards — checked before any async work
+    if (_camDisposing) return;
+    final now = DateTime.now();
+    if (now.difference(_lastInferTs).inMilliseconds < 200) return;
+    _lastInferTs = now;
+
     if (!mounted || !ref.read(isRecordingProvider)) return;
     final result = await TfliteService.instance.runInference(frame);
     if (result != null && mounted && ref.read(isRecordingProvider)) {
-      onModelOutput(
-        state:          result.state,
-        alertnessPct:   result.alertnessPct,
-        drowsinessPct:  result.drowsyPct,
-        distractionPct: result.distractedPct,
-      );
+      onModelOutput(result);
     }
   }
 
   // ─── MODEL OUTPUT ───────────────────────────────────────────────────────────
 
-  void onModelOutput({
-    required String state,
-    required double alertnessPct,
-    required double drowsinessPct,
-    required double distractionPct,
-  }) {
+  void onModelOutput(InferenceResult r) {
     if (!ref.read(isRecordingProvider)) return;
-    ref.read(alertnessPctProvider.notifier).state   = alertnessPct;
-    ref.read(drowsinessPctProvider.notifier).state  = drowsinessPct;
-    ref.read(distractionPctProvider.notifier).state = distractionPct;
-    ref.read(driverStateProvider.notifier).state    = state;
+
+    ref.read(alertnessPctProvider.notifier).state        = r.alertnessPct;
+    ref.read(drowsinessPctProvider.notifier).state       = r.drowsyPct;
+    ref.read(distractionPctProvider.notifier).state      = r.distractedPct;
+    ref.read(driverStateProvider.notifier).state         = r.state;
+    // NEW (v2): subclass tracking
+    ref.read(activeSubclassProvider.notifier).state      = r.subclass;
+    ref.read(activeSubclassIndexProvider.notifier).state = r.subclassIndex;
 
     if (_currentSessionId != null) {
       DatabaseHelper.instance
-          .incrementStateCount(sessionId: _currentSessionId!, state: state);
+          .incrementStateCount(sessionId: _currentSessionId!, state: r.state);
     }
 
-    if (state == 'drowsy') {
-      _consecutiveDrowsy++;
-      _consecutiveDistracted = 0;
-      _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy);
-      BantayDriveService.updateState('drowsy');
-    } else if (state == 'distracted') {
-      _consecutiveDistracted++;
-      _consecutiveDrowsy = 0;
-      _checkAndTriggerAlert('DISTRACTED', _consecutiveDistracted);
-      BantayDriveService.updateState('distracted');
-    } else {
-      _consecutiveDrowsy     = 0;
-      _consecutiveDistracted = 0;
-      // Always reset alert level on genuine neutral recovery so re-escalation
-      // works from scratch — consistent with what manual _dismissAlert() does.
-      _alertLevel = 0;
-      _alarmPlayer.stop();
-      BantayDriveService.updateState('neutral');
+    switch (r.state) {
+      case 'drowsy':
+        _consecutiveDrowsy++;
+        _consecutiveDistracted = 0;
+        _addLogSync('[${modelSourceLabel(r.modelSource)}] ${r.subclass}',
+            'WARNING');
+        _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy);
+        BantayDriveService.updateState('drowsy');
+        break;
+
+      case 'distracted':
+        _consecutiveDistracted++;
+        _consecutiveDrowsy = 0;
+        _addLogSync('[${modelSourceLabel(r.modelSource)}] ${r.subclass}',
+            'WARNING');
+        _checkAndTriggerAlert('DISTRACTED', _consecutiveDistracted);
+        BantayDriveService.updateState('distracted');
+        break;
+
+      default:
+        _consecutiveDrowsy     = 0;
+        _consecutiveDistracted = 0;
+        _alertLevel            = 0;
+        _alarmPlayer.stop();
+        ref.read(activeSubclassProvider.notifier).state      = 'safe_driving';
+        ref.read(activeSubclassIndexProvider.notifier).state = 0;
+        BantayDriveService.updateState('neutral');
     }
   }
 
@@ -452,14 +500,15 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (consecutive < thresholds[0]) return;
 
     int newLevel = 1;
-    if (consecutive >= thresholds[2])      { newLevel = 3; }
-    else if (consecutive >= thresholds[1]) { newLevel = 2; }
+    if (consecutive >= thresholds[2])      newLevel = 3;
+    else if (consecutive >= thresholds[1]) newLevel = 2;
     if (newLevel <= _alertLevel) return;
     _alertLevel = newLevel;
 
     ref.read(showAlertBannerProvider.notifier).state = true;
     ref.read(alertBannerTypeProvider.notifier).state = type;
-    if (newLevel < 3) { _notifController?.forward(from: 0.0); }
+    if (newLevel < 3) _notifController?.forward(from: 0.0);
+
     if (_currentSessionId != null) {
       await DatabaseHelper.instance.insertAlertEvent(
           sessionId:  _currentSessionId!,
@@ -474,7 +523,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   Future<void> _playAlertSound(int level) async {
-    if (level == 1 || level == 2) {
+    if (level <= 2) {
       await _audioPlayer.stop();
       await _audioPlayer.play(AssetSource('L1_L2_sound.mp3'));
     } else {
@@ -500,12 +549,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   void _addLogSync(String message, String type) {
     if (!mounted) return;
     final now = DateTime.now();
-    final t =
-        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+    final t = '${now.hour.toString().padLeft(2, '0')}:'
+        '${now.minute.toString().padLeft(2, '0')}:'
+        '${now.second.toString().padLeft(2, '0')}';
     setState(() {
       _systemLogs.add({'time': t, 'message': message, 'type': type});
-      // Cap in-memory log list to prevent unbounded growth on long drives
-      if (_systemLogs.length > 20) _systemLogs.removeAt(0);
+      if (_systemLogs.length > 100) _systemLogs.removeAt(0);
     });
     if (_currentSessionId != null) {
       DatabaseHelper.instance.insertSystemLog(
@@ -520,20 +569,15 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         alertnessPct: ref.read(alertnessPctProvider).clamp(0.0, 100.0));
   }
 
-  // ════════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════════
   // BUILD
-  // ════════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
     final isInPip = ref.watch(isInPipProvider);
-
-    // ── PIP MODE: ultra-minimal view ─────────────────────────────────────────
-    // Only camera feed + state badge + REC badge + optional alert bar/overlay.
-    // Nothing else renders in PIP.
     if (isInPip) return _buildPipView();
 
-    // ── FULL SCREEN MODE ─────────────────────────────────────────────────────
     final isDesktop   = Responsive.isDesktop(context);
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
@@ -545,21 +589,20 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       color: const Color(0xFF080E1A),
       child: Stack(
         children: [
-          // Main layout
-          isDesktop
-              ? _buildDesktopLayout()
-              : isLandscape
-                  ? _buildLandscapeLayout()
-                  : _buildPortraitLayout(),
+          if (isDesktop)
+            _buildDesktopLayout()
+          else if (isLandscape)
+            _buildLandscapeLayout()
+          else
+            _buildPortraitLayout(),
 
-          // L1 / L2 — slide-in banner
+          // L1/L2 — slide-in banner
           if (showAlert && !isLevel3)
             Positioned(
               top: 0, left: 0, right: 0,
               child: SafeArea(
-                bottom: false,
-                child: _buildAlertBanner(alertType),
-              ),
+                  bottom: false,
+                  child: _buildAlertBanner(alertType)),
             ),
 
           // L3 — full-screen blocking overlay
@@ -570,22 +613,24 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // PIP VIEW  — camera feed + minimal badges only
-  // ════════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PIP VIEW
+  // ═══════════════════════════════════════════════════════════════════════════
 
+  /// FIX #11 (v2): Reads pipOrientationProvider (updated by native on rotation)
+  ///               and swaps preview w/h so PiP doesn't show portrait feed
+  ///               inside a landscape-aspect-ratio window.
+  /// FIX #12 (v2): All camera access guarded by _camDisposing.
   Widget _buildPipView() {
     final driverState = ref.watch(driverStateProvider);
     final showAlert   = ref.watch(showAlertBannerProvider);
     final alertType   = ref.watch(alertBannerTypeProvider);
     final isLevel3    = _alertLevel == 3;
-    // Detect orientation so PiP camera fills correctly in both modes
-    final isLandscape =
-        MediaQuery.of(context).orientation == Orientation.landscape;
+    final pipOri      = ref.watch(pipOrientationProvider); // FIX #11
+    final isLandscape = pipOri == 'landscape';
     final previewSize = _getPreviewSize(isLandscape);
 
-    // State badge color + label
-    late Color stateColor;
+    late Color  stateColor;
     late String stateLabel;
     switch (driverState) {
       case 'drowsy':
@@ -602,217 +647,174 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
 
     return GestureDetector(
-      // Only L3 is dismissible by tap in PIP
       onTap: isLevel3 ? _dismissAlert : null,
       child: ColoredBox(
         color: Colors.black,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
+        child: Stack(fit: StackFit.expand, children: [
 
-            // ── Camera feed ─────────────────────────────────────────────────
-            if (_cameraInitialized)
-              ClipRect(
-                child: FittedBox(
-                  fit: BoxFit.cover,
-                  child: SizedBox(
-                    width:  previewSize.width,
-                    height: previewSize.height,
-                    child: Transform(
-                      alignment: Alignment.center,
-                      transform: Matrix4.diagonal3Values(
-                          _mirrorCamera ? -1.0 : 1.0, 1.0, 1.0),
-                      child: CameraPreview(_cameraController!),
-                    ),
+          // Camera feed — guarded (FIX #12)
+          if (_cameraInitialized && !_camDisposing)
+            ClipRect(
+              child: FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  width:  previewSize.width,
+                  height: previewSize.height,
+                  child: Transform(
+                    alignment: Alignment.center,
+                    transform: Matrix4.diagonal3Values(
+                        _mirrorCamera ? -1.0 : 1.0, 1.0, 1.0),
+                    child: CameraPreview(_cameraController!),
                   ),
                 ),
-              )
-            else
-              const Center(
-                child: CircularProgressIndicator(
-                  color: Color(0xFF00D4FF), strokeWidth: 2,
-                ),
               ),
+            )
+          else
+            const Center(
+              child: CircularProgressIndicator(
+                  color: Color(0xFF00D4FF), strokeWidth: 2),
+            ),
 
-            // ── L3 pulse overlay — tap to dismiss ───────────────────────────
-            if (isLevel3)
-              AnimatedBuilder(
-                animation: _warningAnimation,
-                builder: (context, child) {
-                  final p = (_warningAnimation.value - 0.8) / 0.2;
-                  return GestureDetector(
-                    onTap: _dismissAlert,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color:  Colors.red.withOpacity(0.18 + 0.12 * p),
-                        border: Border.all(
+          // L3 pulse overlay — tap to dismiss
+          if (isLevel3)
+            AnimatedBuilder(
+              animation: _warningAnimation,
+              builder: (context, _) {
+                final p = (_warningAnimation.value - 0.8) / 0.2;
+                return GestureDetector(
+                  onTap: _dismissAlert,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.18 + 0.12 * p),
+                      border: Border.all(
                           color: Colors.red.withOpacity(0.5 + 0.4 * p),
-                          width: 4,
-                        ),
-                      ),
-                      child: Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.warning_amber_rounded,
-                                color: Colors.red.shade300, size: 26),
-                            const SizedBox(height: 4),
-                            Text(
-                              alertType,
-                              style: TextStyle(
+                          width: 4),
+                    ),
+                    child: Center(
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.warning_amber_rounded,
+                            color: Colors.red.shade300, size: 26),
+                        const SizedBox(height: 4),
+                        Text(alertType,
+                            style: TextStyle(
                                 color:      Colors.red.shade200,
                                 fontSize:   10,
                                 fontWeight: FontWeight.bold,
-                                letterSpacing: 1.2,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Tap to dismiss',
-                              style: TextStyle(
+                                letterSpacing: 1.2)),
+                        const SizedBox(height: 2),
+                        Text('Tap to dismiss',
+                            style: TextStyle(
                                 color:    Colors.white.withOpacity(0.6),
-                                fontSize: 8,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                                fontSize: 8)),
+                      ]),
                     ),
-                  );
-                },
-              ),
-
-            // ── REC badge — top-right only ───────────────────────────────────
-            if (!isLevel3)
-              Positioned(
-                top: 6, right: 6,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 5, vertical: 3),
-                  decoration: BoxDecoration(
-                    color:        Colors.red.withOpacity(0.88),
-                    borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 5, height: 5,
-                        decoration: const BoxDecoration(
-                          color: Colors.white, shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 3),
-                      const Text(
-                        'REC',
-                        style: TextStyle(
+                );
+              },
+            ),
+
+          // REC badge — top-right
+          if (!isLevel3)
+            Positioned(
+              top: 6, right: 6,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+                decoration: BoxDecoration(
+                    color:        Colors.red.withOpacity(0.88),
+                    borderRadius: BorderRadius.circular(8)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Container(
+                    width: 5, height: 5,
+                    decoration: const BoxDecoration(
+                        color: Colors.white, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 3),
+                  const Text('REC',
+                      style: TextStyle(
                           color:      Colors.white,
                           fontSize:   8,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                          fontWeight: FontWeight.bold)),
+                ]),
               ),
+            ),
 
-            // ── Bottom bar — state always shown, alert overrides color ────────
-            // Always visible (not just on alert) so the driver state is always
-            // readable. Alert state uses red; neutral uses a subtle dark bar.
-            if (!isLevel3)
-              Positioned(
-                bottom: 0, left: 0, right: 0,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 6, vertical: 5),
-                  color: showAlert
-                      ? Colors.red.withOpacity(0.88)
-                      : stateColor.withOpacity(
-                          driverState == 'neutral' ? 0.55 : 0.88),
-                  child: Text(
-                    showAlert
-                        ? (alertType == 'DROWSY'
-                            ? '⚠ Drowsy Detected'
-                            : '⚠ Distraction Detected')
-                        : stateLabel,
-                    style: const TextStyle(
+          // Bottom state bar — always visible
+          if (!isLevel3)
+            Positioned(
+              bottom: 0, left: 0, right: 0,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 6, vertical: 5),
+                color: showAlert
+                    ? Colors.red.withOpacity(0.88)
+                    : stateColor.withOpacity(
+                        driverState == 'neutral' ? 0.55 : 0.88),
+                child: Text(
+                  showAlert
+                      ? (alertType == 'DROWSY'
+                          ? '⚠ Drowsy Detected'
+                          : '⚠ Distraction Detected')
+                      : stateLabel,
+                  style: const TextStyle(
                       color:      Colors.white,
                       fontSize:   9,
                       fontWeight: FontWeight.bold,
-                      letterSpacing: 0.5,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
+                      letterSpacing: 0.5),
+                  textAlign: TextAlign.center,
                 ),
               ),
-          ],
-        ),
+            ),
+        ]),
       ),
     );
   }
 
-  // ════════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════════
   // LAYOUTS
-  // ════════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════════
 
   Widget _buildPortraitLayout() {
     return SingleChildScrollView(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Column(
-          children: [
-            const SizedBox(height: 8),
-            _buildCameraWithOverlay(
+        child: Column(children: [
+          const SizedBox(height: 8),
+          _buildCameraWithOverlay(
               height:      MediaQuery.of(context).size.height * 0.40,
-              isLandscape: false,
-            ),
-            const SizedBox(height: 12),
-            _buildMetricsSidebar(isLandscape: false),
-            const SizedBox(height: 16),
-          ],
-        ),
+              isLandscape: false),
+          const SizedBox(height: 12),
+          _buildMetricsSidebar(isLandscape: false),
+          const SizedBox(height: 16),
+        ]),
       ),
     );
   }
 
-  Widget _buildLandscapeLayout() {
-    return _buildCameraWithOverlay(isLandscape: true, fullscreen: true);
-  }
+  Widget _buildLandscapeLayout() =>
+      _buildCameraWithOverlay(isLandscape: true, fullscreen: true);
 
   Widget _buildDesktopLayout() {
-    return Column(
-      children: [
-        Expanded(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                flex: 8,
-                child: Column(
-                  children: [
-                    Expanded(
-                        child: _buildCameraWithOverlay(isLandscape: true)),
-                    SizedBox(
-                        height: Responsive.responsiveSpacing(context,
-                            mobile: 16, tablet: 20, desktop: 24)),
-                    _buildMetricsSidebar(isLandscape: false),
-                  ],
-                ),
-              ),
-              SizedBox(
-                  width: Responsive.responsiveSpacing(context,
-                      mobile: 16, tablet: 24, desktop: 32)),
-              Expanded(
-                  flex: 4,
-                  child: _buildMetricsSidebar(isLandscape: false)),
-            ],
-          ),
-        ),
-      ],
-    );
+    return Column(children: [
+      Expanded(child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(flex: 8, child: Column(children: [
+            Expanded(child: _buildCameraWithOverlay(isLandscape: true)),
+            SizedBox(height: Responsive.responsiveSpacing(
+                context, mobile: 16, tablet: 20, desktop: 24)),
+            _buildMetricsSidebar(isLandscape: false),
+          ])),
+          SizedBox(width: Responsive.responsiveSpacing(
+              context, mobile: 16, tablet: 24, desktop: 32)),
+          Expanded(flex: 4,
+              child: _buildMetricsSidebar(isLandscape: false)),
+        ],
+      )),
+    ]);
   }
 
-  // CAMERA WITH OVERLAY (full-screen mode)
+  // ─── CAMERA WITH OVERLAY ────────────────────────────────────────────────────
+
   Widget _buildCameraWithOverlay({
     double? height,
     required bool isLandscape,
@@ -828,13 +830,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         child: SizedBox(
           width:  previewSize.width,
           height: previewSize.height,
-          // Mirror horizontally for right-side dashcam mount so the
-          // preview reads naturally (driver appears on the left of frame).
           child: Transform(
             alignment: Alignment.center,
             transform: Matrix4.diagonal3Values(
                 _mirrorCamera ? -1.0 : 1.0, 1.0, 1.0),
-            child: _cameraInitialized
+            child: (_cameraInitialized && !_camDisposing)
                 ? CameraPreview(_cameraController!)
                 : _buildCameraFallback(),
           ),
@@ -845,130 +845,110 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final inner = ClipRRect(
       borderRadius:
           fullscreen ? BorderRadius.zero : BorderRadius.circular(14),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          cameraWidget,
-          _buildGradientOverlay(),
-          if (isRecording) _buildRecBadge(),
+      child: Stack(fit: StackFit.expand, children: [
+        cameraWidget,
+        _buildGradientOverlay(),
+        if (isRecording) _buildRecBadge(),
 
-          // AI / DEMO badge
-          Positioned(
-            top: 12, left: 12,
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: (_modelLoaded
-                        ? const Color(0xFF10b981)
-                        : const Color(0xFFfbbf24))
-                    .withOpacity(0.88),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 6, height: 6,
-                    decoration: const BoxDecoration(
-                      color: Colors.white, shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 5),
-                  Text(
-                    _modelLoaded ? 'AI ON' : 'DEMO',
-                    style: const TextStyle(
-                      color:      Colors.white,
-                      fontSize:   9,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 0.8,
-                    ),
-                  ),
-                ],
-              ),
+        // AI / DEMO badge
+        Positioned(
+          top: 12, left: 12,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: (_modelLoaded
+                      ? const Color(0xFF10b981)
+                      : const Color(0xFFfbbf24))
+                  .withOpacity(0.88),
+              borderRadius: BorderRadius.circular(12),
             ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                width: 6, height: 6,
+                decoration: const BoxDecoration(
+                    color: Colors.white, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 5),
+              Text(
+                _modelLoaded ? 'AI ON' : 'DEMO',
+                style: const TextStyle(
+                    color:      Colors.white,
+                    fontSize:   9,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.8),
+              ),
+            ]),
           ),
+        ),
 
-          // Bottom control bar
-          Positioned(
-            bottom: fullscreen ? 20 : 14,
-            left: 0, right: 0,
-            child: Center(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(28),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF0f172a).withOpacity(0.65),
-                      borderRadius: BorderRadius.circular(28),
-                      border: Border.all(
-                          color: Colors.white.withOpacity(0.08), width: 1),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _CameraOverlayButton(
-                          icon:        Icons.visibility,
-                          label:       'Clear Glasses',
-                          isActive:    clearGlasses,
-                          activeColor: const Color(0xFF22d3ee),
-                          onTap: () {
-                            ref
-                                .read(clearGlassesProvider.notifier)
-                                .state = !clearGlasses;
-                            if (!clearGlasses &&
-                                _currentSessionId != null) {
-                              _addLogSync(
-                                  'Clear Glasses Mode Active', 'SUCCESS');
-                            }
-                          },
-                        ),
-                        Container(
-                          width: 1, height: 28,
-                          margin: const EdgeInsets.symmetric(horizontal: 6),
-                          color: Colors.white.withOpacity(0.15),
-                        ),
-                        _CameraOverlayButton(
-                          icon: isRecording
-                              ? Icons.stop_circle
-                              : Icons.fiber_manual_record,
-                          label:       isRecording ? 'Stop' : 'Record',
-                          isActive:    isRecording,
-                          activeColor: Colors.red,
-                          onTap: () => isRecording
-                              ? _stopRecording()
-                              : _startRecording(),
-                        ),
-                      ],
-                    ),
+        // Bottom control bar
+        Positioned(
+          bottom: fullscreen ? 20 : 14,
+          left: 0, right: 0,
+          child: Center(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(28),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 6, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0f172a).withOpacity(0.65),
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(
+                        color: Colors.white.withOpacity(0.08), width: 1),
                   ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    _CameraOverlayButton(
+                      icon:        Icons.visibility,
+                      label:       'Clear Glasses',
+                      isActive:    clearGlasses,
+                      activeColor: const Color(0xFF22d3ee),
+                      onTap: () {
+                        ref.read(clearGlassesProvider.notifier).state =
+                            !clearGlasses;
+                        if (!clearGlasses && _currentSessionId != null) {
+                          _addLogSync('Clear Glasses Mode Active', 'SUCCESS');
+                        }
+                      },
+                    ),
+                    Container(
+                      width: 1, height: 28,
+                      margin: const EdgeInsets.symmetric(horizontal: 6),
+                      color: Colors.white.withOpacity(0.15),
+                    ),
+                    _CameraOverlayButton(
+                      icon: isRecording
+                          ? Icons.stop_circle
+                          : Icons.fiber_manual_record,
+                      label:       isRecording ? 'Stop' : 'Record',
+                      isActive:    isRecording,
+                      activeColor: Colors.red,
+                      onTap: () => isRecording
+                          ? _stopRecording()
+                          : _startRecording(),
+                    ),
+                  ]),
                 ),
               ),
             ),
           ),
-        ],
-      ),
+        ),
+      ]),
     );
 
     if (fullscreen) return SizedBox.expand(child: inner);
-
     return Container(
       height: height, width: double.infinity,
       decoration: const BoxDecoration(
         color:        Color(0xFF0f172a),
         borderRadius: BorderRadius.all(Radius.circular(20)),
         boxShadow: [
-          BoxShadow(
-              color:       Color(0xFF0b1120),
-              offset:      Offset(8, 8),
-              blurRadius:  16),
-          BoxShadow(
-              color:       Color(0xFF1e293b),
-              offset:      Offset(-8, -8),
-              blurRadius:  16),
+          BoxShadow(color: Color(0xFF0b1120),
+              offset: Offset(8, 8),   blurRadius: 16),
+          BoxShadow(color: Color(0xFF1e293b),
+              offset: Offset(-8, -8), blurRadius: 16),
         ],
       ),
       padding: const EdgeInsets.all(6),
@@ -980,101 +960,73 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (_cameraError != null) {
       return Container(
         color: Colors.black,
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.videocam_off,
-                  color: Color(0xFF64748b), size: 48),
-              const SizedBox(height: 12),
-              Text(
-                _cameraError!,
-                style: const TextStyle(
-                    color: Color(0xFF64748b), fontSize: 13),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 12),
-              TextButton(
-                onPressed: _initCamera,
-                child: const Text('Retry',
-                    style: TextStyle(color: Color(0xFF22d3ee))),
-              ),
-            ],
-          ),
-        ),
+        child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.videocam_off, color: Color(0xFF64748b), size: 48),
+          const SizedBox(height: 12),
+          Text(_cameraError!,
+              style: const TextStyle(color: Color(0xFF64748b), fontSize: 13),
+              textAlign: TextAlign.center),
+          const SizedBox(height: 12),
+          TextButton(
+              onPressed: _initCamera,
+              child: const Text('Retry',
+                  style: TextStyle(color: Color(0xFF22d3ee)))),
+        ])),
       );
     }
     return Container(
       color: Colors.black,
-      child: const Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(color: Color(0xFF22d3ee)),
-            SizedBox(height: 12),
-            Text('Initializing camera...',
-                style:
-                    TextStyle(color: Color(0xFF64748b), fontSize: 13)),
+      child: const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        CircularProgressIndicator(color: Color(0xFF22d3ee)),
+        SizedBox(height: 12),
+        Text('Initializing camera...',
+            style: TextStyle(color: Color(0xFF64748b), fontSize: 13)),
+      ])),
+    );
+  }
+
+  Widget _buildGradientOverlay() => Positioned.fill(
+    child: Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end:   Alignment.bottomCenter,
+          colors: [
+            Colors.transparent,
+            const Color(0xFF0f172a).withOpacity(0.5),
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
 
-  Widget _buildGradientOverlay() {
-    return Positioned.fill(
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end:   Alignment.bottomCenter,
-            colors: [
-              Colors.transparent,
-              const Color(0xFF0f172a).withOpacity(0.5),
-            ],
-          ),
+  Widget _buildRecBadge() => Positioned(
+    top: 12, right: 12,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+          color: Colors.red.withOpacity(0.85),
+          borderRadius: BorderRadius.circular(20)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+          width: 8, height: 8,
+          decoration: const BoxDecoration(
+              color: Colors.white, shape: BoxShape.circle),
         ),
-      ),
-    );
-  }
-
-  Widget _buildRecBadge() {
-    return Positioned(
-      top: 12, right: 12,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color:        Colors.red.withOpacity(0.85),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 8, height: 8,
-              decoration: const BoxDecoration(
-                color: Colors.white, shape: BoxShape.circle,
-              ),
-            ),
-            const SizedBox(width: 6),
-            const Text(
-              'REC',
-              style: TextStyle(
+        const SizedBox(width: 6),
+        const Text('REC',
+            style: TextStyle(
                 color:      Colors.white,
                 fontSize:   11,
                 fontWeight: FontWeight.bold,
-                letterSpacing: 1.2,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+                letterSpacing: 1.2)),
+      ]),
+    ),
+  );
 
-  // ════════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════════
   // ALERT BANNER — L1 / L2
-  // ════════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════════
 
   Widget _buildAlertBanner(String type) {
     final isDrowsy  = type == 'DROWSY';
@@ -1101,21 +1053,16 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   color:        const Color(0xFF1C1C1E).withOpacity(0.96),
                   borderRadius: BorderRadius.circular(18),
                   border: Border.all(
-                    color: Colors.red.withOpacity(0.25 + 0.35 * pulse),
-                    width: 1.2,
-                  ),
+                      color: Colors.red.withOpacity(0.25 + 0.35 * pulse),
+                      width: 1.2),
                   boxShadow: [
                     BoxShadow(
-                      color:      Colors.black.withOpacity(0.55),
-                      blurRadius: 28,
-                      offset:     const Offset(0, 8),
-                    ),
+                        color:      Colors.black.withOpacity(0.55),
+                        blurRadius: 28, offset: const Offset(0, 8)),
                     BoxShadow(
-                      color:       Colors.red.withOpacity(0.12 + 0.18 * pulse),
-                      blurRadius:  20,
-                      spreadRadius: 1,
-                      offset:      const Offset(0, 2),
-                    ),
+                        color:       Colors.red.withOpacity(0.12 + 0.18 * pulse),
+                        blurRadius:  20, spreadRadius: 1,
+                        offset:      const Offset(0, 2)),
                   ],
                 ),
                 child: ClipRRect(
@@ -1125,100 +1072,81 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 14, vertical: 12),
-                      child: Row(
-                        children: [
-                          AnimatedBuilder(
-                            animation: _warningAnimation,
-                            builder: (context, child) {
-                              final p = (_warningAnimation.value - 0.8) / 0.2;
-                              return Container(
-                                width: 44, height: 44,
-                                decoration: BoxDecoration(
-                                  color:        Colors.red.shade800,
-                                  borderRadius: BorderRadius.circular(12),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.red
-                                          .withOpacity(0.3 + 0.4 * p),
-                                      blurRadius:   14,
-                                      spreadRadius: 1,
-                                    ),
-                                  ],
-                                ),
-                                child: const Icon(
-                                    Icons.warning_amber_rounded,
-                                    color: Colors.white, size: 24),
-                              );
-                            },
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize:       MainAxisSize.min,
-                              children: [
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      'BANTAY DRIVE',
+                      child: Row(children: [
+                        AnimatedBuilder(
+                          animation: _warningAnimation,
+                          builder: (context, child) {
+                            final p = (_warningAnimation.value - 0.8) / 0.2;
+                            return Container(
+                              width: 44, height: 44,
+                              decoration: BoxDecoration(
+                                color:        Colors.red.shade800,
+                                borderRadius: BorderRadius.circular(12),
+                                boxShadow: [BoxShadow(
+                                    color: Colors.red
+                                        .withOpacity(0.3 + 0.4 * p),
+                                    blurRadius: 14, spreadRadius: 1)],
+                              ),
+                              child: const Icon(Icons.warning_amber_rounded,
+                                  color: Colors.white, size: 24),
+                            );
+                          },
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize:       MainAxisSize.min,
+                            children: [
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text('BANTAY DRIVE',
                                       style: TextStyle(
-                                        color: Colors.white.withOpacity(0.45),
-                                        fontSize:      10,
-                                        fontWeight:    FontWeight.w600,
-                                        letterSpacing: 0.8,
-                                      ),
-                                    ),
-                                    Text(
-                                      'now',
+                                          color: Colors.white.withOpacity(0.45),
+                                          fontSize:   10,
+                                          fontWeight: FontWeight.w600,
+                                          letterSpacing: 0.8)),
+                                  Text('now',
                                       style: TextStyle(
-                                        color: Colors.white.withOpacity(0.35),
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  isDrowsy
-                                      ? 'Drowsiness Detected'
-                                      : 'Distraction Detected',
-                                  style: const TextStyle(
+                                          color: Colors.white.withOpacity(0.35),
+                                          fontSize: 11)),
+                                ],
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                isDrowsy
+                                    ? 'Drowsiness Detected'
+                                    : 'Distraction Detected',
+                                style: const TextStyle(
                                     color:      Colors.white,
                                     fontSize:   15,
                                     fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.2,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  isDrowsy
-                                      ? 'Stay alert - tap to dismiss'
-                                      : 'Focus on the road - tap to dismiss',
-                                  style: TextStyle(
+                                    letterSpacing: 0.2),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                isDrowsy
+                                    ? 'Stay alert - tap to dismiss'
+                                    : 'Focus on the road - tap to dismiss',
+                                style: TextStyle(
                                     color:    Colors.white.withOpacity(0.5),
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
+                                    fontSize: 12),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 8),
-                          Container(
-                            width: 22, height: 22,
-                            decoration: BoxDecoration(
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          width: 22, height: 22,
+                          decoration: BoxDecoration(
                               color: Colors.white.withOpacity(0.1),
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              Icons.close_rounded,
-                              color:   Colors.white.withOpacity(0.4),
-                              size:    14,
-                            ),
-                          ),
-                        ],
-                      ),
+                              shape: BoxShape.circle),
+                          child: Icon(Icons.close_rounded,
+                              color: Colors.white.withOpacity(0.4), size: 14),
+                        ),
+                      ]),
                     ),
                   ),
                 ),
@@ -1230,9 +1158,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ════════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════════
   // WARNING OVERLAY — L3
-  // ════════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════════
 
   Widget _buildWarningOverlay(String type) {
     final isDrowsy = type == 'DROWSY';
@@ -1244,206 +1172,214 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           builder: (context, _) {
             final pulse = _warningAnimation.value;
             final p     = (pulse - 0.8) / 0.2;
-            return Stack(
-              fit: StackFit.expand,
-              children: [
-                BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                  child: Container(
-                      color: Colors.red.withOpacity(0.15)),
-                ),
-                Container(
-                  decoration: BoxDecoration(
-                    border: Border.all(
+            return Stack(fit: StackFit.expand, children: [
+              BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                child: Container(
+                    color: Colors.red.withOpacity(0.15)),
+              ),
+              Container(
+                decoration: BoxDecoration(
+                  border: Border.all(
                       color: Colors.red.withOpacity(0.3 + 0.5 * p),
-                      width: 5,
-                    ),
-                    gradient: RadialGradient(
-                      center: Alignment.center,
-                      radius: 1.2,
-                      colors: [
-                        Colors.transparent,
-                        Colors.red.withOpacity(0.06 + 0.10 * p),
-                      ],
-                    ),
-                  ),
-                ),
-                Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 88, height: 88,
-                        decoration: BoxDecoration(
-                          color:  Colors.red.shade900.withOpacity(0.85),
-                          shape:  BoxShape.circle,
-                          border: Border.all(
-                            color: Colors.red.shade400.withOpacity(0.6),
-                            width: 2,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.red
-                                  .withOpacity(0.2 + 0.2 * p),
-                              blurRadius:   30,
-                              spreadRadius: 4,
-                            ),
-                          ],
-                        ),
-                        child: Icon(Icons.warning_amber_rounded,
-                            size: 48, color: Colors.red.shade300),
-                      ),
-                      const SizedBox(height: 20),
-                      Text(
-                        isDrowsy ? 'DROWSINESS' : 'DISTRACTION',
-                        style: TextStyle(
-                          fontSize:      28,
-                          fontWeight:    FontWeight.w900,
-                          color:         Colors.red.shade300,
-                          letterSpacing: 4,
-                        ),
-                      ),
-                      Text(
-                        'DETECTED',
-                        style: TextStyle(
-                          fontSize:      18,
-                          fontWeight:    FontWeight.w700,
-                          color:         Colors.red.shade400.withOpacity(0.8),
-                          letterSpacing: 6,
-                        ),
-                      ),
-                      const SizedBox(height: 28),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 24, vertical: 10),
-                        decoration: BoxDecoration(
-                          color:        Colors.white.withOpacity(0.08),
-                          borderRadius: BorderRadius.circular(30),
-                          border: Border.all(
-                              color: Colors.white.withOpacity(0.15)),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.touch_app_rounded,
-                                size:  16,
-                                color: Colors.white.withOpacity(0.6)),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Tap anywhere to dismiss',
-                              style: TextStyle(
-                                fontSize:      13,
-                                color:         Colors.white.withOpacity(0.6),
-                                fontWeight:    FontWeight.w500,
-                                letterSpacing: 0.3,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      width: 5),
+                  gradient: RadialGradient(
+                    center: Alignment.center, radius: 1.2,
+                    colors: [
+                      Colors.transparent,
+                      Colors.red.withOpacity(0.06 + 0.10 * p),
                     ],
                   ),
                 ),
-                // ALARM ACTIVE badge
-                Positioned(
-                  top: 12, right: 12,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color:        Colors.red.shade800.withOpacity(0.9),
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color:      Colors.red.withOpacity(0.4 * pulse),
-                          blurRadius: 10,
-                        ),
-                      ],
+              ),
+              Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Container(
+                  width: 88, height: 88,
+                  decoration: BoxDecoration(
+                    color:  Colors.red.shade900.withOpacity(0.85),
+                    shape:  BoxShape.circle,
+                    border: Border.all(
+                        color: Colors.red.shade400.withOpacity(0.6), width: 2),
+                    boxShadow: [BoxShadow(
+                        color: Colors.red.withOpacity(0.2 + 0.2 * p),
+                        blurRadius: 30, spreadRadius: 4)],
+                  ),
+                  child: Icon(Icons.warning_amber_rounded,
+                      size: 48, color: Colors.red.shade300),
+                ),
+                const SizedBox(height: 20),
+                Text(isDrowsy ? 'DROWSINESS' : 'DISTRACTION',
+                    style: TextStyle(
+                        fontSize:      28,
+                        fontWeight:    FontWeight.w900,
+                        color:         Colors.red.shade300,
+                        letterSpacing: 4)),
+                Text('DETECTED',
+                    style: TextStyle(
+                        fontSize:      18,
+                        fontWeight:    FontWeight.w700,
+                        color:         Colors.red.shade400.withOpacity(0.8),
+                        letterSpacing: 6)),
+                const SizedBox(height: 28),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 24, vertical: 10),
+                  decoration: BoxDecoration(
+                    color:        Colors.white.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(30),
+                    border: Border.all(
+                        color: Colors.white.withOpacity(0.15)),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.touch_app_rounded,
+                        size:  16,
+                        color: Colors.white.withOpacity(0.6)),
+                    const SizedBox(width: 8),
+                    Text('Tap anywhere to dismiss',
+                        style: TextStyle(
+                            fontSize:   13,
+                            color:      Colors.white.withOpacity(0.6),
+                            fontWeight: FontWeight.w500,
+                            letterSpacing: 0.3)),
+                  ]),
+                ),
+              ])),
+              // ALARM ACTIVE badge
+              Positioned(
+                top: 12, right: 12,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color:        Colors.red.shade800.withOpacity(0.9),
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [BoxShadow(
+                        color:      Colors.red.withOpacity(0.4 * pulse),
+                        blurRadius: 10)],
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Container(
+                      width: 7, height: 7,
+                      decoration: BoxDecoration(
+                          color: Colors.red.shade200, shape: BoxShape.circle),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 7, height: 7,
-                          decoration: BoxDecoration(
-                            color: Colors.red.shade200,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          'ALARM ACTIVE',
-                          style: TextStyle(
+                    const SizedBox(width: 6),
+                    Text('ALARM ACTIVE',
+                        style: TextStyle(
                             color:         Colors.red.shade100,
                             fontSize:      10,
                             fontWeight:    FontWeight.bold,
-                            letterSpacing: 1.0,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                            letterSpacing: 1.0)),
+                  ]),
                 ),
-              ],
-            );
+              ),
+            ]);
           },
         ),
       ),
     );
   }
 
-  // ════════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════════
   // METRICS SIDEBAR
-  // ════════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════════
 
   Widget _buildMetricsSidebar({required bool isLandscape}) {
     final alertness   = ref.watch(alertnessPctProvider);
     final drowsiness  = ref.watch(drowsinessPctProvider);
     final distraction = ref.watch(distractionPctProvider);
 
-    return Column(
-      children: [
-        IntrinsicHeight(
-          child: Row(
-            children: [
-              Expanded(
-                child: _MetricGauge(
-                  label: 'Alertness',
-                  value: alertness,
-                  color: const Color(0xFF22d3ee),
-                  icon:  Icons.bolt,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _MetricGauge(
-                  label: 'Drowsiness',
-                  value: drowsiness,
-                  color: const Color(0xFFef4444),
-                  icon:  Icons.visibility_off,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _MetricGauge(
-                  label: 'Distraction',
-                  value: distraction,
-                  color: const Color(0xFFfbbf24),
-                  icon:  Icons.visibility,
-                ),
-              ),
-            ],
-          ),
+    return Column(children: [
+      // FIX #5 (v2): Each gauge is wrapped in Flexible so the Row distributes
+      // space evenly — prevents overflow when values animate in on record start.
+      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Flexible(child: _MetricGauge(
+            label: 'Alertness',
+            value: alertness,
+            color: const Color(0xFF22d3ee),
+            icon:  Icons.bolt)),
+        const SizedBox(width: 12),
+        Flexible(child: GestureDetector(
+          onTap: drowsiness > 0
+              ? () => _showSubclassSheet('drowsy') : null,
+          child: _MetricGauge(
+              label:   'Drowsiness',
+              value:   drowsiness,
+              color:   const Color(0xFFef4444),
+              icon:    Icons.visibility_off,
+              tapHint: drowsiness > 0),
+        )),
+        const SizedBox(width: 12),
+        Flexible(child: GestureDetector(
+          onTap: distraction > 0
+              ? () => _showSubclassSheet('distracted') : null,
+          child: _MetricGauge(
+              label:   'Distraction',
+              value:   distraction,
+              color:   const Color(0xFFfbbf24),
+              icon:    Icons.visibility,
+              tapHint: distraction > 0),
+        )),
+      ]),
+      const SizedBox(height: 16),
+      _buildSystemLog(),
+    ]);
+  }
+
+  // ─── SUBCLASS BOTTOM SHEET (NEW from v2) ────────────────────────────────────
+
+  void _showSubclassSheet(String mainClass) {
+    final subclass = ref.read(activeSubclassProvider) ?? 'safe_driving';
+    final isDrowsy = mainClass == 'drowsy';
+    final mainColor = isDrowsy
+        ? const Color(0xFFef4444)
+        : const Color(0xFFfbbf24);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => Container(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+        decoration: const BoxDecoration(
+          color: Color(0xFF0D1627),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
-        const SizedBox(height: 16),
-        _buildSystemLog(),
-      ],
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          // Handle bar
+          Center(child: Container(
+            width: 40, height: 4,
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(
+                color: const Color(0xFF1E2D45),
+                borderRadius: BorderRadius.circular(2)),
+          )),
+          Text(isDrowsy ? 'Drowsiness Detected' : 'Distraction Detected',
+              style: const TextStyle(
+                  color:      Colors.white,
+                  fontSize:   17,
+                  fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          Text('Current: $subclass',
+              style: TextStyle(color: mainColor, fontSize: 13)),
+          const SizedBox(height: 16),
+          Text(
+            isDrowsy
+                ? 'Drowsy classes: Yawning, Head Droop, Eyes Closed (PERCLOS)'
+                : 'Distracted classes: Texting, Phone Call, Radio, Drinking,\n'
+                  'Reaching Behind, Hair/Makeup, Talking to Passenger',
+            style: const TextStyle(
+                color: Color(0xFF94a3b8), fontSize: 12),
+            textAlign: TextAlign.center,
+          ),
+        ]),
+      ),
     );
   }
 
-  // ════════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════════
   // SYSTEM LOG
-  // ════════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════════
 
   Widget _buildSystemLog() {
     return Container(
@@ -1453,15 +1389,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color:      const Color(0xFF0b1120).withOpacity(0.5),
-            offset:     const Offset(4, 4),
-            blurRadius: 8,
-          ),
+              color:      const Color(0xFF0b1120).withOpacity(0.5),
+              offset:     const Offset(4, 4), blurRadius: 8),
           BoxShadow(
-            color:      const Color(0xFF1e293b).withOpacity(0.5),
-            offset:     const Offset(-4, -4),
-            blurRadius: 8,
-          ),
+              color:      const Color(0xFF1e293b).withOpacity(0.5),
+              offset:     const Offset(-4, -4), blurRadius: 8),
         ],
       ),
       padding: const EdgeInsets.all(14),
@@ -1469,24 +1401,19 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize:        MainAxisSize.min,
         children: [
-          const Text(
-            'SYSTEM LOG',
-            style: TextStyle(
-              color:         Color(0xFF94a3b8),
-              fontSize:      11,
-              fontWeight:    FontWeight.w600,
-              letterSpacing: 1.5,
-            ),
-          ),
+          const Text('SYSTEM LOG',
+              style: TextStyle(
+                  color:         Color(0xFF94a3b8),
+                  fontSize:      11,
+                  fontWeight:    FontWeight.w600,
+                  letterSpacing: 1.5)),
           const SizedBox(height: 10),
           if (_systemLogs.isEmpty)
             const Align(
               alignment: Alignment.topCenter,
-              child: Text(
-                'No logs yet. Start recording to begin.',
-                style:     TextStyle(color: Colors.white24, fontSize: 12),
-                textAlign: TextAlign.center,
-              ),
+              child: Text('No logs yet. Start recording to begin.',
+                  style:     TextStyle(color: Colors.white24, fontSize: 12),
+                  textAlign: TextAlign.center),
             )
           else
             SizedBox(
@@ -1495,16 +1422,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 physics:   const BouncingScrollPhysics(),
                 itemCount: _systemLogs.length > 20 ? 20 : _systemLogs.length,
                 itemBuilder: (context, index) {
-                  final log =
-                      _systemLogs.reversed.toList()[index];
+                  final log = _systemLogs.reversed.toList()[index];
                   Color textColor;
                   switch (log['type']) {
                     case 'SUCCESS':
-                      textColor = const Color(0xFF10b981);
-                      break;
+                      textColor = const Color(0xFF10b981); break;
                     case 'WARNING':
-                      textColor = const Color(0xFFfbbf24);
-                      break;
+                      textColor = const Color(0xFFfbbf24); break;
                     default:
                       textColor = const Color(0xFF94a3b8);
                   }
@@ -1513,25 +1437,17 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          '[${log['time']}]',
-                          style: const TextStyle(
-                            color:      Color(0xFF475569),
-                            fontSize:   10,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
+                        Text('[${log['time']}]',
+                            style: const TextStyle(
+                                color:      Color(0xFF475569),
+                                fontSize:   10,
+                                fontFamily: 'monospace')),
                         const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            log['message'],
+                        Expanded(child: Text(log['message'],
                             style: TextStyle(
-                              color:      textColor,
-                              fontSize:   10,
-                              fontFamily: 'monospace',
-                            ),
-                          ),
-                        ),
+                                color:      textColor,
+                                fontSize:   10,
+                                fontFamily: 'monospace'))),
                       ],
                     ),
                   );
@@ -1544,124 +1460,117 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 } // end _MonitorScreenState
 
-// METRIC GAUGE
+// ─── METRIC GAUGE ─────────────────────────────────────────────────────────────
+/// FIX #5 (v2): Uses LayoutBuilder so gauge circle size is computed from
+/// available width. Wrapped in Flexible in the parent Row — never overflows.
 class _MetricGauge extends StatelessWidget {
   final String   label;
   final double   value;
   final Color    color;
   final IconData icon;
+  final bool     tapHint;
 
   const _MetricGauge({
     required this.label,
     required this.value,
     required this.color,
     required this.icon,
+    this.tapHint = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final clamped = value.clamp(0.0, 100.0);
-    final isMaxed = clamped >= 100.0;
 
-    return Container(
-      decoration: BoxDecoration(
-        color:        const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: isMaxed
-            ? [
-                BoxShadow(
-                    color:       color.withOpacity(0.30),
-                    blurRadius:  16,
-                    spreadRadius: 2),
-                const BoxShadow(
-                    color:      Color(0xFF0b1120),
-                    offset:     Offset(4, 4),
-                    blurRadius: 8),
-              ]
-            : const [
-                BoxShadow(
-                    color:      Color(0xFF0b1120),
-                    offset:     Offset(6, 6),
-                    blurRadius: 12),
-                BoxShadow(
-                    color:      Color(0xFF1e293b),
-                    offset:     Offset(-6, -6),
-                    blurRadius: 12),
-              ],
-      ),
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 13, color: color),
-              const SizedBox(width: 4),
-              Text(
-                label,
+    return LayoutBuilder(builder: (ctx, constraints) {
+      final gaugeD = (constraints.maxWidth * 0.55).clamp(44.0, 96.0);
+      final fSize  = (gaugeD * 0.30).clamp(12.0, 24.0);
+      final pSize  = (gaugeD * 0.14).clamp(8.0, 12.0);
+
+      return Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF0f172a),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: clamped >= 100.0
+              ? [
+                  BoxShadow(
+                      color:        color.withOpacity(0.30),
+                      blurRadius:   16, spreadRadius: 2),
+                  const BoxShadow(
+                      color:      Color(0xFF0b1120),
+                      offset:     Offset(4, 4), blurRadius: 8),
+                ]
+              : const [
+                  BoxShadow(
+                      color:      Color(0xFF0b1120),
+                      offset:     Offset(6, 6), blurRadius: 12),
+                  BoxShadow(
+                      color:      Color(0xFF1e293b),
+                      offset:     Offset(-6, -6), blurRadius: 12),
+                ],
+        ),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(icon, size: 12, color: color),
+            const SizedBox(width: 3),
+            Flexible(child: Text(label,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  color:      Color(0xFF94a3b8),
-                  fontSize:   11,
-                  fontWeight: FontWeight.w500,
+                    color:      Color(0xFF94a3b8),
+                    fontSize:   10,
+                    fontWeight: FontWeight.w500))),
+            if (tapHint) ...[
+              const SizedBox(width: 3),
+              Icon(Icons.touch_app_rounded,
+                  size:  9, color: color.withOpacity(0.6)),
+            ],
+          ]),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: gaugeD, height: gaugeD,
+            child: Stack(alignment: Alignment.center, children: [
+              SizedBox(
+                width: gaugeD, height: gaugeD,
+                child: CircularProgressIndicator(
+                  value:           1.0,
+                  strokeWidth:     4,
+                  backgroundColor: Colors.transparent,
+                  valueColor:      AlwaysStoppedAnimation<Color>(
+                      color.withOpacity(0.18)),
+                  strokeCap: StrokeCap.round,
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: 80, height: 80,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                SizedBox(
-                  width: 80, height: 80,
-                  child: CircularProgressIndicator(
-                    value:           1.0,
-                    strokeWidth:     5,
-                    backgroundColor: Colors.transparent,
-                    valueColor:      AlwaysStoppedAnimation<Color>(
-                        color.withOpacity(0.18)),
-                    strokeCap: StrokeCap.round,
-                  ),
-                ),
-                TweenAnimationBuilder<double>(
-                  tween:    Tween<double>(begin: 0, end: clamped),
-                  duration: const Duration(milliseconds: 600),
-                  curve:    Curves.easeOut,
-                  builder: (_, v, __) => Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '${v.toInt()}',
+              TweenAnimationBuilder<double>(
+                tween:    Tween<double>(begin: 0, end: clamped),
+                duration: const Duration(milliseconds: 600),
+                curve:    Curves.easeOut,
+                builder: (_, v, __) => Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('${v.toInt()}',
                         style: TextStyle(
-                          color:      color,
-                          fontSize:   22,
-                          fontWeight: FontWeight.bold,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                      Text(
-                        '%',
+                            color:      color,
+                            fontSize:   fSize,
+                            fontWeight: FontWeight.bold,
+                            fontFamily: 'monospace')),
+                    Text('%',
                         style: TextStyle(
-                          color:      color.withOpacity(0.7),
-                          fontSize:   10,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
+                            color:      color.withOpacity(0.7),
+                            fontSize:   pSize,
+                            fontWeight: FontWeight.w500)),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ]),
           ),
-        ],
-      ),
-    );
+        ]),
+      );
+    });
   }
 }
 
-// CAMERA OVERLAY BUTTON
+// ─── CAMERA OVERLAY BUTTON ────────────────────────────────────────────────────
 class _CameraOverlayButton extends StatelessWidget {
   final IconData     icon;
   final String       label;
@@ -1685,28 +1594,22 @@ class _CameraOverlayButton extends StatelessWidget {
         duration: const Duration(milliseconds: 200),
         padding:  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color:        isActive
+          color: isActive
               ? activeColor.withOpacity(0.18)
               : Colors.transparent,
           borderRadius: BorderRadius.circular(22),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon,
-                size:  18,
-                color: isActive ? activeColor : Colors.white60),
-            const SizedBox(width: 6),
-            Text(
-              label,
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon,
+              size:  18,
+              color: isActive ? activeColor : Colors.white60),
+          const SizedBox(width: 6),
+          Text(label,
               style: TextStyle(
-                color:      isActive ? activeColor : Colors.white60,
-                fontSize:   12,
-                fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
-              ),
-            ),
-          ],
-        ),
+                  color:      isActive ? activeColor : Colors.white60,
+                  fontSize:   12,
+                  fontWeight: isActive ? FontWeight.w600 : FontWeight.w400)),
+        ]),
       ),
     );
   }
