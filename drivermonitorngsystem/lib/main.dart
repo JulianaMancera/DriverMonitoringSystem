@@ -13,8 +13,8 @@ import 'screens/monitor_screen.dart';
 import 'screens/analytics_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/history_screen.dart';
-import 'screens/splash_screen.dart';      
-import 'screens/onboarding_screen.dart'; 
+import 'screens/splash_screen.dart';
+import 'screens/onboarding_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -41,12 +41,11 @@ void main() async {
   }
 
   await BantayDriveService.initialize();
- 
 
   runApp(const ProviderScope(child: BantayDriveApp()));
 }
 
-// APP 
+// APP
 class BantayDriveApp extends StatelessWidget {
   const BantayDriveApp({super.key});
 
@@ -67,13 +66,13 @@ class BantayDriveApp extends StatelessWidget {
           ),
           useMaterial3: true,
         ),
-        home: const EntryPoint(),   
+        home: const EntryPoint(),
       ),
     );
   }
 }
 
-// ENTRY POINT  (splash → onboarding? → shell) 
+// ENTRY POINT  (splash → onboarding? → shell)
 
 enum _AppState { splash, onboarding, main }
 
@@ -85,10 +84,10 @@ class EntryPoint extends StatefulWidget {
 }
 
 class _EntryPointState extends State<EntryPoint> {
-  //  DEV TOGGLE 
-  // Set to true to always show onboarding (ignores SharedPreferences).
-  // Set back to false when you're done previewing.
-  static const bool _forceOnboarding = true;
+  //  DEV TOGGLE
+  // Bug fix: was `true` — caused onboarding to show on EVERY launch.
+  // Set back to true temporarily if you need to preview onboarding UI again.
+  static const bool _forceOnboarding = false;
 
   _AppState _state             = _AppState.splash;
   bool      _onboardingNeeded  = false;
@@ -283,7 +282,6 @@ class MainShell extends ConsumerWidget {
                   ],
                 ),
 
-                // ── Original green-dot recording indicator — UNCHANGED ──────
                 actions: [
                   Padding(
                     padding: const EdgeInsets.only(right: 20),

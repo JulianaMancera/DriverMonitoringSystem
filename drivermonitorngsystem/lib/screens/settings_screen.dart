@@ -162,9 +162,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               subtitle: 'Auto-delete sessions older than',
               value: _retentionPeriod,
               options: const ['7 days', '30 days', 'Forever'],
-              onChanged: (v) {
+              onChanged: (v) async {
                 setState(() => _retentionPeriod = v!);
                 PreferencesHelper.instance.setRetention(v!);
+                // Bug fix: enforce retention immediately so old sessions are
+                // deleted right away, not just on next app launch.
+                if (v != 'Forever') {
+                  final days = v == '7 days' ? 7 : 30;
+                  await DatabaseHelper.instance.deleteSessionsOlderThan(days);
+                }
               },
             ),
             _dividerLine(),

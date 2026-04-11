@@ -209,6 +209,16 @@ class DatabaseHelper {
   /// Uses a single query instead of N+1 daily queries.
   Future<int> getSafetyStreakDays() async {
     final db = await database;
+
+    // Bug fix: if no sessions exist, streak is 0 — not 365.
+    // Without this guard, looping 365 days finds no alert days and
+    // returns 365, which is meaningless on a fresh install.
+    final sessionCheck = await db.rawQuery(
+      'SELECT COUNT(*) as cnt FROM sessions WHERE ended_at IS NOT NULL',
+    );
+    final sessionCount = (sessionCheck.first['cnt'] as int?) ?? 0;
+    if (sessionCount == 0) return 0;
+
     final since = DateTime.now()
         .toUtc()
         .subtract(const Duration(days: 365))
@@ -532,6 +542,7 @@ class DatabaseHelper {
       getAlertCountByType(alertType: 'DISTRACTED', days: days),
       getDailyAlertTrends(days: effectiveDays),
       getHourlyAlertDistribution(days: effectiveDays),
+      getAvgSafetyScore(days: days),   // Bug fix: was missing from analytics
     ]);
 
     return {
@@ -541,6 +552,7 @@ class DatabaseHelper {
       'distraction_events':  results[3] as int,
       'daily_trends':        results[4] as List<Map<String, dynamic>>,
       'hourly_distribution': results[5] as List<Map<String, dynamic>>,
+      'avg_safety_score':    results[6] as double,   // now available to AnalyticsScreen
     };
   }
 
