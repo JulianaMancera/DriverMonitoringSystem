@@ -1,9 +1,6 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import '../utils/responsive.dart';
 import 'package:flutter/services.dart';
 import 'package:volume_controller/volume_controller.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core/database/database_helper.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
@@ -109,7 +106,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       backgroundColor: _bg,
       body: ListView(
         controller: _scrollController,
-        padding: EdgeInsets.symmetric(horizontal: MediaQuery.of(context).size.width * 0.04, vertical: MediaQuery.of(context).size.height * 0.015),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         children: [
           _sectionLabel('ALERT SETTINGS'),
           _buildCard([
@@ -140,7 +137,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
             ),
           ]),
-          SizedBox(height: MediaQuery.of(context).size.height * 0.025),
+          const SizedBox(height: 24),
           _sectionLabel('MONITORING SETTINGS'),
           _buildCard([
             _toggleTile(
@@ -155,7 +152,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
             ),
           ]),
-          SizedBox(height: MediaQuery.of(context).size.height * 0.025),
+          const SizedBox(height: 24),
           _sectionLabel('DATA & PRIVACY'),
           _buildCard([
             _dropdownTile(
@@ -172,14 +169,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             _dividerLine(),
             _actionTile(
-              icon: Icons.download_rounded,
-              iconColor: _cyan,
-              title: 'Export Session Data',
-              subtitle: 'Share all sessions as CSV',
-              onTap: () => _onExportData(context),
-            ),
-            _dividerLine(),
-            _actionTile(
               icon: Icons.delete_outline_rounded,
               iconColor: _red,
               title: 'Clear All History',
@@ -188,7 +177,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onTap: () => _onClearHistory(context),
             ),
           ]),
-          SizedBox(height: MediaQuery.of(context).size.height * 0.025),
+          const SizedBox(height: 24),
           _sectionLabel('ABOUT'),
           _buildCard([
             _infoTile(
@@ -199,7 +188,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _dividerLine(),
             _authorsTile(),
           ]),
-          SizedBox(height: MediaQuery.of(context).size.height * 0.032),
+          const SizedBox(height: 32),
         ],
       ),
     );
@@ -208,11 +197,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // ── TILE WIDGETS ───────────────────────────────────────────────────────────
 
   Widget _sectionLabel(String label) => Padding(
-    padding: EdgeInsets.only(left: context.rp(4), bottom: context.rs(6), top: context.rs(4)),
+    padding: const EdgeInsets.only(left: 4, bottom: 8, top: 4),
     child: Text(label,
         style: TextStyle(
             color: _textSecondary,
-            fontSize: Responsive.responsiveFont(context, mobile: 11, tablet: 12, desktop: 13),
+            fontSize: 11,
             fontWeight: FontWeight.w600,
             letterSpacing: 1.2)),
   );
@@ -237,20 +226,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required ValueChanged<bool> onChanged,
   }) {
     return Padding(
-      padding: EdgeInsets.symmetric(horizontal: MediaQuery.of(context).size.width * 0.04, vertical: MediaQuery.of(context).size.height * 0.018),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       child: Row(children: [
         _iconBox(icon, iconColor),
-        SizedBox(width: MediaQuery.of(context).size.width * 0.035),
+        const SizedBox(width: 14),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(title,
               style: TextStyle(
                   color: _textPrimary,
-                  fontSize: Responsive.responsiveFont(context, mobile: 14, tablet: 15, desktop: 16),
+                  fontSize: 14,
                   fontWeight: FontWeight.w500)),
           if (subtitle != null) ...[
-            SizedBox(height: context.rs(2)),
+            const SizedBox(height: 2),
             Text(subtitle,
-                style: TextStyle(color: _textSecondary, fontSize: context.sp(11)))
+                style: TextStyle(color: _textSecondary, fontSize: 12))
           ],
         ])),
         Switch(
@@ -278,27 +267,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
     int? divisions,
   }) {
     return Padding(
-      padding: EdgeInsets.fromLTRB(MediaQuery.of(context).size.width * 0.04, MediaQuery.of(context).size.height * 0.018, MediaQuery.of(context).size.width * 0.04, MediaQuery.of(context).size.height * 0.013),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
       child: Column(children: [
         Row(children: [
           _iconBox(icon, iconColor),
-          SizedBox(width: MediaQuery.of(context).size.width * 0.035),
+          const SizedBox(width: 14),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(title,
                 style: TextStyle(
                     color: _textPrimary,
-                    fontSize: Responsive.responsiveFont(context, mobile: 14, tablet: 15, desktop: 16),
+                    fontSize: 14,
                     fontWeight: FontWeight.w500)),
             if (subtitle != null) ...[
-              SizedBox(height: context.rs(2)),
+              const SizedBox(height: 2),
               Text(subtitle,
-                  style: TextStyle(color: _textSecondary, fontSize: context.sp(11)))
+                  style: TextStyle(color: _textSecondary, fontSize: 12))
             ],
           ])),
           Text(displayValue,
               style: TextStyle(
                   color: _cyan,
-                  fontSize: Responsive.responsiveFont(context, mobile: 14, tablet: 15, desktop: 16),
+                  fontSize: 14,
                   fontWeight: FontWeight.bold)),
         ]),
         SliderTheme(
@@ -332,25 +321,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required ValueChanged<int> onChanged,
   }) {
     return Padding(
-      padding: EdgeInsets.fromLTRB(context.hPad, context.rs(12), context.hPad, context.rs(12)),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           _iconBox(icon, iconColor),
-          SizedBox(width: MediaQuery.of(context).size.width * 0.035),
+          const SizedBox(width: 14),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(title,
                 style: TextStyle(
                     color: _textPrimary,
-                    fontSize: Responsive.responsiveFont(context, mobile: 14, tablet: 15, desktop: 16),
+                    fontSize: 14,
                     fontWeight: FontWeight.w500)),
             if (subtitle != null) ...[
-              SizedBox(height: context.rs(2)),
+              const SizedBox(height: 2),
               Text(subtitle,
-                  style: TextStyle(color: _textSecondary, fontSize: context.sp(11)))
+                  style: TextStyle(color: _textSecondary, fontSize: 12))
             ],
           ])),
         ]),
-        SizedBox(height: context.rs(12)),
+        const SizedBox(height: 12),
         Row(
           children: List.generate(options.length, (i) {
             final selected = i == selectedIndex;
@@ -379,7 +368,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: selected ? _cyan : _textSecondary,
-                      fontSize: Responsive.responsiveFont(context, mobile: 13, tablet: 14, desktop: 15),
+                      fontSize: 13,
                       fontWeight: selected
                           ? FontWeight.bold
                           : FontWeight.normal,
@@ -404,20 +393,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required ValueChanged<String?> onChanged,
   }) {
     return Padding(
-      padding: EdgeInsets.symmetric(horizontal: MediaQuery.of(context).size.width * 0.04, vertical: MediaQuery.of(context).size.height * 0.018),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       child: Row(children: [
         _iconBox(icon, iconColor),
-        SizedBox(width: MediaQuery.of(context).size.width * 0.035),
+        const SizedBox(width: 14),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(title,
               style: TextStyle(
                   color: _textPrimary,
-                  fontSize: Responsive.responsiveFont(context, mobile: 14, tablet: 15, desktop: 16),
+                  fontSize: 14,
                   fontWeight: FontWeight.w500)),
           if (subtitle != null) ...[
-            SizedBox(height: context.rs(2)),
+            const SizedBox(height: 2),
             Text(subtitle,
-                style: TextStyle(color: _textSecondary, fontSize: context.sp(11)))
+                style: TextStyle(color: _textSecondary, fontSize: 12))
           ],
         ])),
         DropdownButtonHideUnderline(
@@ -426,13 +415,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
             dropdownColor: _surfaceAlt,
             icon: Icon(Icons.chevron_right_rounded,
                 color: _textSecondary, size: 20),
-            style: TextStyle(color: _cyan, fontSize: context.sp(13)),
+            style: TextStyle(color: _cyan, fontSize: 13),
             items: options
                 .map((o) => DropdownMenuItem(
                     value: o,
                     child: Text(o,
                         style:
-                            TextStyle(color: _textPrimary, fontSize: context.sp(13)))))
+                            TextStyle(color: _textPrimary, fontSize: 13))))
                 .toList(),
             onChanged: onChanged,
           ),
@@ -453,20 +442,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
       child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: MediaQuery.of(context).size.width * 0.04, vertical: MediaQuery.of(context).size.height * 0.018),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(children: [
           _iconBox(icon, iconColor),
-          SizedBox(width: MediaQuery.of(context).size.width * 0.035),
+          const SizedBox(width: 14),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(title,
                 style: TextStyle(
                     color: titleColor ?? _textPrimary,
-                    fontSize: Responsive.responsiveFont(context, mobile: 14, tablet: 15, desktop: 16),
+                    fontSize: 14,
                     fontWeight: FontWeight.w500)),
             if (subtitle != null) ...[
-              SizedBox(height: context.rs(2)),
+              const SizedBox(height: 2),
               Text(subtitle,
-                  style: TextStyle(color: _textSecondary, fontSize: context.sp(11)))
+                  style: TextStyle(color: _textSecondary, fontSize: 12))
             ],
           ])),
           Icon(Icons.chevron_right_rounded, color: _textSecondary, size: 20),
@@ -481,19 +470,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required String value,
   }) {
     return Padding(
-      padding: EdgeInsets.symmetric(horizontal: MediaQuery.of(context).size.width * 0.04, vertical: MediaQuery.of(context).size.height * 0.018),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       child: Row(children: [
         _iconBox(icon, _textSecondary),
-        SizedBox(width: MediaQuery.of(context).size.width * 0.035),
+        const SizedBox(width: 14),
         Expanded(child: Text(title,
             style: TextStyle(
                 color: _textSecondary,
-                fontSize: Responsive.responsiveFont(context, mobile: 14, tablet: 15, desktop: 16),
+                fontSize: 14,
                 fontWeight: FontWeight.w400))),
         Text(value,
             style: TextStyle(
                 color: _textPrimary,
-                fontSize: Responsive.responsiveFont(context, mobile: 13, tablet: 14, desktop: 15),
+                fontSize: 13,
                 fontWeight: FontWeight.w500)),
       ]),
     );
@@ -506,13 +495,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
       child: ExpansionTile(
         key: _authorsKey,
-        tilePadding: EdgeInsets.symmetric(horizontal: context.rp(16), vertical: context.rs(2)),
-        childrenPadding: EdgeInsets.fromLTRB(context.rp(16), context.rs(0), context.rp(16), context.rs(14)),
+        tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
         leading: _iconBox(Icons.people_rounded, _textSecondary),
         title: Text('Authors',
             style: TextStyle(
                 color: _textSecondary,
-                fontSize: Responsive.responsiveFont(context, mobile: 14, tablet: 15, desktop: 16),
+                fontSize: 14,
                 fontWeight: FontWeight.w400)),
         trailing: Icon(Icons.expand_more_rounded,
             color: _textSecondary, size: 20),
@@ -525,7 +514,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             username: 'JulianaMancera',
             url: 'https://github.com/JulianaMancera',
           ),
-          SizedBox(height: MediaQuery.of(context).size.height * 0.010),
+          const SizedBox(height: 8),
           _githubLink(
             name: 'Pia Katleya Macalanda',
             username: 'PiaMacalanda',
@@ -550,7 +539,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       },
       borderRadius: BorderRadius.circular(10),
       child: Container(
-        padding: EdgeInsets.symmetric(horizontal: context.rp(12), vertical: context.rs(10)),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           color: _surfaceAlt,
           borderRadius: BorderRadius.circular(10),
@@ -566,19 +555,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             child: Icon(Icons.code_rounded, color: _cyan, size: 16),
           ),
-          SizedBox(width: MediaQuery.of(context).size.width * 0.030),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(name,
                   style: TextStyle(
                       color: _textPrimary,
-                      fontSize: Responsive.responsiveFont(context, mobile: 13, tablet: 14, desktop: 15),
+                      fontSize: 13,
                       fontWeight: FontWeight.w500)),
               const SizedBox(height: 1),
               Text('github.com/$username',
                   style: TextStyle(
                       color: _cyan,
-                      fontSize: Responsive.responsiveFont(context, mobile: 11, tablet: 12, desktop: 13),
+                      fontSize: 11,
                       fontWeight: FontWeight.w400)),
             ]),
           ),
@@ -603,7 +592,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(message,
           style: TextStyle(
-              color: isError ? Colors.white : _bg, fontSize: context.sp(13))),
+              color: isError ? Colors.white : _bg, fontSize: 13)),
       backgroundColor: isError ? _red : _cyan,
       behavior: SnackBarBehavior.floating,
       shape:
@@ -612,107 +601,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ));
   }
 
-  // CSV EXPORT
-  String _pad(int n) => n.toString().padLeft(2, '0');
-
-  Future<void> _exportCSV(BuildContext ctx) async {
-    try {
-      final sessions = await DatabaseHelper.instance.getAllSessions();
-      if (sessions.isEmpty) {
-        if (ctx.mounted) {
-          _showSnackbar(ctx, 'No sessions to export.', isError: false);
-        }
-        return;
-      }
-
-      final buf = StringBuffer();
-      buf.writeln(
-          'Session ID,Date,Start Time,End Time,Duration (sec),'
-          'Alertness Avg (%),Safety Score (%),Alert Count');
-
-      for (final s in sessions) {
-        final id       = s['id'] as int;
-        final alerts   = await DatabaseHelper.instance.getAlertsBySession(id);
-        final started  = s['started_at'] as String? ?? '';
-        final ended    = s['ended_at']   as String? ?? '';
-        final duration = s['duration_sec'] as int? ?? 0;
-        final alertAvg = (s['alertness_avg'] as double? ?? 0.0).toStringAsFixed(1);
-        final safety   = (s['safety_score']  as double? ?? 0.0).toStringAsFixed(1);
-
-        final sd = DateTime.tryParse(started);
-        final ed = DateTime.tryParse(ended);
-        final date  = sd != null
-            ? '${sd.year}-${_pad(sd.month)}-${_pad(sd.day)}'
-            : '';
-        final sTime = sd != null
-            ? '${_pad(sd.hour)}:${_pad(sd.minute)}:${_pad(sd.second)}'
-            : '';
-        final eTime = ed != null
-            ? '${_pad(ed.hour)}:${_pad(ed.minute)}:${_pad(ed.second)}'
-            : '';
-
-        buf.writeln(
-            '$id,$date,$sTime,$eTime,$duration,$alertAvg,$safety,${alerts.length}');
-      }
-
-      final docsDir  = await getApplicationDocumentsDirectory();
-      final now      = DateTime.now();
-      final stamp    =
-          '${now.year}${_pad(now.month)}${_pad(now.day)}'
-          '_${_pad(now.hour)}${_pad(now.minute)}';
-      final fileName = 'bantaydrive_sessions_$stamp.csv';
-      final file     = File('${docsDir.path}/$fileName');
-      await file.writeAsString(buf.toString());
-
-      if (!ctx.mounted) return;
-    } catch (e) {
-      if (ctx.mounted) {
-        _showSnackbar(ctx, 'Export failed: $e', isError: true);
-      }
-    }
-  }
-
   //  ACTION HANDLERS
-  void _onExportData(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: _surface,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Export Session Data',
-            style: TextStyle(
-                color: _textPrimary, fontWeight: FontWeight.bold)),
-        content: Text(
-          'All sessions will be exported as a CSV file.\n\n'
-          'A share sheet will open so you can save it to '
-          'Downloads, Google Drive, email, or any app.',
-          style: TextStyle(color: _textSecondary, fontSize: context.sp(14)),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel',
-                style: TextStyle(color: _textSecondary)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _cyan,
-              foregroundColor: _bg,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8)),
-            ),
-            onPressed: () {
-              Navigator.pop(context);
-              _exportCSV(context);
-            },
-            child: const Text('Export & Share'),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _onClearHistory(BuildContext context) {
     showDialog(
       context: context,
@@ -726,7 +615,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         content: Text(
           'This will permanently delete ALL session data including '
           'alerts, logs, and analytics. This action cannot be undone.',
-          style: TextStyle(color: _textSecondary, fontSize: context.sp(14)),
+          style: TextStyle(color: _textSecondary, fontSize: 14),
         ),
         actions: [
           TextButton(
