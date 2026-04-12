@@ -1,10 +1,12 @@
 name: bantaydrive
-description: "A Driving Monitoring System."
+description: "A Driver Monitoring System — Bantay Drive"
 publish_to: "none"
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.10.4
+  # FIX: ^3.10.4 referenced a non-existent SDK version.
+  # Using >=3.3.0 <4.0.0 — Flutter 3.16+ ships with Dart 3.3.x
+  sdk: ">=3.3.0 <4.0.0"
 
 dependencies:
   flutter:
@@ -15,40 +17,40 @@ dependencies:
   path: ^1.8.3
 
   # Charts
-  fl_chart: ^1.1.1
+  fl_chart: ^0.69.0
 
   # Camera
-  camera: ^0.12.0
+  camera: ^0.11.0+2
 
   # Permissions
-  permission_handler: ^12.0.1
+  permission_handler: ^11.3.1
 
   # State management
-  flutter_riverpod: ^3.2.1
+  flutter_riverpod: ^2.5.1
 
   # Audio
   audioplayers: ^6.0.0
-  volume_controller: ^3.4.3
+  volume_controller: ^2.0.7
 
   # Storage / Prefs
   shared_preferences: ^2.3.0
   path_provider: ^2.1.2
 
-  # ML inference (BiLSTM + Attention — Android)
-  tflite_flutter: ^0.12.1
+  # ML inference (TFLite — Android)
+  tflite_flutter: ^0.10.4
 
   # Notifications / Background
-  flutter_local_notifications: ^21.0.0
-  flutter_foreground_task: ^9.0.1
+  flutter_local_notifications: ^17.2.3
+  flutter_foreground_task: ^8.14.0
 
   # Device info
-  device_info_plus: ^13.0.0
+  device_info_plus: ^10.1.0
   url_launcher: ^6.3.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^6.0.0
+  flutter_lints: ^4.0.0
 
 flutter:
   uses-material-design: true
