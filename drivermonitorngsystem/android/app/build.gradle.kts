@@ -7,10 +7,7 @@ plugins {
 android {
     namespace = "com.example.smartalertdrive"
     compileSdk = flutter.compileSdkVersion
-    // FIX: Pin NDK version explicitly — flutter.ndkVersion can resolve to an
-    // incompatible version depending on the Flutter channel. 27.0.12077973 is
-    // the version bundled with Flutter 3.16–3.24 stable and supports JDK 17.
-    ndkVersion = "27.0.12077973"
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
     isCoreLibraryDesugaringEnabled = true

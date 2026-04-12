@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_riverpod/legacy.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -50,7 +49,8 @@ void main() async {
   runApp(const ProviderScope(child: BantayDriveApp()));
 }
 
-// APP
+// ─── APP ──────────────────────────────────────────────────────────────────────
+
 class BantayDriveApp extends StatelessWidget {
   const BantayDriveApp({super.key});
 
@@ -77,7 +77,7 @@ class BantayDriveApp extends StatelessWidget {
   }
 }
 
-// ENTRY POINT  (splash → onboarding? → shell)
+// ─── ENTRY POINT  (splash → onboarding? → shell) ─────────────────────────────
 
 enum _AppState { splash, onboarding, main }
 
@@ -89,9 +89,7 @@ class EntryPoint extends StatefulWidget {
 }
 
 class _EntryPointState extends State<EntryPoint> {
-  //  DEV TOGGLE
-  // Bug fix: was `true` — caused onboarding to show on EVERY launch.
-  // Set back to true temporarily if you need to preview onboarding UI again.
+  // DEV TOGGLE — set true temporarily to preview onboarding UI
   static const bool _forceOnboarding = false;
 
   _AppState _state = _AppState.splash;
@@ -147,9 +145,31 @@ class _EntryPointState extends State<EntryPoint> {
 
 // ─── PROVIDERS ────────────────────────────────────────────────────────────────
 
-final navIndexProvider = StateProvider<int>((ref) => 0);
-final sidebarOpenProvider = StateProvider<bool>((ref) => false);
+// FIX: Riverpod 3.x — StateProvider is replaced by NotifierProvider.
+// All providers that held simple state (int, bool) now use Notifier classes.
 
+class _NavIndexNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+  void set(int index) => state = index;
+}
+
+final navIndexProvider = NotifierProvider<_NavIndexNotifier, int>(
+  _NavIndexNotifier.new,
+);
+
+class _SidebarNotifier extends Notifier<bool> {
+  @override
+  bool build() => false;
+  void toggle() => state = !state;
+  void set(bool value) => state = value;
+}
+
+final sidebarOpenProvider = NotifierProvider<_SidebarNotifier, bool>(
+  _SidebarNotifier.new,
+);
+
+// FIX: FutureProvider is unchanged in Riverpod 3.x — no changes needed here.
 final deviceNameProvider = FutureProvider<String>((ref) async {
   try {
     if (Platform.isAndroid) {
@@ -207,13 +227,14 @@ class MainShell extends ConsumerWidget {
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
 
-    final deviceName = ref
-        .watch(deviceNameProvider)
-        .when(
-          data: (name) => name,
-          loading: () => 'USER',
-          error: (_, _) => 'USER',
-        );
+    // FIX: Riverpod 3.x — .when() error callback uses (error, stackTrace)
+    // The old code used (_, _) which caused "name '_' already defined" error
+    // because Dart doesn't allow the same wildcard name twice in one scope.
+    final deviceName = ref.watch(deviceNameProvider).when(
+      data: (name) => name,
+      loading: () => 'USER',
+      error: (err, stack) => 'USER',
+    );
 
     final isMonitor = currentIndex == 1;
     final isTransparent = isLandscape && isMonitor;
@@ -260,9 +281,9 @@ class MainShell extends ConsumerWidget {
                             size: 26,
                           ),
                         ),
+                        // FIX: use notifier method instead of .state = directly
                         onPressed: () =>
-                            ref.read(sidebarOpenProvider.notifier).state =
-                                !sidebarOpen,
+                            ref.read(sidebarOpenProvider.notifier).toggle(),
                       )
                     : null,
 
@@ -350,7 +371,8 @@ class MainShell extends ConsumerWidget {
                 navItems: _navItems,
                 screens: _screens,
                 onNavTap: (i) {
-                  ref.read(navIndexProvider.notifier).state = i;
+                  // FIX: use notifier method
+                  ref.read(navIndexProvider.notifier).set(i);
                 },
               )
             : IndexedStack(index: currentIndex, children: _screens),
@@ -362,7 +384,8 @@ class MainShell extends ConsumerWidget {
           ? null
           : _BottomNav(
               currentIndex: currentIndex,
-              onTap: (i) => ref.read(navIndexProvider.notifier).state = i,
+              // FIX: use notifier method
+              onTap: (i) => ref.read(navIndexProvider.notifier).set(i),
             ),
     );
   }
