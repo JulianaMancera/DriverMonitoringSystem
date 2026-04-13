@@ -1,14 +1,26 @@
-// PURPOSE:
-//   The core monitoring screen — runs the camera, feeds frames to
-//   TfliteService, handles the 3-level alert system, manages the drive
-//   session lifecycle, and controls PiP mode.
+// ─────────────────────────────────────────────────────────────────────────────
+// monitor_screen.dart  —  v3  (Discord-style PiP + inference fixes)
 //
-// CONNECTIONS:
-//   • TfliteService     — AI inference (NEUTRAL/DROWSY/DISTRACTED per frame)
-//   • DatabaseHelper    — writes session, state counts, alerts, logs, snapshots
-//   • BantayDriveService— foreground service notification (status bar)
-//   • PreferencesHelper — reads sensitivity, autoStart, clearGlasses
-//   • main.dart         — isRecordingProvider, isInPipProvider watched globally
+// KEY ARCHITECTURE CHANGES (v3):
+//
+//   1. DISCORD-STYLE PiP — Never stop the camera stream on lifecycle events.
+//      Only PAUSE INFERENCE on inactive/paused. Camera surface stays alive.
+//      This eliminates the CLOSING→REOPENING loop and BufferQueue errors.
+//
+//   2. NO WIDGET SWAP for PiP — same CameraPreview widget via GlobalKey.
+//      No surface re-attach flicker on PiP enter/exit.
+//
+//   3. INFERENCE PAUSE not stream stop — _inferenceEnabled flag gates frames.
+//      Camera keeps streaming, frames just aren't processed when backgrounded.
+//
+//   4. ALERT SYSTEM FIX — null results (dropped frames) no longer reset the
+//      consecutive counter. Only confirmed NEUTRAL state resets it.
+//      This makes alerts much easier to trigger reliably.
+//
+//   5. SYSTEM LOG FIX — logs now show subclass name + model source + %.
+//
+//   6. BACK BUTTON → PiP when recording (implemented in MainActivity.kt).
+// ─────────────────────────────────────────────────────────────────────────────
 
 import 'dart:async';
 import 'dart:ui';
@@ -24,7 +36,8 @@ import '../core/services/notifications.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import '../utils/responsive.dart';
 
-// PROVIDERS 
+// ─── PROVIDERS ────────────────────────────────────────────────────────────────
+
 class _StringNotifier extends Notifier<String> {
   final String _initial;
   _StringNotifier(this._initial);
@@ -65,43 +78,32 @@ class _IntNotifier extends Notifier<int> {
 }
 
 final driverStateProvider = NotifierProvider<_StringNotifier, String>(
-  () => _StringNotifier('neutral'),
-);
+    () => _StringNotifier('neutral'));
 final alertnessPctProvider = NotifierProvider<_DoubleNotifier, double>(
-  () => _DoubleNotifier(100.0),
-);
+    () => _DoubleNotifier(100.0));
 final drowsinessPctProvider = NotifierProvider<_DoubleNotifier, double>(
-  () => _DoubleNotifier(0.0),
-);
+    () => _DoubleNotifier(0.0));
 final distractionPctProvider = NotifierProvider<_DoubleNotifier, double>(
-  () => _DoubleNotifier(0.0),
-);
+    () => _DoubleNotifier(0.0));
 final isRecordingProvider = NotifierProvider<_BoolNotifier, bool>(
-  () => _BoolNotifier(false),
-);
+    () => _BoolNotifier(false));
 final showAlertBannerProvider = NotifierProvider<_BoolNotifier, bool>(
-  () => _BoolNotifier(false),
-);
+    () => _BoolNotifier(false));
 final alertBannerTypeProvider = NotifierProvider<_StringNotifier, String>(
-  () => _StringNotifier('DROWSY'),
-);
+    () => _StringNotifier('DROWSY'));
 final clearGlassesProvider = NotifierProvider<_BoolNotifier, bool>(
-  () => _BoolNotifier(false),
-);
+    () => _BoolNotifier(false));
 final isInPipProvider = NotifierProvider<_BoolNotifier, bool>(
-  () => _BoolNotifier(false),
-);
+    () => _BoolNotifier(false));
 final activeSubclassProvider =
     NotifierProvider<_NullableStringNotifier, String?>(
-  _NullableStringNotifier.new,
-);
+        _NullableStringNotifier.new);
 final activeSubclassIndexProvider = NotifierProvider<_IntNotifier, int>(
-  () => _IntNotifier(0),
-);
+    () => _IntNotifier(0));
 final pipOrientationProvider = NotifierProvider<_StringNotifier, String>(
-  () => _StringNotifier('portrait'),
-);
+    () => _StringNotifier('portrait'));
 
+// ─────────────────────────────────────────────────────────────────────────────
 class MonitorScreen extends ConsumerStatefulWidget {
   const MonitorScreen({super.key});
   @override
@@ -111,54 +113,58 @@ class MonitorScreen extends ConsumerStatefulWidget {
 class _MonitorScreenState extends ConsumerState<MonitorScreen>
     with TickerProviderStateMixin, WidgetsBindingObserver {
 
-  // Channels
+  // ── Channels ─────────────────────────────────────────────────────────────
   static const _methodChannel = MethodChannel('com.bantaydrive/pip');
   static const _eventChannel  = EventChannel('com.bantaydrive/pip_events');
   StreamSubscription<dynamic>? _pipSubscription;
 
-  // Camera
+  // ── Camera ───────────────────────────────────────────────────────────────
+  // GlobalKey: same CameraPreview instance reused in both full and PiP modes.
+  // This prevents surface re-attach and eliminates the BufferQueue errors.
+  final GlobalKey _cameraKey = GlobalKey();
   CameraController? _cameraController;
   List<CameraDescription> _cameras = [];
-  bool    _cameraInitialized         = false;
+  bool    _cameraInitialized = false;
   String? _cameraError;
-  bool    _streamPausedForBackground = false;
-  bool    _camDisposing              = false;
+  bool    _camDisposing      = false;
 
-  // FIX 1: Track PiP entry time to debounce rapid PiP re-entries.
-  // Rapid PiP entries (e.g. user quickly presses home twice) caused the
-  // PiP window to collapse — the debounce prevents double-entry.
-  DateTime _lastPipEntryTime = DateTime.fromMillisecondsSinceEpoch(0);
+  // ── DISCORD APPROACH: inference gate (NOT stream stop) ───────────────────
+  // When backgrounded: _inferenceEnabled = false (frames flow, not processed)
+  // When foregrounded: _inferenceEnabled = true  (frames processed normally)
+  // Camera stream NEVER stops → no CLOSING→REOPENING loop → no buffer errors
+  bool _inferenceEnabled = false;
 
-  // FIX 1: Tracks if stop was requested while in PiP (via notification button).
-  // The actual stop is deferred until after PiP exit to avoid stopping the
-  // camera stream while the PiP window animation is still running.
-  bool _pendingStopAfterPip = false;
-
-  // Session
+  // ── Session ───────────────────────────────────────────────────────────────
   int?      _currentSessionId;
   DateTime? _sessionStartTime;
   Timer?    _snapshotTimer;
 
-  // Alerts
+  // ── Alert counters ────────────────────────────────────────────────────────
   int _consecutiveDrowsy     = 0;
   int _consecutiveDistracted = 0;
   int _alertLevel            = 0;
 
-  // Logs
+  // ── FIX: Null-result counter ──────────────────────────────────────────────
+  // Previously: null result (dropped frame) → treated as neutral → reset counter
+  // Fixed: count nulls separately, only reset consecutive on confirmed NEUTRAL
+  int _nullResultCount = 0;
+  static const int _kMaxNullBeforeReset = 10;
+
+  // ── Logs ──────────────────────────────────────────────────────────────────
   final List<Map<String, dynamic>> _systemLogs = [];
 
-  // Audio
+  // ── Audio ─────────────────────────────────────────────────────────────────
   final AudioPlayer _audioPlayer = AudioPlayer();
   final AudioPlayer _alarmPlayer = AudioPlayer();
 
-  // Animations
+  // ── Animations ────────────────────────────────────────────────────────────
   late AnimationController _warningController;
   late Animation<double>   _warningAnimation;
   AnimationController?     _notifController;
   Animation<Offset>?       _notifSlide;
   Animation<double>?       _notifFade;
 
-  // Prefs
+  // ── Prefs ─────────────────────────────────────────────────────────────────
   int  _prefAlertSensitivity = 1;
   bool _prefAutoStart        = false;
 
@@ -173,14 +179,16 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   bool     _modelLoaded = false;
   DateTime _lastInferTs = DateTime.fromMillisecondsSinceEpoch(0);
 
-  // LIFECYCLE
+  // ── PiP state ─────────────────────────────────────────────────────────────
+  bool     _pendingStopAfterPip = false;
+
+  // ─── LIFECYCLE ─────────────────────────────────────────────────────────────
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // FIX 2: Use post-frame callback to update PiP state AFTER the current
-    // build cycle. Direct setState during a build causes overflow errors.
     _pipSubscription = _eventChannel.receiveBroadcastStream().listen((raw) {
       if (!mounted || raw is! Map) return;
       final type  = raw['type']  as String?;
@@ -190,19 +198,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
           ref.read(isInPipProvider.notifier).set(value);
-          if (!value) {
-            // Returned from PiP
-            _onReturnFromPip();
-          }
+          if (!value) _onReturnFromPip();
         });
       } else if (type == 'orientation' && value is String) {
         if (!mounted) return;
         ref.read(pipOrientationProvider.notifier).set(value);
-        // FIX 2: Trigger camera preview size recalculation when orientation
-        // changes while in PiP — previously the preview kept old dimensions.
-        if (ref.read(isInPipProvider)) {
-          setState(() {}); // Force preview size recalculation
-        }
+        if (mounted) setState(() {});
       }
     }, onError: (e) => debugPrint('[PiP event] $e'));
 
@@ -241,42 +242,27 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     super.dispose();
   }
 
-  // FIX 5: Don't immediately set isInPip to false on resumed.
-  // onPictureInPictureModeChanged fires BEFORE resumed — if we set
-  // isInPip=false here too, we double-fire the PiP exit logic.
-  // Instead, trust the EventChannel to report the correct state.
+  // ── DISCORD APPROACH: pause inference only, never stop stream ─────────────
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) async {
-    final isRecording = ref.read(isRecordingProvider);
-
+  void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
       case AppLifecycleState.inactive:
-        // Stop stream immediately — prevents CameraX ImageReader crash
-        await _pauseCameraStream();
-
-        if (isRecording && mounted) {
-          final isLandscape =
-              MediaQuery.of(context).orientation == Orientation.landscape;
-          await _enterPip(isLandscape: isLandscape);
-          await BantayDriveService.startService(
+      case AppLifecycleState.paused:
+        // Only disable inference — camera stream stays alive
+        _inferenceEnabled = false;
+        if (ref.read(isRecordingProvider)) {
+          BantayDriveService.startService(
               state: ref.read(driverStateProvider));
         }
         break;
 
-      case AppLifecycleState.paused:
-        // Belt-and-suspenders: also stop on paused
-        await _pauseCameraStream();
-        break;
-
       case AppLifecycleState.resumed:
-        if (mounted) {
-          final currentlyInPip = ref.read(isInPipProvider);
-          if (currentlyInPip) {
-            // Native will fire the pip=false event — wait for it
-          } else {
-            await _resumeCameraStream();
-          }
+        if (ref.read(isRecordingProvider)) {
+          _inferenceEnabled = true;
         }
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) setState(() {});
+        });
         break;
 
       default:
@@ -284,96 +270,32 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // PiP 
-  // FIX 3: Debounce — prevent double PiP entry within 1 second.
-  // Double-entry caused PiP to collapse on some MIUI/POCO devices.
-  Future<void> _enterPip({bool isLandscape = false}) async {
-    final now = DateTime.now();
-    if (now.difference(_lastPipEntryTime).inMilliseconds < 1000) return;
-    _lastPipEntryTime = now;
-
-    try {
-      await _methodChannel
-          .invokeMethod('enterPip', {'isLandscape': isLandscape});
-    } catch (_) {}
-  }
-
+  // ─── PiP ──────────────────────────────────────────────────────────────────
   Future<void> _syncRecordingState(bool recording) async {
     try {
-      await _methodChannel
-          .invokeMethod('setRecording', {'isRecording': recording});
+      await _methodChannel.invokeMethod(
+          'setRecording', {'isRecording': recording});
     } catch (_) {}
   }
 
-  // FIX 4: Called when user returns to the app from PiP mode.
-  // Restores camera stream and handles any pending stop request.
   Future<void> _onReturnFromPip() async {
     if (!mounted) return;
-
-    // FIX 4: Reset orientation to current device orientation when returning
-    // from PiP — prevents layout getting stuck in PiP orientation.
     final isNowLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
     ref.read(pipOrientationProvider.notifier).set(
         isNowLandscape ? 'landscape' : 'portrait');
-
-    // FIX 4: Small delay before resuming camera stream.
-    // The PiP exit animation takes ~300ms — resuming the stream too early
-    // caused the camera to attach to a partially-destroyed surface.
-    await Future.delayed(const Duration(milliseconds: 350));
-    if (!mounted) return;
-
-    await _resumeCameraStream();
-
-    // FIX 4: Handle pending stop request (notification button pressed while in PiP)
+    if (ref.read(isRecordingProvider)) {
+      _inferenceEnabled = true;
+    }
     if (_pendingStopAfterPip) {
       _pendingStopAfterPip = false;
       await _stopRecording();
     }
-
-    // Force rebuild to ensure full layout is restored (not PiP layout)
     if (mounted) setState(() {});
   }
 
-  // CAMERA
-  Future<void> _pauseCameraStream() async {
-    if (_camDisposing || !_cameraInitialized || _cameraController == null) {
-      return;
-    }
-    try {
-      if (_cameraController!.value.isStreamingImages) {
-        await _cameraController!.stopImageStream();
-        _streamPausedForBackground = true;
-      }
-    } catch (_) {}
-  }
+  // ─── CAMERA ───────────────────────────────────────────────────────────────
 
-  Future<void> _resumeCameraStream() async {
-    if (_camDisposing) return;
-    final alreadyStreaming =
-        _cameraController?.value.isStreamingImages ?? false;
-    if (!_streamPausedForBackground && alreadyStreaming) return;
-    try {
-      await Future.delayed(const Duration(milliseconds: 300));
-      if (_camDisposing) return;
-      if (_cameraController == null ||
-          !_cameraController!.value.isInitialized) {
-        _streamPausedForBackground = false;
-        await _initCamera();
-        return;
-      }
-      if (ref.read(isRecordingProvider) &&
-          !_cameraController!.value.isStreamingImages) {
-        await _cameraController!.startImageStream(_onCameraFrame);
-      }
-      _streamPausedForBackground = false;
-    } catch (_) {
-      _streamPausedForBackground = false;
-      if (!_camDisposing) await _initCamera();
-    }
-  }
-
-  // INIT
   Future<void> _loadPreferencesAndInit() async {
     final prefs = PreferencesHelper.instance;
     _prefAlertSensitivity = await prefs.getAlertSensitivity();
@@ -406,7 +328,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       );
       await _cameraController!.initialize();
 
-      // FIX: mounted check after async gap before using setState
       if (!mounted || _camDisposing) return;
       setState(() {
         _cameraInitialized = true;
@@ -415,11 +336,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
       if (_prefAutoStart) {
         await Future.delayed(const Duration(milliseconds: 500));
-        // FIX: mounted check after async gap
         if (mounted && !_camDisposing) await _startRecording();
       }
     } catch (e) {
-      // FIX: mounted check after async gap
       if (mounted) setState(() => _cameraError = 'Camera error: $e');
     }
   }
@@ -435,18 +354,23 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         : Size(ps.height, ps.width);
   }
 
-  // SESSION
+  // ─── SESSION ──────────────────────────────────────────────────────────────
+
   Future<void> _startRecording() async {
-    _currentSessionId = await DatabaseHelper.instance.insertSession();
+    _currentSessionId      = await DatabaseHelper.instance.insertSession();
     await DatabaseHelper.instance.insertStateCount(_currentSessionId!);
-    _sessionStartTime = DateTime.now();
+    _sessionStartTime      = DateTime.now();
+    _nullResultCount       = 0;
+    _consecutiveDrowsy     = 0;
+    _consecutiveDistracted = 0;
+    _alertLevel            = 0;
 
     if (_cameraInitialized && _modelLoaded && !_camDisposing) {
       try {
-        // FIX: Wrap single-statement if in a block
         if (!_cameraController!.value.isStreamingImages) {
           await _cameraController!.startImageStream(_onCameraFrame);
         }
+        _inferenceEnabled = true;
       } catch (e) {
         _addLogSync('Inference stream error: $e', 'WARNING');
       }
@@ -459,7 +383,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     _addLogSync('System Initialized', 'INFO');
     _addLogSync(
-      _modelLoaded ? 'AI Model Active' : 'Demo Mode - No Model',
+      _modelLoaded ? 'DMS-HybridNet Active (T01+T02)' : 'Demo Mode — No Model',
       _modelLoaded ? 'SUCCESS' : 'WARNING',
     );
     _addLogSync('Monitoring Started', 'INFO');
@@ -469,8 +393,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     _snapshotTimer = Timer.periodic(
         const Duration(seconds: 5), (_) => _saveAlertnessSnapshot());
-
-    // FIX: use notifier method instead of .state++
     ref.read(dbChangeCounterProvider.notifier).increment();
   }
 
@@ -488,27 +410,21 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   Future<void> _stopRecording() async {
     if (_currentSessionId == null) return;
 
-    // FIX 6: If user taps Stop while in PiP, defer until PiP exits.
-    // Stopping the camera stream during PiP causes the PiP window to
-    // freeze on the last frame and prevents the user from returning to the app.
+    // Defer stop if currently in PiP
     if (ref.read(isInPipProvider)) {
       _pendingStopAfterPip = true;
       return;
     }
 
     _snapshotTimer?.cancel();
+    _inferenceEnabled      = false;
     await _alarmPlayer.stop();
     _alertLevel            = 0;
     _consecutiveDrowsy     = 0;
     _consecutiveDistracted = 0;
 
-    if (_cameraInitialized && !_camDisposing) {
-      try {
-        if (_cameraController!.value.isStreamingImages) {
-          await _cameraController!.stopImageStream();
-        }
-      } catch (_) {}
-    }
+    // DISCORD: Don't stop stream — just disable inference
+    // isRecording=false gate in _onCameraFrame handles the rest
 
     final durationSec = _sessionStartTime != null
         ? DateTime.now().difference(_sessionStartTime!).inSeconds
@@ -537,11 +453,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       safetyScore:  safetyScore,
     );
 
-    _addLogSync('Session Ended', 'INFO');
+    _addLogSync('Session Ended — Score: ${safetyScore.toInt()}%', 'INFO');
     await _syncRecordingState(false);
     BantayDriveService.stopService();
 
-    // FIX: Use notifier .set() methods instead of .state =
     ref.read(isRecordingProvider.notifier).set(false);
     ref.read(driverStateProvider.notifier).set('neutral');
     ref.read(showAlertBannerProvider.notifier).set(false);
@@ -555,21 +470,38 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(dbChangeCounterProvider.notifier).increment();
   }
 
-  // CAMERA FRAME CALLBACK
+  // ─── CAMERA FRAME ─────────────────────────────────────────────────────────
+
   Future<void> _onCameraFrame(CameraImage frame) async {
     if (_camDisposing) return;
+
+    // DISCORD: inference gate — stream flows but frames dropped when paused
+    if (!_inferenceEnabled) return;
+    if (!mounted || !ref.read(isRecordingProvider)) return;
+
     final now = DateTime.now();
     if (now.difference(_lastInferTs).inMilliseconds < 200) return;
     _lastInferTs = now;
 
-    if (!mounted || !ref.read(isRecordingProvider)) return;
     final result = await TfliteService.instance.runInference(frame);
-    if (result != null && mounted && ref.read(isRecordingProvider)) {
-      onModelOutput(result);
+
+    if (!mounted || !ref.read(isRecordingProvider)) return;
+
+    if (result == null) {
+      // FIX: Don't reset consecutive counters on null/dropped frames
+      _nullResultCount++;
+      if (_nullResultCount >= _kMaxNullBeforeReset) {
+        _nullResultCount = 0;
+      }
+      return;
     }
+
+    _nullResultCount = 0;
+    onModelOutput(result);
   }
 
-  // MODEL OUTPUT
+  // ─── MODEL OUTPUT ──────────────────────────────────────────────────────────
+
   void onModelOutput(InferenceResult r) {
     if (!ref.read(isRecordingProvider)) return;
 
@@ -589,8 +521,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       case 'drowsy':
         _consecutiveDrowsy++;
         _consecutiveDistracted = 0;
+        // FIX: Log includes subclass + model source + confidence %
         _addLogSync(
-            '[${modelSourceLabel(r.modelSource)}] ${r.subclass}', 'WARNING');
+          '${modelSourceLabel(r.modelSource)} → ${r.subclass} '
+          '(${r.drowsyPct.toInt()}%)',
+          'WARNING',
+        );
         _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy);
         BantayDriveService.updateState('drowsy');
         break;
@@ -599,23 +535,30 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         _consecutiveDistracted++;
         _consecutiveDrowsy = 0;
         _addLogSync(
-            '[${modelSourceLabel(r.modelSource)}] ${r.subclass}', 'WARNING');
+          '${modelSourceLabel(r.modelSource)} → ${r.subclass} '
+          '(${r.distractedPct.toInt()}%)',
+          'WARNING',
+        );
         _checkAndTriggerAlert('DISTRACTED', _consecutiveDistracted);
         BantayDriveService.updateState('distracted');
         break;
 
       default:
+        // FIX: Only confirmed NEUTRAL resets counters
         _consecutiveDrowsy     = 0;
         _consecutiveDistracted = 0;
-        _alertLevel            = 0;
-        _alarmPlayer.stop();
+        if (_alertLevel > 0 && _alertLevel < 3) {
+          _alertLevel = 0;
+          _alarmPlayer.stop();
+        }
         ref.read(activeSubclassProvider.notifier).set('safe_driving');
         ref.read(activeSubclassIndexProvider.notifier).set(0);
         BantayDriveService.updateState('neutral');
     }
   }
 
-  // ALERTS
+  // ─── ALERTS ───────────────────────────────────────────────────────────────
+
   Future<void> _checkAndTriggerAlert(String type, int consecutive) async {
     final thresholds =
         _sensitivityThresholds[_prefAlertSensitivity] ?? [3, 6, 9];
@@ -640,10 +583,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           alertType:  type,
           alertLevel: newLevel);
       _addLogSync(
-          type == 'DROWSY'
-              ? 'Microsleep detected'
-              : 'Distraction detected',
-          'WARNING');
+        'ALERT L$newLevel — '
+        '${type == 'DROWSY' ? 'Microsleep/Drowsiness' : 'Distraction'} '
+        '(${type == 'DROWSY' ? _consecutiveDrowsy : _consecutiveDistracted} frames)',
+        'WARNING',
+      );
       ref.read(dbChangeCounterProvider.notifier).increment();
     }
     await _playAlertSound(newLevel);
@@ -671,7 +615,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (mounted) ref.read(showAlertBannerProvider.notifier).set(false);
   }
 
-  // HELPERS 
+  // ─── HELPERS ──────────────────────────────────────────────────────────────
+
   void _addLogSync(String message, String type) {
     if (!mounted) return;
     final now = DateTime.now();
@@ -697,14 +642,16 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         alertnessPct: ref.read(alertnessPctProvider).clamp(0.0, 100.0));
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
   // BUILD
+  // ═══════════════════════════════════════════════════════════════════════════
+
   @override
   Widget build(BuildContext context) {
     final isInPip = ref.watch(isInPipProvider);
     if (isInPip) return _buildPipView();
 
-    final isDesktop =
-        MediaQuery.of(context).size.width >= 1024;
+    final isDesktop   = MediaQuery.of(context).size.width >= 1024;
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
     final showAlert = ref.watch(showAlertBannerProvider);
@@ -722,7 +669,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           else
             _buildPortraitLayout(),
 
-          // L1/L2 — slide-in banner
           if (showAlert && !isLevel3)
             Positioned(
               top: 0, left: 0, right: 0,
@@ -731,7 +677,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   child: _buildAlertBanner(alertType)),
             ),
 
-          // L3 — full-screen blocking overlay
           if (showAlert && isLevel3)
             Positioned.fill(child: _buildWarningOverlay(alertType)),
         ],
@@ -739,7 +684,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // PIP VIEW 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PIP VIEW — DISCORD APPROACH (same surface, no swap)
+  // ═══════════════════════════════════════════════════════════════════════════
+
   Widget _buildPipView() {
     final driverState = ref.watch(driverStateProvider);
     final showAlert   = ref.watch(showAlertBannerProvider);
@@ -747,9 +695,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final isLevel3    = _alertLevel == 3;
     final pipOri      = ref.watch(pipOrientationProvider);
     final isLandscape = pipOri == 'landscape';
-
-    // FIX 7: Always recalculate preview size fresh from current orientation.
-    // Cached size was causing wrong aspect ratio after device rotation in PiP.
     final previewSize = _getPreviewSize(isLandscape);
 
     late Color  stateColor;
@@ -768,204 +713,164 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         stateLabel = 'ALERT';
     }
 
-    // FIX 7: Wrap entire PiP view in LayoutBuilder so it never overflows.
-    // The previous version used SizedBox.expand inside a Stack — when
-    // returning from PiP, the constraints hadn't settled yet causing overflow.
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return GestureDetector(
-          onTap: isLevel3 ? _dismissAlert : null,
-          child: ColoredBox(
-            color: Colors.black,
-            child: Stack(
-              fit: StackFit.expand,
-              clipBehavior: Clip.hardEdge,
-              children: [
-
-                // Camera feed
-                if (_cameraInitialized && !_camDisposing)
-                  ClipRect(
-                    child: FittedBox(
-                      fit: BoxFit.cover,
-                      child: SizedBox(
-                        // FIX 7: Clamp preview dimensions to available constraints
-                        // so they never exceed the PiP window size.
-                        width:  previewSize.width
-                            .clamp(1.0, constraints.maxWidth * 2),
-                        height: previewSize.height
-                            .clamp(1.0, constraints.maxHeight * 2),
-                        child: Transform(
-                          alignment: Alignment.center,
-                          transform: Matrix4.diagonal3Values(
-                              _mirrorCamera ? -1.0 : 1.0, 1.0, 1.0),
-                          child: CameraPreview(_cameraController!),
-                        ),
+    return LayoutBuilder(builder: (context, constraints) {
+      return GestureDetector(
+        onTap: isLevel3 ? _dismissAlert : null,
+        child: ColoredBox(
+          color: Colors.black,
+          child: Stack(
+            fit:          StackFit.expand,
+            clipBehavior: Clip.hardEdge,
+            children: [
+              if (_cameraInitialized && !_camDisposing)
+                ClipRect(
+                  child: FittedBox(
+                    fit: BoxFit.cover,
+                    child: SizedBox(
+                      width: previewSize.width
+                          .clamp(1.0, constraints.maxWidth * 2),
+                      height: previewSize.height
+                          .clamp(1.0, constraints.maxHeight * 2),
+                      child: Transform(
+                        alignment: Alignment.center,
+                        transform: Matrix4.diagonal3Values(
+                            _mirrorCamera ? -1.0 : 1.0, 1.0, 1.0),
+                        // GlobalKey: same widget instance — no re-attach
+                        child: CameraPreview(
+                            key: _cameraKey, _cameraController!),
                       ),
                     ),
-                  )
-                else
-                  const Center(
-                    child: CircularProgressIndicator(
-                        color: Color(0xFF00D4FF), strokeWidth: 2),
                   ),
+                )
+              else
+                const Center(child: CircularProgressIndicator(
+                    color: Color(0xFF00D4FF), strokeWidth: 2)),
 
-                // L3 pulse overlay
-                if (isLevel3)
-                  AnimatedBuilder(
-                    animation: _warningAnimation,
-                    builder: (context, _) {
-                      final p = (_warningAnimation.value - 0.8) / 0.2;
-                      return GestureDetector(
-                        onTap: _dismissAlert,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.red.withValues(
-                                alpha: 0.18 + 0.12 * p),
-                            border: Border.all(
-                                color: Colors.red.withValues(
-                                    alpha: 0.5 + 0.4 * p),
-                                width: 4),
-                          ),
-                          child: Center(
-                            child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                              Icon(Icons.warning_amber_rounded,
-                                  color: Colors.red.shade300, size: 26),
-                              const SizedBox(height: 4),
-                              Text(alertType,
-                                  style: TextStyle(
-                                      color:         Colors.red.shade200,
-                                      fontSize:      10,
-                                      fontWeight:    FontWeight.bold,
-                                      letterSpacing: 1.2)),
-                              const SizedBox(height: 2),
-                              Text('Tap to dismiss',
-                                  style: TextStyle(
-                                      color: Colors.white
-                                          .withValues(alpha: 0.6),
-                                      fontSize: 8)),
-                            ]),
-                          ),
+              if (isLevel3)
+                AnimatedBuilder(
+                  animation: _warningAnimation,
+                  builder: (context, _) {
+                    final p = (_warningAnimation.value - 0.8) / 0.2;
+                    return GestureDetector(
+                      onTap: _dismissAlert,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.red.withValues(alpha: 0.18 + 0.12 * p),
+                          border: Border.all(
+                              color: Colors.red.withValues(
+                                  alpha: 0.5 + 0.4 * p),
+                              width: 4),
                         ),
-                      );
-                    },
-                  ),
+                        child: Center(child: Column(
+                            mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.warning_amber_rounded,
+                              color: Colors.red.shade300, size: 26),
+                          const SizedBox(height: 4),
+                          Text(alertType, style: TextStyle(
+                              color: Colors.red.shade200, fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1.2)),
+                          const SizedBox(height: 2),
+                          Text('Tap to dismiss', style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.6),
+                              fontSize: 8)),
+                        ])),
+                      ),
+                    );
+                  },
+                ),
 
-                // REC badge
-                if (!isLevel3)
-                  Positioned(
-                    top: 6, right: 6,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 5, vertical: 3),
-                      decoration: BoxDecoration(
-                          color: Colors.red.withValues(alpha: 0.88),
-                          borderRadius: BorderRadius.circular(8)),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Container(
-                          width: 5, height: 5,
+              if (!isLevel3)
+                Positioned(top: 6, right: 6,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 5, vertical: 3),
+                    decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.88),
+                        borderRadius: BorderRadius.circular(8)),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Container(width: 5, height: 5,
                           decoration: const BoxDecoration(
-                              color:  Colors.white,
-                              shape:  BoxShape.circle),
-                        ),
-                        const SizedBox(width: 3),
-                        const Text('REC',
-                            style: TextStyle(
-                                color:      Colors.white,
-                                fontSize:   8,
-                                fontWeight: FontWeight.bold)),
-                      ]),
-                    ),
+                              color: Colors.white, shape: BoxShape.circle)),
+                      const SizedBox(width: 3),
+                      const Text('REC', style: TextStyle(
+                          color: Colors.white, fontSize: 8,
+                          fontWeight: FontWeight.bold)),
+                    ]),
                   ),
+                ),
 
-                // Bottom state bar
-                if (!isLevel3)
-                  Positioned(
-                    bottom: 0, left: 0, right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 5),
-                      color: showAlert
-                          ? Colors.red.withValues(alpha: 0.88)
-                          : stateColor.withValues(
-                              alpha: driverState == 'neutral'
-                                  ? 0.55
-                                  : 0.88),
-                      child: Text(
-                        showAlert
-                            ? (alertType == 'DROWSY'
-                                ? '⚠ Drowsy Detected'
-                                : '⚠ Distraction Detected')
-                            : stateLabel,
-                        style: const TextStyle(
-                            color:         Colors.white,
-                            fontSize:      9,
-                            fontWeight:    FontWeight.bold,
-                            letterSpacing: 0.5),
-                        textAlign: TextAlign.center,
-                      ),
+              if (!isLevel3)
+                Positioned(bottom: 0, left: 0, right: 0,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 5),
+                    color: showAlert
+                        ? Colors.red.withValues(alpha: 0.88)
+                        : stateColor.withValues(
+                            alpha: driverState == 'neutral' ? 0.55 : 0.88),
+                    child: Text(
+                      showAlert
+                          ? (alertType == 'DROWSY'
+                              ? '⚠ Drowsy Detected'
+                              : '⚠ Distraction Detected')
+                          : stateLabel,
+                      style: const TextStyle(
+                          color: Colors.white, fontSize: 9,
+                          fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                      textAlign: TextAlign.center,
                     ),
                   ),
-              ],
-            ),
+                ),
+            ],
           ),
-        );
-      },
-    );
+        ),
+      );
+    });
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
   // LAYOUTS
-  Widget _buildPortraitLayout() {
-    return SingleChildScrollView(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Column(children: [
-          const SizedBox(height: 8),
-          _buildCameraWithOverlay(
-              height:      MediaQuery.of(context).size.height * 0.40,
-              isLandscape: false),
-          const SizedBox(height: 12),
-          _buildMetricsSidebar(isLandscape: false),
-          const SizedBox(height: 16),
-        ]),
-      ),
-    );
-  }
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Widget _buildPortraitLayout() => SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(children: [
+            const SizedBox(height: 8),
+            _buildCameraWithOverlay(
+                height:      MediaQuery.of(context).size.height * 0.40,
+                isLandscape: false),
+            const SizedBox(height: 12),
+            _buildMetricsSidebar(isLandscape: false),
+            const SizedBox(height: 16),
+          ]),
+        ),
+      );
 
   Widget _buildLandscapeLayout() =>
       _buildCameraWithOverlay(isLandscape: true, fullscreen: true);
 
-  Widget _buildDesktopLayout() {
-    return Column(children: [
-      Expanded(
-        child: Row(
+  Widget _buildDesktopLayout() => Column(children: [
+        Expanded(child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              flex: 8,
-              child: Column(children: [
-                Expanded(
-                    child: _buildCameraWithOverlay(isLandscape: true)),
-                SizedBox(
-                    height: Responsive.responsiveSpacing(context,
-                        mobile: 16, tablet: 20, desktop: 24)),
-                _buildMetricsSidebar(isLandscape: false),
-              ]),
-            ),
-            SizedBox(
-                width: Responsive.responsiveSpacing(context,
-                    mobile: 16, tablet: 24, desktop: 32)),
-            Expanded(
-                flex: 4,
+            Expanded(flex: 8, child: Column(children: [
+              Expanded(child: _buildCameraWithOverlay(isLandscape: true)),
+              SizedBox(height: Responsive.responsiveSpacing(context,
+                  mobile: 16, tablet: 20, desktop: 24)),
+              _buildMetricsSidebar(isLandscape: false),
+            ])),
+            SizedBox(width: Responsive.responsiveSpacing(context,
+                mobile: 16, tablet: 24, desktop: 32)),
+            Expanded(flex: 4,
                 child: _buildMetricsSidebar(isLandscape: false)),
           ],
-        ),
-      ),
-    ]);
-  }
+        )),
+      ]);
 
-  // CAMERA WITH OVERLAY
+  // ─── CAMERA WITH OVERLAY ──────────────────────────────────────────────────
+
   Widget _buildCameraWithOverlay({
     double? height,
     required bool isLandscape,
@@ -985,8 +890,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             alignment: Alignment.center,
             transform: Matrix4.diagonal3Values(
                 _mirrorCamera ? -1.0 : 1.0, 1.0, 1.0),
+            // GlobalKey: same instance reused — no surface re-attach
             child: (_cameraInitialized && !_camDisposing)
-                ? CameraPreview(_cameraController!)
+                ? CameraPreview(key: _cameraKey, _cameraController!)
                 : _buildCameraFallback(),
           ),
         ),
@@ -1001,14 +907,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         _buildGradientOverlay(),
         if (isRecording) _buildRecBadge(),
 
-        // AI / DEMO badge
-        Positioned(
-          top: 12, left: 12,
+        // AI/DEMO badge
+        Positioned(top: 12, left: 12,
           child: Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 8, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              // FIX: withOpacity → withValues
               color: (_modelLoaded
                       ? const Color(0xFF10b981)
                       : const Color(0xFFfbbf24))
@@ -1016,23 +919,37 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Container(
-                width: 6, height: 6,
-                decoration: const BoxDecoration(
-                    color: Colors.white, shape: BoxShape.circle),
-              ),
+              Container(width: 6, height: 6,
+                  decoration: const BoxDecoration(
+                      color: Colors.white, shape: BoxShape.circle)),
               const SizedBox(width: 5),
-              Text(
-                _modelLoaded ? 'AI ON' : 'DEMO',
-                style: const TextStyle(
-                    color:         Colors.white,
-                    fontSize:      9,
-                    fontWeight:    FontWeight.bold,
-                    letterSpacing: 0.8),
-              ),
+              Text(_modelLoaded ? 'AI ON' : 'DEMO',
+                  style: const TextStyle(
+                      color: Colors.white, fontSize: 9,
+                      fontWeight: FontWeight.bold, letterSpacing: 0.8)),
             ]),
           ),
         ),
+
+        // T02 warm-up badge
+        if (isRecording && _modelLoaded)
+          Positioned(top: 12, left: 90,
+            child: Builder(builder: (ctx) {
+              final fillPct = TfliteService.instance.bufferFillPct;
+              if (fillPct >= 100) return const SizedBox.shrink();
+              return Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1e293b).withValues(alpha: 0.88),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text('T02 ${fillPct.toInt()}%',
+                    style: const TextStyle(
+                        color: Color(0xFF94a3b8), fontSize: 9)),
+              );
+            }),
+          ),
 
         // Bottom control bar
         Positioned(
@@ -1060,11 +977,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       isActive:    clearGlasses,
                       activeColor: const Color(0xFF22d3ee),
                       onTap: () {
-                        ref
-                            .read(clearGlassesProvider.notifier)
-                            .toggle();
-                        if (!clearGlasses &&
-                            _currentSessionId != null) {
+                        ref.read(clearGlassesProvider.notifier).toggle();
+                        if (!clearGlasses && _currentSessionId != null) {
                           _addLogSync(
                               'Clear Glasses Mode Active', 'SUCCESS');
                         }
@@ -1102,11 +1016,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         color:        Color(0xFF0f172a),
         borderRadius: BorderRadius.all(Radius.circular(20)),
         boxShadow: [
-          BoxShadow(
-              color:  Color(0xFF0b1120),
+          BoxShadow(color: Color(0xFF0b1120),
               offset: Offset(8, 8), blurRadius: 16),
-          BoxShadow(
-              color:  Color(0xFF1e293b),
+          BoxShadow(color: Color(0xFF1e293b),
               offset: Offset(-8, -8), blurRadius: 16),
         ],
       ),
@@ -1119,35 +1031,30 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (_cameraError != null) {
       return Container(
         color: Colors.black,
-        child: Center(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.videocam_off,
-                color: Color(0xFF64748b), size: 48),
-            const SizedBox(height: 12),
-            Text(_cameraError!,
-                style: const TextStyle(
-                    color: Color(0xFF64748b), fontSize: 13),
-                textAlign: TextAlign.center),
-            const SizedBox(height: 12),
-            TextButton(
-                onPressed: _initCamera,
-                child: const Text('Retry',
-                    style: TextStyle(color: Color(0xFF22d3ee)))),
-          ]),
-        ),
+        child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.videocam_off,
+              color: Color(0xFF64748b), size: 48),
+          const SizedBox(height: 12),
+          Text(_cameraError!,
+              style: const TextStyle(
+                  color: Color(0xFF64748b), fontSize: 13),
+              textAlign: TextAlign.center),
+          const SizedBox(height: 12),
+          TextButton(
+              onPressed: _initCamera,
+              child: const Text('Retry',
+                  style: TextStyle(color: Color(0xFF22d3ee)))),
+        ])),
       );
     }
     return const ColoredBox(
       color: Colors.black,
-      child: Center(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          CircularProgressIndicator(color: Color(0xFF22d3ee)),
-          SizedBox(height: 12),
-          Text('Initializing camera...',
-              style: TextStyle(
-                  color: Color(0xFF64748b), fontSize: 13)),
-        ]),
-      ),
+      child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        CircularProgressIndicator(color: Color(0xFF22d3ee)),
+        SizedBox(height: 12),
+        Text('Initializing camera...',
+            style: TextStyle(color: Color(0xFF64748b), fontSize: 13)),
+      ])),
     );
   }
 
@@ -1159,7 +1066,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               end:   Alignment.bottomCenter,
               colors: [
                 Colors.transparent,
-                // FIX: withOpacity → withValues
                 const Color(0xFF0f172a).withValues(alpha: 0.5),
               ],
             ),
@@ -1170,29 +1076,26 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   Widget _buildRecBadge() => Positioned(
         top: 12, right: 12,
         child: Container(
-          padding: const EdgeInsets.symmetric(
-              horizontal: 10, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: BoxDecoration(
               color:        Colors.red.withValues(alpha: 0.85),
               borderRadius: BorderRadius.circular(20)),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Container(
-              width: 8, height: 8,
-              decoration: const BoxDecoration(
-                  color: Colors.white, shape: BoxShape.circle),
-            ),
+            Container(width: 8, height: 8,
+                decoration: const BoxDecoration(
+                    color: Colors.white, shape: BoxShape.circle)),
             const SizedBox(width: 6),
-            const Text('REC',
-                style: TextStyle(
-                    color:         Colors.white,
-                    fontSize:      11,
-                    fontWeight:    FontWeight.bold,
-                    letterSpacing: 1.2)),
+            const Text('REC', style: TextStyle(
+                color: Colors.white, fontSize: 11,
+                fontWeight: FontWeight.bold, letterSpacing: 1.2)),
           ]),
         ),
       );
 
-  // ALERT BANNER — L1 / L2
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ALERT BANNER — L1/L2
+  // ═══════════════════════════════════════════════════════════════════════════
+
   Widget _buildAlertBanner(String type) {
     final isDrowsy  = type == 'DROWSY';
     final slideAnim = _notifSlide ?? AlwaysStoppedAnimation(Offset.zero);
@@ -1223,15 +1126,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       width: 1.2),
                   boxShadow: [
                     BoxShadow(
-                        color:      Colors.black.withValues(alpha: 0.55),
-                        blurRadius: 28,
-                        offset:     const Offset(0, 8)),
+                        color: Colors.black.withValues(alpha: 0.55),
+                        blurRadius: 28, offset: const Offset(0, 8)),
                     BoxShadow(
-                        color:       Colors.red.withValues(
+                        color: Colors.red.withValues(
                             alpha: 0.12 + 0.18 * pulse),
-                        blurRadius:  20,
-                        spreadRadius: 1,
-                        offset:      const Offset(0, 2)),
+                        blurRadius: 20, spreadRadius: 1,
+                        offset: const Offset(0, 2)),
                   ],
                 ),
                 child: ClipRRect(
@@ -1245,76 +1146,60 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                         AnimatedBuilder(
                           animation: _warningAnimation,
                           builder: (context, child) {
-                            final p =
-                                (_warningAnimation.value - 0.8) / 0.2;
+                            final p = (_warningAnimation.value - 0.8) / 0.2;
                             return Container(
                               width: 44, height: 44,
                               decoration: BoxDecoration(
                                 color:        Colors.red.shade800,
                                 borderRadius: BorderRadius.circular(12),
-                                boxShadow: [
-                                  BoxShadow(
-                                      color: Colors.red.withValues(
-                                          alpha: 0.3 + 0.4 * p),
-                                      blurRadius:   14,
-                                      spreadRadius: 1),
-                                ],
+                                boxShadow: [BoxShadow(
+                                    color: Colors.red.withValues(
+                                        alpha: 0.3 + 0.4 * p),
+                                    blurRadius: 14, spreadRadius: 1)],
                               ),
-                              child: const Icon(
-                                  Icons.warning_amber_rounded,
-                                  color: Colors.white,
-                                  size:  24),
+                              child: const Icon(Icons.warning_amber_rounded,
+                                  color: Colors.white, size: 24),
                             );
                           },
                         ),
                         const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize:       MainAxisSize.min,
-                            children: [
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text('BANTAY DRIVE',
-                                      style: TextStyle(
-                                          color: Colors.white
-                                              .withValues(alpha: 0.45),
-                                          fontSize:      10,
-                                          fontWeight:    FontWeight.w600,
-                                          letterSpacing: 0.8)),
-                                  Text('now',
-                                      style: TextStyle(
-                                          color: Colors.white
-                                              .withValues(alpha: 0.35),
-                                          fontSize: 11)),
-                                ],
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                isDrowsy
-                                    ? 'Drowsiness Detected'
-                                    : 'Distraction Detected',
-                                style: const TextStyle(
-                                    color:         Colors.white,
-                                    fontSize:      15,
-                                    fontWeight:    FontWeight.w700,
-                                    letterSpacing: 0.2),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                isDrowsy
-                                    ? 'Stay alert - tap to dismiss'
-                                    : 'Focus on the road - tap to dismiss',
-                                style: TextStyle(
-                                    color: Colors.white
-                                        .withValues(alpha: 0.5),
-                                    fontSize: 12),
-                              ),
-                            ],
-                          ),
-                        ),
+                        Expanded(child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize:       MainAxisSize.min,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('BANTAY DRIVE', style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.45),
+                                    fontSize: 10, fontWeight: FontWeight.w600,
+                                    letterSpacing: 0.8)),
+                                Text('now', style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.35),
+                                    fontSize: 11)),
+                              ],
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              isDrowsy
+                                  ? 'Drowsiness Detected'
+                                  : 'Distraction Detected',
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.2),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              isDrowsy
+                                  ? 'Stay alert — tap to dismiss'
+                                  : 'Focus on the road — tap to dismiss',
+                              style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.5),
+                                  fontSize: 12),
+                            ),
+                          ],
+                        )),
                         const SizedBox(width: 8),
                         Container(
                           width: 22, height: 22,
@@ -1323,7 +1208,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                               shape: BoxShape.circle),
                           child: Icon(Icons.close_rounded,
                               color: Colors.white.withValues(alpha: 0.4),
-                              size:  14),
+                              size: 14),
                         ),
                       ]),
                     ),
@@ -1337,7 +1222,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
   // WARNING OVERLAY — L3
+  // ═══════════════════════════════════════════════════════════════════════════
+
   Widget _buildWarningOverlay(String type) {
     final isDrowsy = type == 'DROWSY';
     return GestureDetector(
@@ -1354,115 +1242,84 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 child: Container(
                     color: Colors.red.withValues(alpha: 0.15)),
               ),
-              Container(
-                decoration: BoxDecoration(
-                  border: Border.all(
-                      color: Colors.red.withValues(
-                          alpha: 0.3 + 0.5 * p),
-                      width: 5),
-                  gradient: RadialGradient(
-                    center: Alignment.center, radius: 1.2,
-                    colors: [
-                      Colors.transparent,
-                      Colors.red.withValues(
-                          alpha: 0.06 + 0.10 * p),
-                    ],
-                  ),
+              Container(decoration: BoxDecoration(
+                border: Border.all(
+                    color: Colors.red.withValues(alpha: 0.3 + 0.5 * p),
+                    width: 5),
+                gradient: RadialGradient(
+                  center: Alignment.center, radius: 1.2,
+                  colors: [
+                    Colors.transparent,
+                    Colors.red.withValues(alpha: 0.06 + 0.10 * p),
+                  ],
                 ),
-              ),
-              Center(
-                child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                  Container(
-                    width: 88, height: 88,
-                    decoration: BoxDecoration(
-                      color:  Colors.red.shade900.withValues(alpha: 0.85),
-                      shape:  BoxShape.circle,
-                      border: Border.all(
-                          color: Colors.red.shade400.withValues(alpha: 0.6),
-                          width: 2),
-                      boxShadow: [
-                        BoxShadow(
-                            color: Colors.red.withValues(
-                                alpha: 0.2 + 0.2 * p),
-                            blurRadius:   30,
-                            spreadRadius: 4),
-                      ],
-                    ),
-                    child: Icon(Icons.warning_amber_rounded,
-                        size:  48,
-                        color: Colors.red.shade300),
+              )),
+              Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Container(
+                  width: 88, height: 88,
+                  decoration: BoxDecoration(
+                    color:  Colors.red.shade900.withValues(alpha: 0.85),
+                    shape:  BoxShape.circle,
+                    border: Border.all(
+                        color: Colors.red.shade400.withValues(alpha: 0.6),
+                        width: 2),
+                    boxShadow: [BoxShadow(
+                        color: Colors.red.withValues(alpha: 0.2 + 0.2 * p),
+                        blurRadius: 30, spreadRadius: 4)],
                   ),
-                  const SizedBox(height: 20),
-                  Text(
-                    isDrowsy ? 'DROWSINESS' : 'DISTRACTION',
-                    style: TextStyle(
-                        fontSize:      28,
-                        fontWeight:    FontWeight.w900,
-                        color:         Colors.red.shade300,
-                        letterSpacing: 4),
+                  child: Icon(Icons.warning_amber_rounded,
+                      size: 48, color: Colors.red.shade300),
+                ),
+                const SizedBox(height: 20),
+                Text(isDrowsy ? 'DROWSINESS' : 'DISTRACTION',
+                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900,
+                        color: Colors.red.shade300, letterSpacing: 4)),
+                Text('DETECTED', style: TextStyle(fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.red.shade400.withValues(alpha: 0.8),
+                    letterSpacing: 6)),
+                const SizedBox(height: 28),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 24, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(30),
+                    border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.15)),
                   ),
-                  Text('DETECTED',
-                      style: TextStyle(
-                          fontSize:      18,
-                          fontWeight:    FontWeight.w700,
-                          color: Colors.red.shade400.withValues(alpha: 0.8),
-                          letterSpacing: 6)),
-                  const SizedBox(height: 28),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 24, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(30),
-                      border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.15)),
-                    ),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.touch_app_rounded,
-                          size:  16,
-                          color: Colors.white.withValues(alpha: 0.6)),
-                      const SizedBox(width: 8),
-                      Text('Tap anywhere to dismiss',
-                          style: TextStyle(
-                              fontSize:      13,
-                              color: Colors.white.withValues(alpha: 0.6),
-                              fontWeight:    FontWeight.w500,
-                              letterSpacing: 0.3)),
-                    ]),
-                  ),
-                ]),
-              ),
-              Positioned(
-                top: 12, right: 12,
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.touch_app_rounded,
+                        size: 16,
+                        color: Colors.white.withValues(alpha: 0.6)),
+                    const SizedBox(width: 8),
+                    Text('Tap anywhere to dismiss', style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.white.withValues(alpha: 0.6),
+                        fontWeight: FontWeight.w500, letterSpacing: 0.3)),
+                  ]),
+                ),
+              ])),
+              Positioned(top: 12, right: 12,
                 child: Container(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
                     color: Colors.red.shade800.withValues(alpha: 0.9),
                     borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                          color: Colors.red.withValues(
-                              alpha: 0.4 * pulse),
-                          blurRadius: 10),
-                    ],
+                    boxShadow: [BoxShadow(
+                        color: Colors.red.withValues(alpha: 0.4 * pulse),
+                        blurRadius: 10)],
                   ),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Container(
-                      width: 7, height: 7,
-                      decoration: BoxDecoration(
-                          color: Colors.red.shade200,
-                          shape: BoxShape.circle),
-                    ),
+                    Container(width: 7, height: 7,
+                        decoration: BoxDecoration(
+                            color: Colors.red.shade200,
+                            shape: BoxShape.circle)),
                     const SizedBox(width: 6),
-                    Text('ALARM ACTIVE',
-                        style: TextStyle(
-                            color:         Colors.red.shade100,
-                            fontSize:      10,
-                            fontWeight:    FontWeight.bold,
-                            letterSpacing: 1.0)),
+                    Text('ALARM ACTIVE', style: TextStyle(
+                        color: Colors.red.shade100, fontSize: 10,
+                        fontWeight: FontWeight.bold, letterSpacing: 1.0)),
                   ]),
                 ),
               ),
@@ -1473,7 +1330,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // METRICS SIDEBAR
+  // ═══════════════════════════════════════════════════════════════════════════
+  // METRICS + SYSTEM LOG
+  // ═══════════════════════════════════════════════════════════════════════════
+
   Widget _buildMetricsSidebar({required bool isLandscape}) {
     final alertness   = ref.watch(alertnessPctProvider);
     final drowsiness  = ref.watch(drowsinessPctProvider);
@@ -1481,48 +1341,32 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     return Column(children: [
       Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Flexible(
+        Flexible(child: _MetricGauge(
+            label: 'Alertness', value: alertness,
+            color: const Color(0xFF22d3ee), icon: Icons.bolt)),
+        const SizedBox(width: 12),
+        Flexible(child: GestureDetector(
+          onTap: drowsiness > 0 ? () => _showSubclassSheet('drowsy') : null,
           child: _MetricGauge(
-              label: 'Alertness',
-              value: alertness,
-              color: const Color(0xFF22d3ee),
-              icon:  Icons.bolt),
-        ),
+              label: 'Drowsiness', value: drowsiness,
+              color: const Color(0xFFef4444),
+              icon: Icons.visibility_off, tapHint: drowsiness > 0),
+        )),
         const SizedBox(width: 12),
-        Flexible(
-          child: GestureDetector(
-            onTap: drowsiness > 0
-                ? () => _showSubclassSheet('drowsy')
-                : null,
-            child: _MetricGauge(
-                label:   'Drowsiness',
-                value:   drowsiness,
-                color:   const Color(0xFFef4444),
-                icon:    Icons.visibility_off,
-                tapHint: drowsiness > 0),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Flexible(
-          child: GestureDetector(
-            onTap: distraction > 0
-                ? () => _showSubclassSheet('distracted')
-                : null,
-            child: _MetricGauge(
-                label:   'Distraction',
-                value:   distraction,
-                color:   const Color(0xFFfbbf24),
-                icon:    Icons.visibility,
-                tapHint: distraction > 0),
-          ),
-        ),
+        Flexible(child: GestureDetector(
+          onTap: distraction > 0
+              ? () => _showSubclassSheet('distracted') : null,
+          child: _MetricGauge(
+              label: 'Distraction', value: distraction,
+              color: const Color(0xFFfbbf24),
+              icon: Icons.visibility, tapHint: distraction > 0),
+        )),
       ]),
       const SizedBox(height: 16),
       _buildSystemLog(),
     ]);
   }
 
-  // SUBCLASS BOTTOM SHEET
   void _showSubclassSheet(String mainClass) {
     final subclass  = ref.read(activeSubclassProvider) ?? 'safe_driving';
     final isDrowsy  = mainClass == 'drowsy';
@@ -1537,41 +1381,30 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       builder: (_) => Container(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
         decoration: const BoxDecoration(
-          color: Color(0xFF0D1627),
-          borderRadius:
-              BorderRadius.vertical(top: Radius.circular(24)),
+          color:        Color(0xFF0D1627),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Center(
-            child: Container(
-              width: 40, height: 4,
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                  color:        const Color(0xFF1E2D45),
-                  borderRadius: BorderRadius.circular(2)),
-            ),
-          ),
-          Text(
-            isDrowsy
-                ? 'Drowsiness Detected'
-                : 'Distraction Detected',
-            style: const TextStyle(
-                color:      Colors.white,
-                fontSize:   17,
-                fontWeight: FontWeight.w700),
-          ),
+          Center(child: Container(
+            width: 40, height: 4,
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(
+                color:        const Color(0xFF1E2D45),
+                borderRadius: BorderRadius.circular(2)),
+          )),
+          Text(isDrowsy ? 'Drowsiness Detected' : 'Distraction Detected',
+              style: const TextStyle(color: Colors.white,
+                  fontSize: 17, fontWeight: FontWeight.w700)),
           const SizedBox(height: 4),
           Text('Current: $subclass',
-              style:
-                  TextStyle(color: mainColor, fontSize: 13)),
+              style: TextStyle(color: mainColor, fontSize: 13)),
           const SizedBox(height: 16),
           Text(
             isDrowsy
-                ? 'Drowsy classes: Yawning, Head Droop, Eyes Closed (PERCLOS)'
-                : 'Distracted classes: Texting, Phone Call, Radio, Drinking,\n'
+                ? 'Drowsy: Yawning, Head Droop, Eyes Closed (PERCLOS)'
+                : 'Distracted: Texting, Phone Call, Radio, Drinking,\n'
                   'Reaching Behind, Hair/Makeup, Talking to Passenger',
-            style: const TextStyle(
-                color: Color(0xFF94a3b8), fontSize: 12),
+            style: const TextStyle(color: Color(0xFF94a3b8), fontSize: 12),
             textAlign: TextAlign.center,
           ),
         ]),
@@ -1579,7 +1412,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // SYSTEM LOG
   Widget _buildSystemLog() {
     return Container(
       width: double.infinity,
@@ -1587,14 +1419,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         color:        const Color(0xFF0f172a),
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
-          BoxShadow(
-              color:      const Color(0xFF0b1120).withValues(alpha: 0.5),
-              offset:     const Offset(4, 4),
-              blurRadius: 8),
-          BoxShadow(
-              color:      const Color(0xFF1e293b).withValues(alpha: 0.5),
-              offset:     const Offset(-4, -4),
-              blurRadius: 8),
+          BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.5),
+              offset: const Offset(4, 4), blurRadius: 8),
+          BoxShadow(color: const Color(0xFF1e293b).withValues(alpha: 0.5),
+              offset: const Offset(-4, -4), blurRadius: 8),
         ],
       ),
       padding: const EdgeInsets.all(14),
@@ -1602,20 +1430,36 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize:        MainAxisSize.min,
         children: [
-          const Text('SYSTEM LOG',
-              style: TextStyle(
-                  color:         Color(0xFF94a3b8),
-                  fontSize:      11,
-                  fontWeight:    FontWeight.w600,
-                  letterSpacing: 1.5)),
+          Row(children: [
+            const Text('SYSTEM LOG', style: TextStyle(
+                color: Color(0xFF94a3b8), fontSize: 11,
+                fontWeight: FontWeight.w600, letterSpacing: 1.5)),
+            const Spacer(),
+            if (ref.watch(isRecordingProvider))
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10b981).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  _inferenceEnabled ? '● LIVE' : '● PAUSED',
+                  style: TextStyle(
+                    color: _inferenceEnabled
+                        ? const Color(0xFF10b981)
+                        : const Color(0xFF64748b),
+                    fontSize: 9, fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+          ]),
           const SizedBox(height: 10),
           if (_systemLogs.isEmpty)
             const Align(
               alignment: Alignment.topCenter,
-              child: Text(
-                  'No logs yet. Start recording to begin.',
-                  style: TextStyle(
-                      color: Colors.white24, fontSize: 12),
+              child: Text('No logs yet. Start recording to begin.',
+                  style:     TextStyle(color: Colors.white24, fontSize: 12),
                   textAlign: TextAlign.center),
             )
           else
@@ -1623,28 +1467,22 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               height: 120,
               child: ListView.builder(
                 physics:   const BouncingScrollPhysics(),
-                itemCount: _systemLogs.length > 20
-                    ? 20
-                    : _systemLogs.length,
+                itemCount: _systemLogs.length > 20 ? 20 : _systemLogs.length,
                 itemBuilder: (context, index) {
-                  final log =
-                      _systemLogs.reversed.toList()[index];
+                  final log = _systemLogs.reversed.toList()[index];
                   Color textColor;
                   switch (log['type']) {
                     case 'SUCCESS':
-                      textColor = const Color(0xFF10b981);
-                      break;
+                      textColor = const Color(0xFF10b981); break;
                     case 'WARNING':
-                      textColor = const Color(0xFFfbbf24);
-                      break;
+                      textColor = const Color(0xFFfbbf24); break;
                     default:
                       textColor = const Color(0xFF94a3b8);
                   }
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 6),
                     child: Row(
-                      crossAxisAlignment:
-                          CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('[${log['time']}]',
                             style: const TextStyle(
@@ -1652,13 +1490,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                                 fontSize:   10,
                                 fontFamily: 'monospace')),
                         const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(log['message'],
-                              style: TextStyle(
-                                  color:      textColor,
-                                  fontSize:   10,
-                                  fontFamily: 'monospace')),
-                        ),
+                        Expanded(child: Text(log['message'],
+                            style: TextStyle(
+                                color:      textColor,
+                                fontSize:   10,
+                                fontFamily: 'monospace'))),
                       ],
                     ),
                   );
@@ -1671,7 +1507,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 } // end _MonitorScreenState
 
-// METRIC GAUGE
+// ─── METRIC GAUGE ─────────────────────────────────────────────────────────────
+
 class _MetricGauge extends StatelessWidget {
   final String   label;
   final double   value;
@@ -1690,7 +1527,6 @@ class _MetricGauge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final clamped = value.clamp(0.0, 100.0);
-
     return LayoutBuilder(builder: (ctx, constraints) {
       final gaugeD = (constraints.maxWidth * 0.55).clamp(44.0, 96.0);
       final fSize  = (gaugeD * 0.30).clamp(12.0, 24.0);
@@ -1702,53 +1538,39 @@ class _MetricGauge extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
           boxShadow: clamped >= 100.0
               ? [
-                  BoxShadow(
-                      color:        color.withValues(alpha: 0.30),
-                      blurRadius:   16,
-                      spreadRadius: 2),
-                  const BoxShadow(
-                      color:      Color(0xFF0b1120),
-                      offset:     Offset(4, 4),
-                      blurRadius: 8),
+                  BoxShadow(color: color.withValues(alpha: 0.30),
+                      blurRadius: 16, spreadRadius: 2),
+                  const BoxShadow(color: Color(0xFF0b1120),
+                      offset: Offset(4, 4), blurRadius: 8),
                 ]
               : const [
-                  BoxShadow(
-                      color:      Color(0xFF0b1120),
-                      offset:     Offset(6, 6),
-                      blurRadius: 12),
-                  BoxShadow(
-                      color:      Color(0xFF1e293b),
-                      offset:     Offset(-6, -6),
-                      blurRadius: 12),
+                  BoxShadow(color: Color(0xFF0b1120),
+                      offset: Offset(6, 6), blurRadius: 12),
+                  BoxShadow(color: Color(0xFF1e293b),
+                      offset: Offset(-6, -6), blurRadius: 12),
                 ],
         ),
-        padding: const EdgeInsets.symmetric(
-            vertical: 12, horizontal: 6),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             Icon(icon, size: 12, color: color),
             const SizedBox(width: 3),
-            Flexible(
-              child: Text(label,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      color:      Color(0xFF94a3b8),
-                      fontSize:   10,
-                      fontWeight: FontWeight.w500)),
-            ),
+            Flexible(child: Text(label,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: Color(0xFF94a3b8), fontSize: 10,
+                    fontWeight: FontWeight.w500))),
             if (tapHint) ...[
               const SizedBox(width: 3),
               Icon(Icons.touch_app_rounded,
-                  size:  9,
-                  color: color.withValues(alpha: 0.6)),
+                  size: 9, color: color.withValues(alpha: 0.6)),
             ],
           ]),
           const SizedBox(height: 10),
           SizedBox(
             width: gaugeD, height: gaugeD,
             child: Stack(alignment: Alignment.center, children: [
-              SizedBox(
-                width: gaugeD, height: gaugeD,
+              SizedBox(width: gaugeD, height: gaugeD,
                 child: CircularProgressIndicator(
                   value:           1.0,
                   strokeWidth:     4,
@@ -1765,17 +1587,12 @@ class _MetricGauge extends StatelessWidget {
                 builder: (_, v, __) => Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('${v.toInt()}',
-                        style: TextStyle(
-                            color:      color,
-                            fontSize:   fSize,
-                            fontWeight: FontWeight.bold,
-                            fontFamily: 'monospace')),
-                    Text('%',
-                        style: TextStyle(
-                            color: color.withValues(alpha: 0.7),
-                            fontSize:   pSize,
-                            fontWeight: FontWeight.w500)),
+                    Text('${v.toInt()}', style: TextStyle(
+                        color: color, fontSize: fSize,
+                        fontWeight: FontWeight.bold, fontFamily: 'monospace')),
+                    Text('%', style: TextStyle(
+                        color: color.withValues(alpha: 0.7),
+                        fontSize: pSize, fontWeight: FontWeight.w500)),
                   ],
                 ),
               ),
@@ -1787,7 +1604,8 @@ class _MetricGauge extends StatelessWidget {
   }
 }
 
-// CAMERA OVERLAY BUTTON
+// ─── CAMERA OVERLAY BUTTON ────────────────────────────────────────────────────
+
 class _CameraOverlayButton extends StatelessWidget {
   final IconData     icon;
   final String       label;
@@ -1809,8 +1627,7 @@ class _CameraOverlayButton extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding:  const EdgeInsets.symmetric(
-            horizontal: 14, vertical: 8),
+        padding:  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
           color: isActive
               ? activeColor.withValues(alpha: 0.18)
@@ -1818,17 +1635,13 @@ class _CameraOverlayButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(22),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon,
-              size:  18,
+          Icon(icon, size: 18,
               color: isActive ? activeColor : Colors.white60),
           const SizedBox(width: 6),
-          Text(label,
-              style: TextStyle(
-                  color:      isActive ? activeColor : Colors.white60,
-                  fontSize:   12,
-                  fontWeight: isActive
-                      ? FontWeight.w600
-                      : FontWeight.w400)),
+          Text(label, style: TextStyle(
+              color:      isActive ? activeColor : Colors.white60,
+              fontSize:   12,
+              fontWeight: isActive ? FontWeight.w600 : FontWeight.w400)),
         ]),
       ),
     );
