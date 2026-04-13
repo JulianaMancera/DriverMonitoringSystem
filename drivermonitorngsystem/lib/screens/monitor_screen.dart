@@ -340,21 +340,21 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final alerts =
         await DatabaseHelper.instance.getAlertsBySession(_currentSessionId!);
     double penalty = 0.0;
-    for (final a in alerts) {
-    final level = (a['alert_level'] as int?) ?? 1;
-      switch (level) {
-        case 1:
-          penalty += 2.0;
-          break;
-        case 2:
-          penalty += 4.0;
-          break;
-        default:
-          penalty += 8.0;
+      for (final a in alerts) {
+        final level = (a['alert_level'] as int?) ?? 1;
+        switch (level) {
+          case 1:
+            penalty += 1.5;   
+            break;
+          case 2:
+            penalty += 3.0;   
+            break;
+          default:
+            penalty += 6.0;  
+        }
       }
-    }
 
-    final safetyScore = (alertness - penalty).clamp(0.0, 100.0);
+    final safetyScore = (100.0 - penalty).clamp(0.0, 100.0);
 
     await DatabaseHelper.instance.endSession(
       sessionId:    _currentSessionId!,
