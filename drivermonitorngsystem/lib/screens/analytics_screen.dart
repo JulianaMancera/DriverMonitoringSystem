@@ -303,8 +303,8 @@ class _SummaryCards extends StatelessWidget {
             mobile: 12, tablet: 14, desktop: 16),
         childAspectRatio: _aspect(ctx),
         children: [
-          const _StatCard(icon: Icons.timer_outlined,
-              label: 'Total Sessions', value: '0', positive: true),
+          _StatCard(icon: Icons.timer_outlined,
+              label: 'Total Sessions', value: '$sessions', positive: true),
           _StatCard(icon: Icons.warning_amber_outlined,
               label: 'Total Alerts', value: '$alerts',
               positive: alerts == 0),
