@@ -1,25 +1,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// monitor_screen.dart  —  v3  (Discord-style PiP + inference fixes)
+// monitor_screen.dart  —  v4 patched
 //
-// KEY ARCHITECTURE CHANGES (v3):
-//
-//   1. DISCORD-STYLE PiP — Never stop the camera stream on lifecycle events.
-//      Only PAUSE INFERENCE on inactive/paused. Camera surface stays alive.
-//      This eliminates the CLOSING→REOPENING loop and BufferQueue errors.
-//
-//   2. NO WIDGET SWAP for PiP — same CameraPreview widget via GlobalKey.
-//      No surface re-attach flicker on PiP enter/exit.
-//
-//   3. INFERENCE PAUSE not stream stop — _inferenceEnabled flag gates frames.
-//      Camera keeps streaming, frames just aren't processed when backgrounded.
-//
-//   4. ALERT SYSTEM FIX — null results (dropped frames) no longer reset the
-//      consecutive counter. Only confirmed NEUTRAL state resets it.
-//      This makes alerts much easier to trigger reliably.
-//
-//   5. SYSTEM LOG FIX — logs now show subclass name + model source + %.
-//
-//   6. BACK BUTTON → PiP when recording (implemented in MainActivity.kt).
+// PATCHES APPLIED (from patch_notes_v4.dart):
+//   1A: PiP entirely removed (channels, providers, _buildPipView, _pendingStopAfterPip, etc.)
+//   1B: Original stream management restored in didChangeAppLifecycleState
+//   1C: Original _onCameraFrame restored (200ms throttle, null = dropped frame)
+//   1D: System log in onModelOutput now shows [source] subclass — X% format
+//   1E: T02 warm-up badge removed from _buildCameraWithOverlay
+//   1F: Alert log message fixed to show "consecutive frames"
+//   1G: Notification permission block removed (apply to main.dart separately)
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'dart:async';
@@ -93,15 +82,18 @@ final alertBannerTypeProvider = NotifierProvider<_StringNotifier, String>(
     () => _StringNotifier('DROWSY'));
 final clearGlassesProvider = NotifierProvider<_BoolNotifier, bool>(
     () => _BoolNotifier(false));
+
+// PATCH 1A: isInPipProvider kept as always-false stub for main.dart compat
 final isInPipProvider = NotifierProvider<_BoolNotifier, bool>(
     () => _BoolNotifier(false));
+
 final activeSubclassProvider =
     NotifierProvider<_NullableStringNotifier, String?>(
         _NullableStringNotifier.new);
 final activeSubclassIndexProvider = NotifierProvider<_IntNotifier, int>(
     () => _IntNotifier(0));
-final pipOrientationProvider = NotifierProvider<_StringNotifier, String>(
-    () => _StringNotifier('portrait'));
+
+// PATCH 1A: pipOrientationProvider removed (was only used by PiP logic)
 
 // ─────────────────────────────────────────────────────────────────────────────
 class MonitorScreen extends ConsumerStatefulWidget {
@@ -113,26 +105,13 @@ class MonitorScreen extends ConsumerStatefulWidget {
 class _MonitorScreenState extends ConsumerState<MonitorScreen>
     with TickerProviderStateMixin, WidgetsBindingObserver {
 
-  // ── Channels ─────────────────────────────────────────────────────────────
-  static const _methodChannel = MethodChannel('com.bantaydrive/pip');
-  static const _eventChannel  = EventChannel('com.bantaydrive/pip_events');
-  StreamSubscription<dynamic>? _pipSubscription;
-
   // ── Camera ───────────────────────────────────────────────────────────────
-  // GlobalKey: same CameraPreview instance reused in both full and PiP modes.
-  // This prevents surface re-attach and eliminates the BufferQueue errors.
   final GlobalKey _cameraKey = GlobalKey();
   CameraController? _cameraController;
   List<CameraDescription> _cameras = [];
   bool    _cameraInitialized = false;
   String? _cameraError;
   bool    _camDisposing      = false;
-
-  // ── DISCORD APPROACH: inference gate (NOT stream stop) ───────────────────
-  // When backgrounded: _inferenceEnabled = false (frames flow, not processed)
-  // When foregrounded: _inferenceEnabled = true  (frames processed normally)
-  // Camera stream NEVER stops → no CLOSING→REOPENING loop → no buffer errors
-  bool _inferenceEnabled = false;
 
   // ── Session ───────────────────────────────────────────────────────────────
   int?      _currentSessionId;
@@ -143,12 +122,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   int _consecutiveDrowsy     = 0;
   int _consecutiveDistracted = 0;
   int _alertLevel            = 0;
-
-  // ── FIX: Null-result counter ──────────────────────────────────────────────
-  // Previously: null result (dropped frame) → treated as neutral → reset counter
-  // Fixed: count nulls separately, only reset consecutive on confirmed NEUTRAL
-  int _nullResultCount = 0;
-  static const int _kMaxNullBeforeReset = 10;
 
   // ── Logs ──────────────────────────────────────────────────────────────────
   final List<Map<String, dynamic>> _systemLogs = [];
@@ -176,11 +149,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     2: [2,  4,  6], // High
   };
 
-  bool     _modelLoaded = false;
-  DateTime _lastInferTs = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _modelLoaded = false;
 
-  // ── PiP state ─────────────────────────────────────────────────────────────
-  bool     _pendingStopAfterPip = false;
+  // PATCH 1C: 200ms throttle restored (was changed to 100ms in v4)
+  DateTime _lastInferTs = DateTime.fromMillisecondsSinceEpoch(0);
+  static const int _kInferThrottleMs = 200;
 
   // ─── LIFECYCLE ─────────────────────────────────────────────────────────────
 
@@ -189,23 +162,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    _pipSubscription = _eventChannel.receiveBroadcastStream().listen((raw) {
-      if (!mounted || raw is! Map) return;
-      final type  = raw['type']  as String?;
-      final value = raw['value'];
-
-      if (type == 'pip' && value is bool) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          ref.read(isInPipProvider.notifier).set(value);
-          if (!value) _onReturnFromPip();
-        });
-      } else if (type == 'orientation' && value is String) {
-        if (!mounted) return;
-        ref.read(pipOrientationProvider.notifier).set(value);
-        if (mounted) setState(() {});
-      }
-    }, onError: (e) => debugPrint('[PiP event] $e'));
+    // PATCH 1A: _pipSubscription / _eventChannel removed
 
     _warningController = AnimationController(
       duration: const Duration(milliseconds: 1000), vsync: this,
@@ -230,7 +187,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _pipSubscription?.cancel();
     _snapshotTimer?.cancel();
     _warningController.dispose();
     _notifController?.dispose();
@@ -242,54 +198,48 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     super.dispose();
   }
 
-  // ── DISCORD APPROACH: pause inference only, never stop stream ─────────────
+  // PATCH 1B: Original stream stop/start lifecycle restored
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
+  void didChangeAppLifecycleState(AppLifecycleState state) async {
+    final isRecording = ref.read(isRecordingProvider);
     switch (state) {
       case AppLifecycleState.inactive:
       case AppLifecycleState.paused:
-        // Only disable inference — camera stream stays alive
-        _inferenceEnabled = false;
-        if (ref.read(isRecordingProvider)) {
-          BantayDriveService.startService(
+        await _pauseCameraStream();
+        if (isRecording) {
+          await BantayDriveService.startService(
               state: ref.read(driverStateProvider));
         }
         break;
-
       case AppLifecycleState.resumed:
-        if (ref.read(isRecordingProvider)) {
-          _inferenceEnabled = true;
-        }
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) setState(() {});
-        });
+        await _resumeCameraStream();
         break;
-
       default:
         break;
     }
   }
 
-  // ─── PiP ──────────────────────────────────────────────────────────────────
-  Future<void> _syncRecordingState(bool recording) async {
+  // PATCH 1B: Stream helpers
+  Future<void> _pauseCameraStream() async {
+    if (_cameraController == null || _camDisposing) return;
     try {
-      await _methodChannel.invokeMethod(
-          'setRecording', {'isRecording': recording});
-    } catch (_) {}
+      if (_cameraController!.value.isStreamingImages) {
+        await _cameraController!.stopImageStream();
+      }
+    } catch (e) {
+      debugPrint('[Camera] pauseStream error: $e');
+    }
   }
 
-  Future<void> _onReturnFromPip() async {
-    if (!mounted) return;
-    final isNowLandscape =
-        MediaQuery.of(context).orientation == Orientation.landscape;
-    ref.read(pipOrientationProvider.notifier).set(
-        isNowLandscape ? 'landscape' : 'portrait');
-    if (ref.read(isRecordingProvider)) {
-      _inferenceEnabled = true;
-    }
-    if (_pendingStopAfterPip) {
-      _pendingStopAfterPip = false;
-      await _stopRecording();
+  Future<void> _resumeCameraStream() async {
+    if (_cameraController == null || _camDisposing) return;
+    if (!ref.read(isRecordingProvider)) return;
+    try {
+      if (!_cameraController!.value.isStreamingImages) {
+        await _cameraController!.startImageStream(_onCameraFrame);
+      }
+    } catch (e) {
+      debugPrint('[Camera] resumeStream error: $e');
     }
     if (mounted) setState(() {});
   }
@@ -360,7 +310,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _currentSessionId      = await DatabaseHelper.instance.insertSession();
     await DatabaseHelper.instance.insertStateCount(_currentSessionId!);
     _sessionStartTime      = DateTime.now();
-    _nullResultCount       = 0;
     _consecutiveDrowsy     = 0;
     _consecutiveDistracted = 0;
     _alertLevel            = 0;
@@ -370,7 +319,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         if (!_cameraController!.value.isStreamingImages) {
           await _cameraController!.startImageStream(_onCameraFrame);
         }
-        _inferenceEnabled = true;
       } catch (e) {
         _addLogSync('Inference stream error: $e', 'WARNING');
       }
@@ -378,7 +326,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     ref.read(isRecordingProvider.notifier).set(true);
     ref.read(driverStateProvider.notifier).set('neutral');
-    await _syncRecordingState(true);
     _startNotificationWithRetry();
 
     _addLogSync('System Initialized', 'INFO');
@@ -410,21 +357,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   Future<void> _stopRecording() async {
     if (_currentSessionId == null) return;
 
-    // Defer stop if currently in PiP
-    if (ref.read(isInPipProvider)) {
-      _pendingStopAfterPip = true;
-      return;
-    }
-
     _snapshotTimer?.cancel();
-    _inferenceEnabled      = false;
+    await _pauseCameraStream();
     await _alarmPlayer.stop();
     _alertLevel            = 0;
     _consecutiveDrowsy     = 0;
     _consecutiveDistracted = 0;
-
-    // DISCORD: Don't stop stream — just disable inference
-    // isRecording=false gate in _onCameraFrame handles the rest
 
     final durationSec = _sessionStartTime != null
         ? DateTime.now().difference(_sessionStartTime!).inSeconds
@@ -436,13 +374,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     double penalty = 0.0;
     for (final a in alerts) {
       final level = (a['alert_level'] as int?) ?? 1;
-      if (level == 1) {
-        penalty += 2.0;
-      } else if (level == 2) {
-        penalty += 4.0;
-      } else {
-        penalty += 8.0;
-      }
+      if (level == 1)      penalty += 2.0;
+      else if (level == 2) penalty += 4.0;
+      else                 penalty += 8.0;
     }
     final safetyScore = (alertness - penalty).clamp(0.0, 100.0);
 
@@ -454,7 +388,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
 
     _addLogSync('Session Ended — Score: ${safetyScore.toInt()}%', 'INFO');
-    await _syncRecordingState(false);
     BantayDriveService.stopService();
 
     ref.read(isRecordingProvider.notifier).set(false);
@@ -472,32 +405,16 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   // ─── CAMERA FRAME ─────────────────────────────────────────────────────────
 
+  // PATCH 1C: Original _onCameraFrame restored — 200ms throttle, null = dropped
   Future<void> _onCameraFrame(CameraImage frame) async {
     if (_camDisposing) return;
-
-    // DISCORD: inference gate — stream flows but frames dropped when paused
-    if (!_inferenceEnabled) return;
-    if (!mounted || !ref.read(isRecordingProvider)) return;
-
     final now = DateTime.now();
-    if (now.difference(_lastInferTs).inMilliseconds < 200) return;
+    if (now.difference(_lastInferTs).inMilliseconds < _kInferThrottleMs) return;
     _lastInferTs = now;
-
-    final result = await TfliteService.instance.runInference(frame);
-
     if (!mounted || !ref.read(isRecordingProvider)) return;
-
-    if (result == null) {
-      // FIX: Don't reset consecutive counters on null/dropped frames
-      _nullResultCount++;
-      if (_nullResultCount >= _kMaxNullBeforeReset) {
-        _nullResultCount = 0;
-      }
-      return;
-    }
-
-    _nullResultCount = 0;
-    onModelOutput(result);
+    final result = await TfliteService.instance.runInference(frame);
+    if (result == null) return; // dropped frame — don't reset counters
+    if (mounted && ref.read(isRecordingProvider)) onModelOutput(result);
   }
 
   // ─── MODEL OUTPUT ──────────────────────────────────────────────────────────
@@ -521,10 +438,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       case 'drowsy':
         _consecutiveDrowsy++;
         _consecutiveDistracted = 0;
-        // FIX: Log includes subclass + model source + confidence %
+        // PATCH 1D: Log now shows [source] subclass — X% format
         _addLogSync(
-          '${modelSourceLabel(r.modelSource)} → ${r.subclass} '
-          '(${r.drowsyPct.toInt()}%)',
+          '[${modelSourceLabel(r.modelSource)}] '
+          '${r.subclass} — ${r.drowsyPct.toInt()}% drowsy',
           'WARNING',
         );
         _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy);
@@ -534,9 +451,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       case 'distracted':
         _consecutiveDistracted++;
         _consecutiveDrowsy = 0;
+        // PATCH 1D: Log now shows [source] subclass — X% format
         _addLogSync(
-          '${modelSourceLabel(r.modelSource)} → ${r.subclass} '
-          '(${r.distractedPct.toInt()}%)',
+          '[${modelSourceLabel(r.modelSource)}] '
+          '${r.subclass} — ${r.distractedPct.toInt()}% distracted',
           'WARNING',
         );
         _checkAndTriggerAlert('DISTRACTED', _consecutiveDistracted);
@@ -544,7 +462,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         break;
 
       default:
-        // FIX: Only confirmed NEUTRAL resets counters
+        // Only confirmed NEUTRAL resets the counters
         _consecutiveDrowsy     = 0;
         _consecutiveDistracted = 0;
         if (_alertLevel > 0 && _alertLevel < 3) {
@@ -565,11 +483,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (consecutive < thresholds[0]) return;
 
     int newLevel = 1;
-    if (consecutive >= thresholds[2]) {
-      newLevel = 3;
-    } else if (consecutive >= thresholds[1]) {
-      newLevel = 2;
-    }
+    if (consecutive >= thresholds[2])      newLevel = 3;
+    else if (consecutive >= thresholds[1]) newLevel = 2;
+
     if (newLevel <= _alertLevel) return;
     _alertLevel = newLevel;
 
@@ -582,10 +498,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           sessionId:  _currentSessionId!,
           alertType:  type,
           alertLevel: newLevel);
+      // PATCH 1F: Alert log now says "consecutive frames"
       _addLogSync(
-        'ALERT L$newLevel — '
-        '${type == 'DROWSY' ? 'Microsleep/Drowsiness' : 'Distraction'} '
-        '(${type == 'DROWSY' ? _consecutiveDrowsy : _consecutiveDistracted} frames)',
+        'ALERT Level $newLevel — '
+        '${type == 'DROWSY' ? 'Drowsiness' : 'Distraction'} '
+        '($consecutive consecutive frames)',
         'WARNING',
       );
       ref.read(dbChangeCounterProvider.notifier).increment();
@@ -648,8 +565,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   @override
   Widget build(BuildContext context) {
-    final isInPip = ref.watch(isInPipProvider);
-    if (isInPip) return _buildPipView();
+    // PATCH 1A: PiP check removed — isInPipProvider is always false stub
 
     final isDesktop   = MediaQuery.of(context).size.width >= 1024;
     final isLandscape =
@@ -682,151 +598,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         ],
       ),
     );
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // PIP VIEW — DISCORD APPROACH (same surface, no swap)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  Widget _buildPipView() {
-    final driverState = ref.watch(driverStateProvider);
-    final showAlert   = ref.watch(showAlertBannerProvider);
-    final alertType   = ref.watch(alertBannerTypeProvider);
-    final isLevel3    = _alertLevel == 3;
-    final pipOri      = ref.watch(pipOrientationProvider);
-    final isLandscape = pipOri == 'landscape';
-    final previewSize = _getPreviewSize(isLandscape);
-
-    late Color  stateColor;
-    late String stateLabel;
-    switch (driverState) {
-      case 'drowsy':
-        stateColor = Colors.red;
-        stateLabel = 'DROWSY';
-        break;
-      case 'distracted':
-        stateColor = const Color(0xFFFF8C00);
-        stateLabel = 'DISTRACTED';
-        break;
-      default:
-        stateColor = const Color(0xFF00FF88);
-        stateLabel = 'ALERT';
-    }
-
-    return LayoutBuilder(builder: (context, constraints) {
-      return GestureDetector(
-        onTap: isLevel3 ? _dismissAlert : null,
-        child: ColoredBox(
-          color: Colors.black,
-          child: Stack(
-            fit:          StackFit.expand,
-            clipBehavior: Clip.hardEdge,
-            children: [
-              if (_cameraInitialized && !_camDisposing)
-                ClipRect(
-                  child: FittedBox(
-                    fit: BoxFit.cover,
-                    child: SizedBox(
-                      width: previewSize.width
-                          .clamp(1.0, constraints.maxWidth * 2),
-                      height: previewSize.height
-                          .clamp(1.0, constraints.maxHeight * 2),
-                      child: Transform(
-                        alignment: Alignment.center,
-                        transform: Matrix4.diagonal3Values(
-                            _mirrorCamera ? -1.0 : 1.0, 1.0, 1.0),
-                        // GlobalKey: same widget instance — no re-attach
-                        child: CameraPreview(
-                            key: _cameraKey, _cameraController!),
-                      ),
-                    ),
-                  ),
-                )
-              else
-                const Center(child: CircularProgressIndicator(
-                    color: Color(0xFF00D4FF), strokeWidth: 2)),
-
-              if (isLevel3)
-                AnimatedBuilder(
-                  animation: _warningAnimation,
-                  builder: (context, _) {
-                    final p = (_warningAnimation.value - 0.8) / 0.2;
-                    return GestureDetector(
-                      onTap: _dismissAlert,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.red.withValues(alpha: 0.18 + 0.12 * p),
-                          border: Border.all(
-                              color: Colors.red.withValues(
-                                  alpha: 0.5 + 0.4 * p),
-                              width: 4),
-                        ),
-                        child: Center(child: Column(
-                            mainAxisSize: MainAxisSize.min, children: [
-                          Icon(Icons.warning_amber_rounded,
-                              color: Colors.red.shade300, size: 26),
-                          const SizedBox(height: 4),
-                          Text(alertType, style: TextStyle(
-                              color: Colors.red.shade200, fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 1.2)),
-                          const SizedBox(height: 2),
-                          Text('Tap to dismiss', style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.6),
-                              fontSize: 8)),
-                        ])),
-                      ),
-                    );
-                  },
-                ),
-
-              if (!isLevel3)
-                Positioned(top: 6, right: 6,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 5, vertical: 3),
-                    decoration: BoxDecoration(
-                        color: Colors.red.withValues(alpha: 0.88),
-                        borderRadius: BorderRadius.circular(8)),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Container(width: 5, height: 5,
-                          decoration: const BoxDecoration(
-                              color: Colors.white, shape: BoxShape.circle)),
-                      const SizedBox(width: 3),
-                      const Text('REC', style: TextStyle(
-                          color: Colors.white, fontSize: 8,
-                          fontWeight: FontWeight.bold)),
-                    ]),
-                  ),
-                ),
-
-              if (!isLevel3)
-                Positioned(bottom: 0, left: 0, right: 0,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 5),
-                    color: showAlert
-                        ? Colors.red.withValues(alpha: 0.88)
-                        : stateColor.withValues(
-                            alpha: driverState == 'neutral' ? 0.55 : 0.88),
-                    child: Text(
-                      showAlert
-                          ? (alertType == 'DROWSY'
-                              ? '⚠ Drowsy Detected'
-                              : '⚠ Distraction Detected')
-                          : stateLabel,
-                      style: const TextStyle(
-                          color: Colors.white, fontSize: 9,
-                          fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      );
-    });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -890,7 +661,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             alignment: Alignment.center,
             transform: Matrix4.diagonal3Values(
                 _mirrorCamera ? -1.0 : 1.0, 1.0, 1.0),
-            // GlobalKey: same instance reused — no surface re-attach
             child: (_cameraInitialized && !_camDisposing)
                 ? CameraPreview(key: _cameraKey, _cameraController!)
                 : _buildCameraFallback(),
@@ -931,25 +701,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           ),
         ),
 
-        // T02 warm-up badge
-        if (isRecording && _modelLoaded)
-          Positioned(top: 12, left: 90,
-            child: Builder(builder: (ctx) {
-              final fillPct = TfliteService.instance.bufferFillPct;
-              if (fillPct >= 100) return const SizedBox.shrink();
-              return Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1e293b).withValues(alpha: 0.88),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text('T02 ${fillPct.toInt()}%',
-                    style: const TextStyle(
-                        color: Color(0xFF94a3b8), fontSize: 9)),
-              );
-            }),
-          ),
+        // PATCH 1E: T02 warm-up badge removed
 
         // Bottom control bar
         Positioned(
@@ -979,8 +731,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       onTap: () {
                         ref.read(clearGlassesProvider.notifier).toggle();
                         if (!clearGlasses && _currentSessionId != null) {
-                          _addLogSync(
-                              'Clear Glasses Mode Active', 'SUCCESS');
+                          _addLogSync('Clear Glasses Mode Active', 'SUCCESS');
                         }
                       },
                     ),
@@ -1032,12 +783,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       return Container(
         color: Colors.black,
         child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.videocam_off,
-              color: Color(0xFF64748b), size: 48),
+          const Icon(Icons.videocam_off, color: Color(0xFF64748b), size: 48),
           const SizedBox(height: 12),
           Text(_cameraError!,
-              style: const TextStyle(
-                  color: Color(0xFF64748b), fontSize: 13),
+              style: const TextStyle(color: Color(0xFF64748b), fontSize: 13),
               textAlign: TextAlign.center),
           const SizedBox(height: 12),
           TextButton(
@@ -1126,13 +875,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       width: 1.2),
                   boxShadow: [
                     BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.55),
+                        color:      Colors.black.withValues(alpha: 0.55),
                         blurRadius: 28, offset: const Offset(0, 8)),
                     BoxShadow(
-                        color: Colors.red.withValues(
+                        color:        Colors.red.withValues(
                             alpha: 0.12 + 0.18 * pulse),
-                        blurRadius: 20, spreadRadius: 1,
-                        offset: const Offset(0, 2)),
+                        blurRadius:   20, spreadRadius: 1,
+                        offset:       const Offset(0, 2)),
                   ],
                 ),
                 child: ClipRRect(
@@ -1168,11 +917,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                           mainAxisSize:       MainAxisSize.min,
                           children: [
                             Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              mainAxisAlignment:
+                                  MainAxisAlignment.spaceBetween,
                               children: [
                                 Text('BANTAY DRIVE', style: TextStyle(
                                     color: Colors.white.withValues(alpha: 0.45),
-                                    fontSize: 10, fontWeight: FontWeight.w600,
+                                    fontSize:      10,
+                                    fontWeight:    FontWeight.w600,
                                     letterSpacing: 0.8)),
                                 Text('now', style: TextStyle(
                                     color: Colors.white.withValues(alpha: 0.35),
@@ -1185,8 +936,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                                   ? 'Drowsiness Detected'
                                   : 'Distraction Detected',
                               style: const TextStyle(
-                                  color: Colors.white, fontSize: 15,
-                                  fontWeight: FontWeight.w700,
+                                  color:         Colors.white,
+                                  fontSize:      15,
+                                  fontWeight:    FontWeight.w700,
                                   letterSpacing: 0.2),
                             ),
                             const SizedBox(height: 2),
@@ -1195,7 +947,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                                   ? 'Stay alert — tap to dismiss'
                                   : 'Focus on the road — tap to dismiss',
                               style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.5),
+                                  color:    Colors.white.withValues(alpha: 0.5),
                                   fontSize: 12),
                             ),
                           ],
@@ -1294,9 +1046,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                         color: Colors.white.withValues(alpha: 0.6)),
                     const SizedBox(width: 8),
                     Text('Tap anywhere to dismiss', style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.white.withValues(alpha: 0.6),
-                        fontWeight: FontWeight.w500, letterSpacing: 0.3)),
+                        fontSize:      13,
+                        color:         Colors.white.withValues(alpha: 0.6),
+                        fontWeight:    FontWeight.w500,
+                        letterSpacing: 0.3)),
                   ]),
                 ),
               ])),
@@ -1308,7 +1061,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                     color: Colors.red.shade800.withValues(alpha: 0.9),
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: [BoxShadow(
-                        color: Colors.red.withValues(alpha: 0.4 * pulse),
+                        color:      Colors.red.withValues(alpha: 0.4 * pulse),
                         blurRadius: 10)],
                   ),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -1318,8 +1071,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                             shape: BoxShape.circle)),
                     const SizedBox(width: 6),
                     Text('ALARM ACTIVE', style: TextStyle(
-                        color: Colors.red.shade100, fontSize: 10,
-                        fontWeight: FontWeight.bold, letterSpacing: 1.0)),
+                        color:         Colors.red.shade100,
+                        fontSize:      10,
+                        fontWeight:    FontWeight.bold,
+                        letterSpacing: 1.0)),
                   ]),
                 ),
               ),
@@ -1371,8 +1126,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final subclass  = ref.read(activeSubclassProvider) ?? 'safe_driving';
     final isDrowsy  = mainClass == 'drowsy';
     final mainColor = isDrowsy
-        ? const Color(0xFFef4444)
-        : const Color(0xFFfbbf24);
+        ? const Color(0xFFef4444) : const Color(0xFFfbbf24);
 
     showModalBottomSheet(
       context: context,
@@ -1432,8 +1186,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         children: [
           Row(children: [
             const Text('SYSTEM LOG', style: TextStyle(
-                color: Color(0xFF94a3b8), fontSize: 11,
-                fontWeight: FontWeight.w600, letterSpacing: 1.5)),
+                color:         Color(0xFF94a3b8),
+                fontSize:      11,
+                fontWeight:    FontWeight.w600,
+                letterSpacing: 1.5)),
             const Spacer(),
             if (ref.watch(isRecordingProvider))
               Container(
@@ -1443,12 +1199,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   color: const Color(0xFF10b981).withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(6),
                 ),
-                child: Text(
-                  _inferenceEnabled ? '● LIVE' : '● PAUSED',
+                child: const Text(
+                  '● LIVE',
                   style: TextStyle(
-                    color: _inferenceEnabled
-                        ? const Color(0xFF10b981)
-                        : const Color(0xFF64748b),
+                    color: Color(0xFF10b981),
                     fontSize: 9, fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -1588,11 +1342,11 @@ class _MetricGauge extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text('${v.toInt()}', style: TextStyle(
-                        color: color, fontSize: fSize,
+                        color:      color, fontSize: fSize,
                         fontWeight: FontWeight.bold, fontFamily: 'monospace')),
                     Text('%', style: TextStyle(
-                        color: color.withValues(alpha: 0.7),
-                        fontSize: pSize, fontWeight: FontWeight.w500)),
+                        color:      color.withValues(alpha: 0.7),
+                        fontSize:   pSize, fontWeight: FontWeight.w500)),
                   ],
                 ),
               ),
