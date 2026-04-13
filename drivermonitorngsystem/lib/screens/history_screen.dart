@@ -1,6 +1,8 @@
-// history_screen.dart — color fix + yellow→red bug fix
-// FIX: Drowsy = Amber #F59E0B, Distracted = Purple #A855F7
-// FIX: alertCount properly carried into detail sheet header
+// history_screen.dart — fully responsive
+// All sizes use context.sp() / context.rp() / context.rs() / context.ri()
+// Search bar: fixed logical 44px → now context.rs(44).clamp(38,52)
+// Icon sizes: context.ri() so they scale on compact phones
+// Card heights: intrinsic (no fixed px) so content never clips
 
 import 'package:flutter/material.dart';
 import '../utils/responsive.dart';
@@ -10,7 +12,6 @@ import '../core/database/db_change_notifier.dart';
 
 class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
-
   @override
   ConsumerState<HistoryScreen> createState() => _HistoryScreenState();
 }
@@ -21,8 +22,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   static const Color _surfaceAlt  = Color(0xFF1A2235);
   static const Color _cyan        = Color(0xFF00D4FF);
   static const Color _green       = Color(0xFF00FF88);
-  static const Color _drowsy      = Color(0xFFF59E0B); // amber
-  static const Color _distracted  = Color(0xFFA855F7); // purple
+  static const Color _drowsy      = Color(0xFFF59E0B);
+  static const Color _distracted  = Color(0xFFA855F7);
   static const Color _textPrimary = Color(0xFFEEF2FF);
   static const Color _textDim     = Color(0xFF6B7A99);
   static const Color _divider     = Color(0xFF1E2D45);
@@ -60,8 +61,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     final pos       = _filterScrollCtrl.position;
     final showRight = pos.extentAfter > 4;
     final showLeft  = pos.extentBefore > 4;
-    if (showRight != _filterCanScrollRight ||
-        showLeft  != _filterCanScrollLeft) {
+    if (showRight != _filterCanScrollRight || showLeft != _filterCanScrollLeft) {
       setState(() {
         _filterCanScrollRight = showRight;
         _filterCanScrollLeft  = showLeft;
@@ -72,9 +72,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   void _checkFilterScroll() {
     if (_filterScrollCtrl.hasClients) {
       setState(() {
-        _filterCanScrollRight =
-            _filterScrollCtrl.position.maxScrollExtent > 0;
-        _filterCanScrollLeft = false;
+        _filterCanScrollRight = _filterScrollCtrl.position.maxScrollExtent > 0;
+        _filterCanScrollLeft  = false;
       });
     }
   }
@@ -82,17 +81,13 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   Future<void> _loadSessions() async {
     setState(() => _isLoading = true);
     final sessions    = await DatabaseHelper.instance.getAllSessions();
-    final alertCounts =
-        await DatabaseHelper.instance.getAllSessionAlertCounts();
-    final enriched = sessions.map((s) => {
+    final alertCounts = await DatabaseHelper.instance.getAllSessionAlertCounts();
+    final enriched    = sessions.map((s) => {
           ...s,
           'alert_count': alertCounts[s['id'] as int] ?? 0,
         }).toList();
     if (mounted) {
-      setState(() {
-        _sessions  = enriched;
-        _isLoading = false;
-      });
+      setState(() { _sessions = enriched; _isLoading = false; });
       _applyFilter();
     }
   }
@@ -105,29 +100,20 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     if (query.isNotEmpty) {
       result = result.where((s) {
         final iso        = s['started_at'] as String? ?? '';
-        final d          = DateTime.tryParse(iso);
-        final local      = d?.toLocal();
+        final d          = DateTime.tryParse(iso)?.toLocal();
         final alertCount = s['alert_count'] as int? ?? 0;
         final searchables = <String>[];
-        if (local != null) {
-          const months = [
-            'january','february','march','april','may','june',
-            'july','august','september','october','november','december'
-          ];
-          const short = [
-            'jan','feb','mar','apr','may','jun',
-            'jul','aug','sep','oct','nov','dec'
-          ];
-          searchables.addAll([
-            months[local.month - 1], short[local.month - 1],
-            '${short[local.month - 1]} ${local.day}',
-            '${local.day}', '${local.year}',
-            '${local.month}/${local.day}/${local.year}',
-          ]);
-          final h    = local.hour == 0 ? 12 :
-              (local.hour > 12 ? local.hour - 12 : local.hour);
-          final m    = local.minute.toString().padLeft(2, '0');
-          final ampm = local.hour >= 12 ? 'pm' : 'am';
+        if (d != null) {
+          const months = ['january','february','march','april','may','june',
+                          'july','august','september','october','november','december'];
+          const short  = ['jan','feb','mar','apr','may','jun',
+                          'jul','aug','sep','oct','nov','dec'];
+          searchables.addAll([months[d.month-1], short[d.month-1],
+            '${short[d.month-1]} ${d.day}', '${d.day}', '${d.year}',
+            '${d.month}/${d.day}/${d.year}']);
+          final h    = d.hour == 0 ? 12 : (d.hour > 12 ? d.hour - 12 : d.hour);
+          final m    = d.minute.toString().padLeft(2, '0');
+          final ampm = d.hour >= 12 ? 'pm' : 'am';
           searchables.addAll(['$h:$m $ampm', ampm]);
         }
         if (alertCount == 0) searchables.add('safe');
@@ -153,26 +139,22 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         }).toList();
         break;
       case 3:
-        result = result
-            .where((s) => (s['alert_count'] as int? ?? 0) > 0).toList();
+        result = result.where((s) => (s['alert_count'] as int? ?? 0) > 0).toList();
         break;
       case 4:
-        result = result
-            .where((s) => (s['alert_count'] as int? ?? 0) == 0).toList();
+        result = result.where((s) => (s['alert_count'] as int? ?? 0) == 0).toList();
         break;
     }
-
     setState(() => _filtered = result);
   }
 
   void _openSessionDetail(Map<String, dynamic> session) {
     FocusScope.of(context).unfocus();
     showModalBottomSheet(
-      context:            context,
-      isScrollControlled: true,
-      backgroundColor:    Colors.transparent,
-      barrierColor:       Colors.black.withValues(alpha: 0.6),
-      enableDrag:         true,
+      context: context, isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.6),
+      enableDrag: true,
       builder: (_) => _SessionDetailSheet(session: session),
     );
   }
@@ -190,21 +172,20 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     if (iso == null) return '—';
     final d = DateTime.tryParse(iso);
     if (d == null) return '—';
-    final local = d.toLocal();
+    final l = d.toLocal();
     const mo = ['Jan','Feb','Mar','Apr','May','Jun',
                  'Jul','Aug','Sep','Oct','Nov','Dec'];
-    return '${mo[local.month - 1]} ${local.day}, ${local.year}';
+    return '${mo[l.month-1]} ${l.day}, ${l.year}';
   }
 
   String _formatTime(String? iso) {
     if (iso == null) return '—';
     final d = DateTime.tryParse(iso);
     if (d == null) return '—';
-    final local = d.toLocal();
-    final h    = local.hour == 0 ? 12 :
-        (local.hour > 12 ? local.hour - 12 : local.hour);
-    final m    = local.minute.toString().padLeft(2, '0');
-    final ampm = local.hour >= 12 ? 'PM' : 'AM';
+    final l    = d.toLocal();
+    final h    = l.hour == 0 ? 12 : (l.hour > 12 ? l.hour - 12 : l.hour);
+    final m    = l.minute.toString().padLeft(2, '0');
+    final ampm = l.hour >= 12 ? 'PM' : 'AM';
     return '$h:$m $ampm';
   }
 
@@ -230,11 +211,10 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     return groups;
   }
 
-  // FIX: Accent color logic updated to use amber/purple instead of red/orange
   Color _accentColor(int alertCount) {
     if (alertCount == 0) return _green;
-    if (alertCount <= 2) return _drowsy;    // amber — few alerts
-    return _distracted;                      // purple — many alerts
+    if (alertCount <= 2) return _drowsy;
+    return _distracted;
   }
 
   @override
@@ -250,91 +230,89 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         _buildFilterChips(),
         Expanded(
           child: _isLoading
-              ? const Center(child: CircularProgressIndicator(
-                  color: Color(0xFF00D4FF)))
-              : _filtered.isEmpty
-                  ? _buildEmpty()
-                  : _buildList(),
+              ? const Center(child: CircularProgressIndicator(color: _cyan))
+              : _filtered.isEmpty ? _buildEmpty() : _buildList(),
         ),
       ]),
     );
   }
 
-  Widget _buildSearchBar() => Container(
-        color: _surface,
-        padding: EdgeInsets.symmetric(
-            horizontal: MediaQuery.of(context).size.width * 0.04,
-            vertical: 10),
-        child: SizedBox(
-          height: 44,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-                color: _surfaceAlt, borderRadius: BorderRadius.circular(12)),
-            child: TextField(
-              controller:        _searchCtrl,
-              style:             TextStyle(
-                  color: _textPrimary, fontSize: context.sp(13)),
-              textInputAction:   TextInputAction.search,
-              textAlignVertical: TextAlignVertical.center,
-              onSubmitted:       (_) => FocusScope.of(context).unfocus(),
-              decoration: InputDecoration(
-                hintText:  'Search by date, month, or "safe"...',
-                hintStyle: TextStyle(color: _textDim, fontSize: context.sp(13)),
-                prefixIcon: Icon(Icons.search_rounded, color: _textDim, size: 18),
-                prefixIconConstraints: const BoxConstraints(
-                    minWidth: 44, minHeight: 44),
-                suffixIcon: _searchCtrl.text.isNotEmpty
-                    ? GestureDetector(
-                        onTap: () {
-                          _searchCtrl.clear();
-                          FocusScope.of(context).unfocus();
-                        },
-                        child: Icon(Icons.close_rounded,
-                            color: _textDim, size: 16))
-                    : null,
-                suffixIconConstraints: const BoxConstraints(
-                    minWidth: 36, minHeight: 36),
-                border: InputBorder.none, isDense: true,
-                contentPadding: EdgeInsets.zero,
-              ),
+  // FIX: Search bar height uses context.rs() so it scales correctly
+  // on compact phones (was fixed 44px — too tall on 360dp phones)
+  Widget _buildSearchBar() {
+    final barH = context.rs(44).clamp(38.0, 52.0);
+    return Container(
+      color: _surface,
+      padding: EdgeInsets.symmetric(
+          horizontal: context.rp(16), vertical: context.rs(10)),
+      child: SizedBox(
+        height: barH,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+              color: _surfaceAlt,
+              borderRadius: BorderRadius.circular(context.rp(12))),
+          child: TextField(
+            controller: _searchCtrl,
+            style: TextStyle(color: _textPrimary, fontSize: context.sp(13)),
+            textInputAction: TextInputAction.search,
+            textAlignVertical: TextAlignVertical.center,
+            onSubmitted: (_) => FocusScope.of(context).unfocus(),
+            decoration: InputDecoration(
+              hintText: 'Search by date, month, or "safe"...',
+              hintStyle: TextStyle(
+                  color: _textDim, fontSize: context.sp(13)),
+              prefixIcon: Icon(Icons.search_rounded,
+                  color: _textDim, size: context.ri(18)),
+              prefixIconConstraints: BoxConstraints(
+                  minWidth: barH, minHeight: barH),
+              suffixIcon: _searchCtrl.text.isNotEmpty
+                  ? GestureDetector(
+                      onTap: () {
+                        _searchCtrl.clear();
+                        FocusScope.of(context).unfocus();
+                      },
+                      child: Icon(Icons.close_rounded,
+                          color: _textDim, size: context.ri(16)))
+                  : null,
+              suffixIconConstraints: BoxConstraints(
+                  minWidth: context.ri(36), minHeight: barH),
+              border: InputBorder.none, isDense: true,
+              contentPadding: EdgeInsets.zero,
             ),
           ),
         ),
-      );
+      ),
+    );
+  }
 
   Widget _scrollArrow({required bool visible, required bool isLeft}) =>
       AnimatedSize(
         duration: const Duration(milliseconds: 200),
-        curve:    Curves.easeInOut,
+        curve: Curves.easeInOut,
         child: SizedBox(
-          width: visible ? 24 : 0,
+          width: visible ? context.rp(24) : 0,
           child: visible
               ? Container(
-                  alignment: isLeft
-                      ? Alignment.centerRight
-                      : Alignment.centerLeft,
+                  alignment: isLeft ? Alignment.centerRight : Alignment.centerLeft,
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       colors: isLeft
                           ? [_surface, _surface.withValues(alpha: 0.0)]
                           : [_surface.withValues(alpha: 0.0), _surface],
-                      begin: Alignment.centerLeft,
-                      end:   Alignment.centerRight,
+                      begin: Alignment.centerLeft, end: Alignment.centerRight,
                     ),
                   ),
                   child: Icon(
-                    isLeft
-                        ? Icons.chevron_left_rounded
-                        : Icons.chevron_right_rounded,
-                    color: _textDim, size: 16,
-                  ),
+                    isLeft ? Icons.chevron_left_rounded : Icons.chevron_right_rounded,
+                    color: _textDim, size: context.ri(16)),
                 )
               : const SizedBox.shrink(),
         ),
       );
 
   Widget _buildFilterChips() => Container(
-        color: _surface, padding: const EdgeInsets.only(bottom: 10),
+        color: _surface,
+        padding: EdgeInsets.only(bottom: context.rs(10)),
         child: Row(children: [
           _scrollArrow(visible: _filterCanScrollLeft, isLeft: true),
           Expanded(
@@ -345,33 +323,22 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                 ...List.generate(_filters.length, (i) {
                   final on = i == _selectedFilter;
                   return GestureDetector(
-                    onTap: () {
-                      setState(() => _selectedFilter = i);
-                      _applyFilter();
-                    },
+                    onTap: () { setState(() => _selectedFilter = i); _applyFilter(); },
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 200),
-                      margin:  EdgeInsets.only(right: context.rp(8)),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 13, vertical: 6),
+                      margin: EdgeInsets.only(right: context.rp(8)),
+                      padding: EdgeInsets.symmetric(
+                          horizontal: context.rp(13), vertical: context.rs(6)),
                       decoration: BoxDecoration(
-                        color: on
-                            ? _cyan.withValues(alpha: 0.15)
-                            : _surfaceAlt,
-                        borderRadius: BorderRadius.circular(20),
+                        color: on ? _cyan.withValues(alpha: 0.15) : _surfaceAlt,
+                        borderRadius: BorderRadius.circular(context.rp(20)),
                         border: Border.all(
-                            color: on
-                                ? _cyan.withValues(alpha: 0.4)
-                                : _divider),
+                            color: on ? _cyan.withValues(alpha: 0.4) : _divider),
                       ),
-                      child: Text(_filters[i],
-                          style: TextStyle(
-                            color: on ? _cyan : _textDim,
-                            fontSize: Responsive.responsiveFont(context,
-                                mobile: 11, tablet: 12, desktop: 13),
-                            fontWeight:    FontWeight.w600,
-                            letterSpacing: 0.5,
-                          )),
+                      child: Text(_filters[i], style: TextStyle(
+                        color: on ? _cyan : _textDim,
+                        fontSize: context.sp(11),
+                        fontWeight: FontWeight.w600, letterSpacing: 0.5)),
                     ),
                   );
                 }),
@@ -389,17 +356,17 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: EdgeInsets.fromLTRB(
-            MediaQuery.of(context).size.width * 0.04, 6,
-            MediaQuery.of(context).size.width * 0.04, 32),
+            context.rp(16), context.rs(6),
+            context.rp(16), context.rs(32)),
         children: groups.entries.map((entry) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
               padding: EdgeInsets.only(
                   top: context.rs(12), bottom: context.rs(6)),
-              child: Text(entry.key,
-                  style: TextStyle(color: _textDim, fontSize: context.sp(10),
-                      fontWeight: FontWeight.w600, letterSpacing: 1.2)),
+              child: Text(entry.key, style: TextStyle(
+                  color: _textDim, fontSize: context.sp(10),
+                  fontWeight: FontWeight.w600, letterSpacing: 1.2)),
             ),
             ...entry.value.map((s) => _buildCard(s)),
           ],
@@ -413,82 +380,81 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     final alertCount = s['alert_count']  as int? ?? 0;
     final isSafe     = alertCount == 0;
     final accent     = _accentColor(alertCount);
+    // FIX: icon container size uses context.ri() — scales on small phones
+    final iconBoxSize = context.ri(40).clamp(34.0, 48.0);
 
     return Container(
       margin: EdgeInsets.only(bottom: context.rs(10)),
       decoration: BoxDecoration(
-          color: _surface, borderRadius: BorderRadius.circular(14),
+          color: _surface, borderRadius: BorderRadius.circular(context.rp(14)),
           border: Border.all(color: _divider, width: 1)),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          splashColor:    _cyan.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(context.rp(14)),
+          splashColor: _cyan.withValues(alpha: 0.08),
           highlightColor: _cyan.withValues(alpha: 0.04),
           onTap: () => _openSessionDetail(s),
           child: Padding(
             padding: EdgeInsets.symmetric(
-                horizontal: context.rp(16), vertical: context.rs(14)),
+                horizontal: context.rp(16), vertical: context.rs(12)),
             child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
               // Accent strip
-              Container(width: 4, height: 44,
-                  decoration: BoxDecoration(
-                      color: accent.withValues(alpha: 0.7),
-                      borderRadius: BorderRadius.circular(2))),
-              SizedBox(width: context.rp(14)),
+              Container(
+                width: context.rp(4), height: context.rs(44),
+                decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(context.rp(2)))),
+              SizedBox(width: context.rp(12)),
               // Status icon
-              Container(width: 40, height: 40,
-                  decoration: BoxDecoration(
-                    color:        accent.withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(10),
+              Container(
+                width: iconBoxSize, height: iconBoxSize,
+                decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(context.rp(10)),
                     border: Border.all(
-                        color: accent.withValues(alpha: 0.2), width: 1),
-                  ),
-                  child: Icon(
-                    isSafe
-                        ? Icons.check_circle_outline_rounded
-                        : Icons.warning_amber_rounded,
-                    color: accent, size: 20,
-                  )),
+                        color: accent.withValues(alpha: 0.2), width: 1)),
+                child: Icon(
+                  isSafe ? Icons.check_circle_outline_rounded
+                         : Icons.warning_amber_rounded,
+                  color: accent, size: context.ri(20))),
               SizedBox(width: context.rp(12)),
               // Date / time / duration
               Expanded(child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment:  MainAxisAlignment.center,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(_formatDate(s['started_at']),
-                      style: TextStyle(
-                          color: _textPrimary,
-                          fontSize: Responsive.responsiveFont(context,
-                              mobile: 13, tablet: 14, desktop: 15),
-                          fontWeight: FontWeight.w600)),
+                  Text(_formatDate(s['started_at']), style: TextStyle(
+                      color: _textPrimary, fontSize: context.sp(13),
+                      fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis),
                   SizedBox(height: context.rs(3)),
                   Row(children: [
                     Icon(Icons.access_time_rounded,
-                        color: _textDim, size: 11),
-                    const SizedBox(width: 4),
-                    Text(_formatTime(s['started_at']),
-                        style: TextStyle(
-                            color: _textDim, fontSize: context.sp(11))),
+                        color: _textDim, size: context.ri(11)),
+                    SizedBox(width: context.rp(4)),
+                    Text(_formatTime(s['started_at']), style: TextStyle(
+                        color: _textDim, fontSize: context.sp(11))),
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      child: Container(width: 3, height: 3,
+                      padding: EdgeInsets.symmetric(horizontal: context.rp(6)),
+                      child: Container(
+                          width: context.rp(3), height: context.rp(3),
                           decoration: BoxDecoration(
-                              color: _textDim, shape: BoxShape.circle)),
-                    ),
-                    Icon(Icons.timer_outlined, color: _textDim, size: 11),
-                    const SizedBox(width: 4),
-                    Text(_formatDuration(duration),
-                        style: TextStyle(
-                            color: _textDim, fontSize: context.sp(11))),
+                              color: _textDim, shape: BoxShape.circle))),
+                    Icon(Icons.timer_outlined,
+                        color: _textDim, size: context.ri(11)),
+                    SizedBox(width: context.rp(4)),
+                    Text(_formatDuration(duration), style: TextStyle(
+                        color: _textDim, fontSize: context.sp(11))),
                   ]),
                 ],
               )),
               // Badge + chevron
               Row(mainAxisSize: MainAxisSize.min, children: [
                 _buildAlertBadge(alertCount),
-                SizedBox(width: context.rp(6)),
-                Icon(Icons.chevron_right_rounded, color: _textDim, size: 18),
+                SizedBox(width: context.rp(4)),
+                Icon(Icons.chevron_right_rounded,
+                    color: _textDim, size: context.ri(18)),
               ]),
             ]),
           ),
@@ -498,32 +464,28 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   }
 
   Widget _buildAlertBadge(int count) {
-    final Color  color;
-    final Color  bg;
+    final Color color;
+    final Color bg;
     final String label;
     final IconData icon;
-
     if (count == 0) {
-      color = _green;  bg = _green.withValues(alpha: 0.1);
-      label = 'Safe';  icon = Icons.check_circle_outline_rounded;
+      color = _green; bg = _green.withValues(alpha: 0.1);
+      label = 'Safe'; icon = Icons.check_circle_outline_rounded;
     } else if (count <= 2) {
-      // FIX: Was orange — now amber to match drowsy color
       color = _drowsy; bg = _drowsy.withValues(alpha: 0.1);
       label = '$count alert${count > 1 ? 's' : ''}';
-      icon  = Icons.warning_amber_rounded;
+      icon = Icons.warning_amber_rounded;
     } else {
-      // FIX: Was red — now purple to match distracted color
       color = _distracted; bg = _distracted.withValues(alpha: 0.1);
       label = '$count alerts'; icon = Icons.warning_rounded;
     }
-
     return Container(
       padding: EdgeInsets.symmetric(
           horizontal: context.rp(8), vertical: context.rs(4)),
       decoration: BoxDecoration(
-          color: bg, borderRadius: BorderRadius.circular(6)),
+          color: bg, borderRadius: BorderRadius.circular(context.rp(6))),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, color: color, size: 11),
+        Icon(icon, color: color, size: context.ri(11)),
         SizedBox(width: context.rp(4)),
         Text(label, style: TextStyle(
             color: color, fontSize: context.sp(10),
@@ -539,21 +501,18 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
           children: [
             SizedBox(height: MediaQuery.of(context).size.height * 0.3),
             Column(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.history_rounded, color: _textDim, size: 56),
+              Icon(Icons.history_rounded, color: _textDim, size: context.ri(56)),
               SizedBox(height: context.rs(16)),
-              Text('No sessions found',
-                  style: TextStyle(color: _textPrimary,
-                      fontSize: Responsive.responsiveFont(context,
-                          mobile: 16, tablet: 17, desktop: 18),
-                      fontWeight: FontWeight.w600)),
+              Text('No sessions found', style: TextStyle(
+                  color: _textPrimary, fontSize: context.sp(16),
+                  fontWeight: FontWeight.w600)),
               SizedBox(height: context.rs(6)),
               Text(
                 _selectedFilter == 0
                     ? 'Start recording to see your drive history.'
                     : 'Try a different filter.',
-                style:     TextStyle(color: _textDim, fontSize: context.sp(13)),
-                textAlign: TextAlign.center,
-              ),
+                style: TextStyle(color: _textDim, fontSize: context.sp(13)),
+                textAlign: TextAlign.center),
             ]),
           ],
         ),
@@ -566,25 +525,22 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 class _SessionDetailSheet extends StatefulWidget {
   final Map<String, dynamic> session;
   const _SessionDetailSheet({required this.session});
-
   @override
   State<_SessionDetailSheet> createState() => _SessionDetailSheetState();
 }
 
 class _SessionDetailSheetState extends State<_SessionDetailSheet>
     with SingleTickerProviderStateMixin {
-
-  static const Color _sheetBg     = Color(0xFF0D1627);
-  static const Color _surfaceAlt  = Color(0xFF1A2235);
-  static const Color _cyan        = Color(0xFF00D4FF);
-  static const Color _green       = Color(0xFF00FF88);
-  // FIX: Updated to match new color scheme
-  static const Color _drowsy      = Color(0xFFF59E0B); // amber
-  static const Color _distracted  = Color(0xFFA855F7); // purple
-  static const Color _textPrimary = Color(0xFFEEF2FF);
-  static const Color _textMuted   = Color(0xFF94A3B8);
-  static const Color _textDim     = Color(0xFF6B7A99);
-  static const Color _divider     = Color(0xFF1E2D45);
+  static const Color _sheetBg    = Color(0xFF0D1627);
+  static const Color _surfaceAlt = Color(0xFF1A2235);
+  static const Color _cyan       = Color(0xFF00D4FF);
+  static const Color _green      = Color(0xFF00FF88);
+  static const Color _drowsy     = Color(0xFFF59E0B);
+  static const Color _distracted = Color(0xFFA855F7);
+  static const Color _textPrimary= Color(0xFFEEF2FF);
+  static const Color _textMuted  = Color(0xFF94A3B8);
+  static const Color _textDim    = Color(0xFF6B7A99);
+  static const Color _divider    = Color(0xFF1E2D45);
 
   bool _loading = true;
   Map<String, dynamic>?      _counts;
@@ -607,10 +563,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
   }
 
   @override
-  void dispose() {
-    _animCtrl.dispose();
-    super.dispose();
-  }
+  void dispose() { _animCtrl.dispose(); super.dispose(); }
 
   Future<void> _loadDetail() async {
     final id     = widget.session['id'] as int;
@@ -619,11 +572,8 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     final logs   = await DatabaseHelper.instance.getSystemLogs(id);
     if (mounted) {
       setState(() {
-        _counts  = counts;
-        _alerts  = alerts;
-        _logs    = logs;
-        _loading = false;
-      });
+      _counts = counts; _alerts = alerts; _logs = logs; _loading = false;
+    });
     }
   }
 
@@ -631,21 +581,20 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     if (iso == null) return '—';
     final d = DateTime.tryParse(iso);
     if (d == null) return '—';
-    final local = d.toLocal();
+    final l = d.toLocal();
     const mo = ['Jan','Feb','Mar','Apr','May','Jun',
                  'Jul','Aug','Sep','Oct','Nov','Dec'];
-    return '${mo[local.month - 1]} ${local.day}, ${local.year}';
+    return '${mo[l.month-1]} ${l.day}, ${l.year}';
   }
 
   String _formatTime(String? iso) {
     if (iso == null) return '—';
     final d = DateTime.tryParse(iso);
     if (d == null) return '—';
-    final local = d.toLocal();
-    final h    = local.hour == 0 ? 12 :
-        (local.hour > 12 ? local.hour - 12 : local.hour);
-    final m    = local.minute.toString().padLeft(2, '0');
-    final ampm = local.hour >= 12 ? 'PM' : 'AM';
+    final l    = d.toLocal();
+    final h    = l.hour == 0 ? 12 : (l.hour > 12 ? l.hour - 12 : l.hour);
+    final m    = l.minute.toString().padLeft(2, '0');
+    final ampm = l.hour >= 12 ? 'PM' : 'AM';
     return '$h:$m $ampm';
   }
 
@@ -658,23 +607,16 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     return '${s}s';
   }
 
-  // FIX: Alert type color now matches new scheme
   Color _alertTypeColor(String type) =>
       type == 'DROWSY' ? _drowsy : _distracted;
 
-  String _alertLevelLabel(int level) {
-    switch (level) {
-      case 1:  return 'L1';
-      case 2:  return 'L2';
-      case 3:  return 'L3';
-      default: return 'L?';
-    }
-  }
+  String _alertLevelLabel(int level) =>
+      level == 1 ? 'L1' : level == 2 ? 'L2' : level == 3 ? 'L3' : 'L?';
 
   Color _logTypeColor(String type) {
     switch (type) {
       case 'SUCCESS': return _green;
-      case 'WARNING': return _drowsy; // FIX: was orange, now amber
+      case 'WARNING': return _drowsy;
       default:        return _textMuted;
     }
   }
@@ -683,9 +625,9 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     if (isoOrTime == null || isoOrTime.isEmpty) return '--:--:--';
     try {
       final d = DateTime.parse(isoOrTime).toLocal();
-      return '${d.hour.toString().padLeft(2, '0')}:'
-             '${d.minute.toString().padLeft(2, '0')}:'
-             '${d.second.toString().padLeft(2, '0')}';
+      return '${d.hour.toString().padLeft(2,'0')}:'
+             '${d.minute.toString().padLeft(2,'0')}:'
+             '${d.second.toString().padLeft(2,'0')}';
     } catch (_) {
       return isoOrTime.length >= 19 ? isoOrTime.substring(11, 19) : isoOrTime;
     }
@@ -694,27 +636,24 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
   @override
   Widget build(BuildContext context) {
     final duration   = widget.session['duration_sec'] as int? ?? 0;
-    // FIX: Read alert_count from enriched session map — was causing yellow→red
-    // bug because alertCount defaulted to 0 when key was missing
-    final alertCount = widget.session['alert_count'] as int? ?? 0;
+    final alertCount = widget.session['alert_count']  as int? ?? 0;
     final isSafe     = alertCount == 0;
-
-    // FIX: Detail sheet header icon color now matches card accent color
     final headerColor = isSafe ? _green :
         (alertCount <= 2 ? _drowsy : _distracted);
+    // FIX: header icon size responsive
+    final iconSize = context.ri(48).clamp(40.0, 56.0);
 
     return FadeTransition(
       opacity: _fadeAnim,
       child: ScaleTransition(
-        scale:     Tween<double>(begin: 0.93, end: 1.0).animate(_scaleAnim),
+        scale: Tween<double>(begin: 0.93, end: 1.0).animate(_scaleAnim),
         alignment: Alignment.bottomCenter,
         child: Container(
           constraints: BoxConstraints(
               maxHeight: MediaQuery.of(context).size.height * 0.88),
           decoration: BoxDecoration(
-            color:        _sheetBg,
-            borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(24)),
+            color: _sheetBg,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
             boxShadow: [
               BoxShadow(color: Colors.black.withValues(alpha: 0.5),
                   blurRadius: 40, offset: const Offset(0, -8)),
@@ -726,80 +665,61 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
             Padding(
               padding: EdgeInsets.only(
                   top: context.rs(12), bottom: context.rs(4)),
-              child: Container(width: 40, height: 4,
+              child: Container(
+                  width: context.rp(40), height: context.rs(4),
                   decoration: BoxDecoration(
                       color: _divider,
                       borderRadius: BorderRadius.circular(2))),
             ),
-
             // Header
             Padding(
               padding: EdgeInsets.fromLTRB(
                   context.rp(20), context.rs(8),
                   context.rp(16), context.rs(12)),
               child: Row(children: [
-                // FIX: Icon color now uses headerColor which matches card
-                Container(width: 48, height: 48,
-                    decoration: BoxDecoration(
-                      color:  headerColor.withValues(alpha: 0.12),
-                      shape:  BoxShape.circle,
-                      border: Border.all(
-                          color: headerColor.withValues(alpha: 0.35), width: 2),
-                    ),
-                    child: Icon(
-                      isSafe
-                          ? Icons.check_circle_outline_rounded
-                          : Icons.warning_amber_rounded,
-                      color: headerColor, size: 24,
-                    )),
-
+                Container(
+                  width: iconSize, height: iconSize,
+                  decoration: BoxDecoration(
+                    color: headerColor.withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                        color: headerColor.withValues(alpha: 0.35), width: 2)),
+                  child: Icon(
+                    isSafe ? Icons.check_circle_outline_rounded
+                           : Icons.warning_amber_rounded,
+                    color: headerColor, size: context.ri(24))),
                 SizedBox(width: context.rp(14)),
-
                 Expanded(child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_formatDate(widget.session['started_at']),
-                        style: TextStyle(
-                          color:      _textPrimary,
-                          fontSize:   Responsive.responsiveFont(context,
-                              mobile: 16, tablet: 17, desktop: 18),
-                          fontWeight: FontWeight.w700,
-                        )),
-                    const SizedBox(height: 3),
-                    Text('${_formatTime(widget.session['started_at'])}  →  '
-                         '${_formatTime(widget.session['ended_at'])}',
-                        style: TextStyle(
-                            color: _textDim, fontSize: context.sp(12))),
-                    Text(_formatDuration(duration),
-                        style: TextStyle(
-                          color:      _textMuted,
-                          fontSize:   Responsive.responsiveFont(context,
-                              mobile: 11, tablet: 12, desktop: 13),
-                          fontWeight: FontWeight.w500,
-                        )),
-                  ],
-                )),
-
+                    crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(_formatDate(widget.session['started_at']),
+                      style: TextStyle(color: _textPrimary,
+                          fontSize: context.sp(16), fontWeight: FontWeight.w700),
+                      overflow: TextOverflow.ellipsis),
+                  SizedBox(height: context.rs(3)),
+                  Text('${_formatTime(widget.session['started_at'])}  →  '
+                       '${_formatTime(widget.session['ended_at'])}',
+                      style: TextStyle(color: _textDim, fontSize: context.sp(12))),
+                  Text(_formatDuration(duration),
+                      style: TextStyle(color: _textMuted,
+                          fontSize: context.sp(11), fontWeight: FontWeight.w500)),
+                ])),
                 GestureDetector(
                   onTap: () => Navigator.of(context).pop(),
-                  child: Container(width: 34, height: 34,
-                      decoration: BoxDecoration(
-                          color: _surfaceAlt, shape: BoxShape.circle,
-                          border: Border.all(color: _divider, width: 1)),
-                      child: Icon(Icons.close_rounded,
-                          color: _textMuted, size: 18)),
-                ),
+                  child: Container(
+                    width: context.ri(34), height: context.ri(34),
+                    decoration: BoxDecoration(
+                        color: _surfaceAlt, shape: BoxShape.circle,
+                        border: Border.all(color: _divider, width: 1)),
+                    child: Icon(Icons.close_rounded,
+                        color: _textMuted, size: context.ri(18)))),
               ]),
             ),
-
             Divider(color: _divider, height: 1, thickness: 1),
-
             Flexible(
               child: _loading
                   ? const Padding(
                       padding: EdgeInsets.all(40),
-                      child: CircularProgressIndicator(
-                          color: Color(0xFF00D4FF)))
+                      child: CircularProgressIndicator(color: _cyan))
                   : SingleChildScrollView(
                       padding: EdgeInsets.fromLTRB(
                           context.rp(20), context.rs(16),
@@ -826,11 +746,10 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
   }
 
   Widget _sectionLabel(String label) => Padding(
-        padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).size.height * 0.012),
-        child: Text(label,
-            style: TextStyle(color: _textDim, fontSize: context.sp(10),
-                fontWeight: FontWeight.w600, letterSpacing: 1.2)),
+        padding: EdgeInsets.only(bottom: context.rs(10)),
+        child: Text(label, style: TextStyle(
+            color: _textDim, fontSize: context.sp(10),
+            fontWeight: FontWeight.w600, letterSpacing: 1.2)),
       );
 
   Widget _buildStateBreakdown() {
@@ -843,10 +762,9 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
       return Container(
         padding: EdgeInsets.all(context.rp(16)),
         decoration: BoxDecoration(color: _surfaceAlt,
-            borderRadius: BorderRadius.circular(12)),
+            borderRadius: BorderRadius.circular(context.rp(12))),
         child: Center(child: Text('No state data recorded',
-            style: TextStyle(color: _textDim, fontSize: context.sp(13)))),
-      );
+            style: TextStyle(color: _textDim, fontSize: context.sp(13)))));
     }
 
     final nPct = (neutral    / total * 100).round();
@@ -856,54 +774,48 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     return Container(
       padding: EdgeInsets.all(context.rp(16)),
       decoration: BoxDecoration(
-        color:        _surfaceAlt,
-        borderRadius: BorderRadius.circular(12),
-        border:       Border.all(color: _divider, width: 1),
-      ),
+          color: _surfaceAlt,
+          borderRadius: BorderRadius.circular(context.rp(12)),
+          border: Border.all(color: _divider, width: 1)),
       child: Column(children: [
         ClipRRect(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(context.rp(6)),
           child: Row(children: [
             if (neutral > 0)
-              Flexible(flex: neutral,
-                  child: Container(height: 10, color: _cyan)),
-            // FIX: Drowsy bar now amber
+              Flexible(flex: neutral, child: Container(height: context.rs(10), color: _cyan)),
             if (drowsy > 0)
-              Flexible(flex: drowsy,
-                  child: Container(height: 10, color: _drowsy,
-                      margin: const EdgeInsets.only(left: 2))),
-            // FIX: Distracted bar now purple
+              Flexible(flex: drowsy, child: Container(
+                  height: context.rs(10), color: _drowsy,
+                  margin: EdgeInsets.only(left: context.rp(2)))),
             if (distracted > 0)
-              Flexible(flex: distracted,
-                  child: Container(height: 10, color: _distracted,
-                      margin: const EdgeInsets.only(left: 2))),
+              Flexible(flex: distracted, child: Container(
+                  height: context.rs(10), color: _distracted,
+                  margin: EdgeInsets.only(left: context.rp(2)))),
           ]),
         ),
         SizedBox(height: context.rs(14)),
         Row(children: [
-          Expanded(child: _statePill(_cyan,        'Neutral',    '$nPct%')),
+          Expanded(child: _statePill(_cyan,       'Neutral',    '$nPct%')),
           SizedBox(width: context.rp(8)),
-          Expanded(child: _statePill(_drowsy,      'Drowsy',     '$dPct%')),
+          Expanded(child: _statePill(_drowsy,     'Drowsy',     '$dPct%')),
           SizedBox(width: context.rp(8)),
-          Expanded(child: _statePill(_distracted,  'Distracted', '$xPct%')),
+          Expanded(child: _statePill(_distracted, 'Distracted', '$xPct%')),
         ]),
       ]),
     );
   }
 
   Widget _statePill(Color color, String label, String pct) => Container(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+        padding: EdgeInsets.symmetric(
+            vertical: context.rs(8), horizontal: context.rp(10)),
         decoration: BoxDecoration(
-          color:        color.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(8),
-          border:       Border.all(color: color.withValues(alpha: 0.2), width: 1),
-        ),
+            color: color.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(context.rp(8)),
+            border: Border.all(color: color.withValues(alpha: 0.2), width: 1)),
         child: Column(children: [
           Text(pct, style: TextStyle(color: color,
-              fontSize: Responsive.responsiveFont(context,
-                  mobile: 15, tablet: 16, desktop: 17),
-              fontWeight: FontWeight.w700)),
-          const SizedBox(height: 2),
+              fontSize: context.sp(15), fontWeight: FontWeight.w700)),
+          SizedBox(height: context.rs(2)),
           Text(label, style: TextStyle(color: _textDim,
               fontSize: context.sp(10), fontWeight: FontWeight.w500)),
         ]),
@@ -914,19 +826,19 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
       return Container(
         padding: EdgeInsets.all(context.rp(16)),
         decoration: BoxDecoration(color: _surfaceAlt,
-            borderRadius: BorderRadius.circular(12)),
+            borderRadius: BorderRadius.circular(context.rp(12))),
         child: Row(children: [
-          Icon(Icons.check_circle_outline_rounded, color: _green, size: 18),
+          Icon(Icons.check_circle_outline_rounded,
+              color: _green, size: context.ri(18)),
           SizedBox(width: context.rp(10)),
           Text('No alerts triggered — safe drive!',
               style: TextStyle(color: _green, fontSize: context.sp(13))),
         ]),
       );
     }
-
     return Container(
       decoration: BoxDecoration(color: _surfaceAlt,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(context.rp(12)),
           border: Border.all(color: _divider, width: 1)),
       child: Column(
         children: _alerts.asMap().entries.map((entry) {
@@ -937,43 +849,33 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
           final time   = _formatTime(alert['triggered_at']);
           final color  = _alertTypeColor(type);
           final isLast = i == _alerts.length - 1;
-
           return Column(children: [
             Padding(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 14, vertical: 10),
+              padding: EdgeInsets.symmetric(
+                  horizontal: context.rp(14), vertical: context.rs(10)),
               child: Row(children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 7, vertical: 3),
+                  padding: EdgeInsets.symmetric(
+                      horizontal: context.rp(7), vertical: context.rs(3)),
                   decoration: BoxDecoration(
-                    color:        color.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                        color: color.withValues(alpha: 0.3), width: 1),
-                  ),
-                  child: Text(_alertLevelLabel(level),
-                      style: TextStyle(color: color,
-                          fontSize: context.sp(10),
-                          fontWeight: FontWeight.w700)),
-                ),
+                      color: color.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(context.rp(6)),
+                      border: Border.all(
+                          color: color.withValues(alpha: 0.3), width: 1)),
+                  child: Text(_alertLevelLabel(level), style: TextStyle(
+                      color: color, fontSize: context.sp(10),
+                      fontWeight: FontWeight.w700))),
                 SizedBox(width: context.rp(10)),
                 Expanded(child: Text(
-                  type == 'DROWSY'
-                      ? 'Drowsiness Detected'
-                      : 'Distraction Detected',
+                  type == 'DROWSY' ? 'Drowsiness Detected' : 'Distraction Detected',
                   style: TextStyle(color: _textPrimary,
-                      fontSize: Responsive.responsiveFont(context,
-                          mobile: 13, tablet: 14, desktop: 15),
-                      fontWeight: FontWeight.w500),
-                )),
+                      fontSize: context.sp(13), fontWeight: FontWeight.w500))),
                 Text(time, style: TextStyle(
                     color: _textDim, fontSize: context.sp(11))),
               ]),
             ),
-            if (!isLast)
-              Divider(color: _divider, height: 1,
-                  thickness: 1, indent: 14),
+            if (!isLast) Divider(color: _divider, height: 1,
+                thickness: 1, indent: context.rp(14)),
           ]);
         }).toList(),
       ),
@@ -985,15 +887,13 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
       return Container(
         padding: EdgeInsets.all(context.rp(16)),
         decoration: BoxDecoration(color: _surfaceAlt,
-            borderRadius: BorderRadius.circular(12)),
+            borderRadius: BorderRadius.circular(context.rp(12))),
         child: Text('No log entries.',
-            style: TextStyle(color: _textDim, fontSize: context.sp(13))),
-      );
+            style: TextStyle(color: _textDim, fontSize: context.sp(13))));
     }
-
     return Container(
       decoration: BoxDecoration(color: _surfaceAlt,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(context.rp(12)),
           border: Border.all(color: _divider, width: 1)),
       padding: EdgeInsets.all(context.rp(12)),
       child: Column(
@@ -1003,7 +903,6 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
           final rawTime = log['log_time'] as String? ?? '';
           final color   = _logTypeColor(type);
           final timeStr = _formatLogTime(rawTime);
-
           return Padding(
             padding: EdgeInsets.only(bottom: context.rs(8)),
             child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [

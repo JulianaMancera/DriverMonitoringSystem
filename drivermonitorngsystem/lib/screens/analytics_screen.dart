@@ -1,19 +1,16 @@
-// analytics_screen.dart
-//
-// STRUCTURE: Original code preserved exactly —
-//   filterTabs passed as widget into _Content → inside SingleChildScrollView.
-//   This means tabs scroll away with content (as originally intended).
-//
-// FIXES APPLIED ON TOP OF ORIGINAL:
-//   1. Colors: Drowsy = Amber #F59E0B, Distracted = Purple #A855F7
-//   2. _StatCard: accentColor param added for drowsy/distracted dot colors
-//   3. _LineCard: selDays param added for 7-day vs scroll behavior
-//   4. 7-day chart: fills full width, no scroll, no swipe indicator
-//   5. 30-day / All Time: scrollable, swipe indicator shown
-//   6. Chart modal: uses Expanded (not SizedBox+chartH) so chart has height
-//   7. Bar chart modal: uses Expanded + AlwaysScrollableScrollPhysics
-//   8. All scroll physics: AlwaysScrollableScrollPhysics (was Bouncing)
-//   9. _Content passes selDays down to _LineCard and _BarCard
+// analytics_screen.dart — fully responsive
+// Every px value replaced with context.sp() / context.rp() / context.rs() / context.ri()
+// Phones + tablets only (no desktop breakpoints per project scope)
+// Key fixes:
+//   • Filter tab padding: MediaQuery*0.05 → context.rp()
+//   • Chart heights: hardcoded 300/240 → context.rs() with compact check
+//   • All reservedSize in charts: hardcoded 30/38 → ctx.rs()/ctx.rp()
+//   • Stat card icon/dot/font: hardcoded sizes → context.ri()/sp()
+//   • Modal close button: hardcoded 34 → context.ri()
+//   • Bar width: hardcoded 16 → ctx.rp(14)
+//   • Legend dot: hardcoded 10 → ctx.ri(10)
+//   • All SizedBox gaps: hardcoded → context.rs()/rp()
+//   • All border radii: hardcoded → context.rp()
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,11 +19,8 @@ import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
 import '../utils/responsive.dart';
 
-// ─── COLORS ──────────────────────────────────────────────────────────────────
-const Color _kDrowsyColor     = Color(0xFFF59E0B); // amber
-const Color _kDistractedColor = Color(0xFFA855F7); // purple
-
-// ─── PROVIDERS ────────────────────────────────────────────────────────────────
+const Color _kDrowsyColor     = Color(0xFFF59E0B);
+const Color _kDistractedColor = Color(0xFFA855F7);
 
 class _FilterNotifier extends Notifier<int?> {
   @override
@@ -45,12 +39,6 @@ final analyticsDataProvider =
   return DatabaseHelper.instance.getAnalyticsSummary(days: days);
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ORIGINAL STRUCTURE PRESERVED:
-// asyncData.when → data: _Content(filterTabs: _FilterTabs(...))
-// _FilterTabs is passed INTO _Content as a widget parameter,
-// so it lives inside SingleChildScrollView and scrolls with the content.
-// ─────────────────────────────────────────────────────────────────────────────
 class AnalyticsScreen extends ConsumerWidget {
   const AnalyticsScreen({super.key});
 
@@ -65,20 +53,14 @@ class AnalyticsScreen extends ConsumerWidget {
       color: const Color(0xFF080E1A),
       child: asyncData.when(
         loading: () => const Center(
-          child: CircularProgressIndicator(color: Color(0xFF22d3ee)),
-        ),
+            child: CircularProgressIndicator(color: Color(0xFF22d3ee))),
         error: (e, stack) => Center(
-          child: Text(
-            'Error loading analytics: $e',
-            style: const TextStyle(color: Colors.white54),
-            textAlign: TextAlign.center,
-          ),
-        ),
+            child: Text('Error loading analytics: $e',
+                style: const TextStyle(color: Colors.white54),
+                textAlign: TextAlign.center)),
         data: (data) => _Content(
-          data:       data,
-          isMobile:   isMobile,
-          isTablet:   isTablet,
-          selDays:    selDays,   // FIX: pass selDays for 7-day chart logic
+          data: data, isMobile: isMobile, isTablet: isTablet,
+          selDays: selDays,
           filterTabs: _FilterTabs(selectedDays: selDays, ref: ref),
         ),
       ),
@@ -87,7 +69,6 @@ class AnalyticsScreen extends ConsumerWidget {
 }
 
 // ── FILTER TABS ───────────────────────────────────────────────────────────────
-// ORIGINAL: passed as widget into _Content → scrolls with content.
 class _FilterTabs extends StatelessWidget {
   final int?      selectedDays;
   final WidgetRef ref;
@@ -95,18 +76,16 @@ class _FilterTabs extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hPad = MediaQuery.of(context).size.width * 0.05;
-    final vPad = MediaQuery.of(context).size.height * 0.02;
-
     return Padding(
-      padding: EdgeInsets.fromLTRB(hPad, vPad, hPad, vPad * 0.75),
+      padding: EdgeInsets.fromLTRB(
+          context.rp(20), context.rs(16),
+          context.rp(20), context.rs(12)),
       child: Container(
-        padding:      const EdgeInsets.all(4),
+        padding: EdgeInsets.all(context.rp(4)),
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          color:        const Color(0xFF0f172a),
-          borderRadius: BorderRadius.circular(
-              MediaQuery.of(context).size.width * 0.04),
+          color: const Color(0xFF0f172a),
+          borderRadius: BorderRadius.circular(context.rp(16)),
           boxShadow: const [
             BoxShadow(color: Color(0xFF0b1120),
                 offset: Offset(4, 4), blurRadius: 8),
@@ -115,19 +94,16 @@ class _FilterTabs extends StatelessWidget {
           ],
         ),
         child: IntrinsicWidth(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _tab(context, '7 Days',   selectedDays == 7,
-                  () => ref.read(analyticsFilterProvider.notifier).set(7)),
-              SizedBox(width: MediaQuery.of(context).size.width * 0.01),
-              _tab(context, '30 Days',  selectedDays == 30,
-                  () => ref.read(analyticsFilterProvider.notifier).set(30)),
-              SizedBox(width: MediaQuery.of(context).size.width * 0.01),
-              _tab(context, 'All Time', selectedDays == null,
-                  () => ref.read(analyticsFilterProvider.notifier).set(null)),
-            ],
-          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            _tab(context, '7 Days',   selectedDays == 7,
+                () => ref.read(analyticsFilterProvider.notifier).set(7)),
+            SizedBox(width: context.rp(4)),
+            _tab(context, '30 Days',  selectedDays == 30,
+                () => ref.read(analyticsFilterProvider.notifier).set(30)),
+            SizedBox(width: context.rp(4)),
+            _tab(context, 'All Time', selectedDays == null,
+                () => ref.read(analyticsFilterProvider.notifier).set(null)),
+          ]),
         ),
       ),
     );
@@ -135,51 +111,38 @@ class _FilterTabs extends StatelessWidget {
 
   Widget _tab(BuildContext ctx, String label, bool sel, VoidCallback onTap) =>
       InkWell(
-        onTap:        onTap,
+        onTap: onTap,
         borderRadius: BorderRadius.circular(ctx.rp(12)),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           padding: EdgeInsets.symmetric(
-            horizontal: Responsive.responsivePadding(ctx,
-                mobile: 14, tablet: 16, desktop: 18),
-            vertical:   Responsive.responsivePadding(ctx,
-                mobile: 8, tablet: 9, desktop: 10),
-          ),
+              horizontal: ctx.rp(14), vertical: ctx.rs(8)),
           decoration: BoxDecoration(
-            color:        sel ? const Color(0xFF1e293b) : Colors.transparent,
+            color: sel ? const Color(0xFF1e293b) : Colors.transparent,
             borderRadius: BorderRadius.circular(ctx.rp(12)),
             boxShadow: sel
                 ? const [BoxShadow(color: Color(0xFF0b1120),
                     offset: Offset(2, 2), blurRadius: 4)]
                 : [],
           ),
-          child: Text(label,
-              style: TextStyle(
-                fontSize:   Responsive.responsiveFont(ctx,
-                    mobile: 12, tablet: 13, desktop: 14),
-                fontWeight: sel ? FontWeight.w600 : FontWeight.w500,
-                color:      sel
-                    ? const Color(0xFF22d3ee)
-                    : const Color(0xFF64748b),
-              )),
+          child: Text(label, style: TextStyle(
+            fontSize:   ctx.sp(12),
+            fontWeight: sel ? FontWeight.w600 : FontWeight.w500,
+            color: sel ? const Color(0xFF22d3ee) : const Color(0xFF64748b),
+          )),
         ),
       );
 }
 
-// ── SCROLLABLE CONTENT ────────────────────────────────────────────────────────
-// ORIGINAL STRUCTURE: filterTabs widget rendered at top of SingleChildScrollView.
-// FIX: selDays added as param and threaded down to _LineCard.
+// ── CONTENT ───────────────────────────────────────────────────────────────────
 class _Content extends StatelessWidget {
   final Map<String, dynamic> data;
-  final bool    isMobile, isTablet;
-  final int?    selDays;   // FIX: added
-  final Widget  filterTabs;
+  final bool isMobile, isTablet;
+  final int? selDays;
+  final Widget filterTabs;
   const _Content({
-    required this.data,
-    required this.isMobile,
-    required this.isTablet,
-    required this.selDays,
-    required this.filterTabs,
+    required this.data, required this.isMobile, required this.isTablet,
+    required this.selDays, required this.filterTabs,
   });
 
   @override
@@ -195,7 +158,7 @@ class _Content extends StatelessWidget {
             ?.cast<Map<String, dynamic>>() ?? [];
 
     return RefreshIndicator(
-      color:           const Color(0xFF22d3ee),
+      color: const Color(0xFF22d3ee),
       backgroundColor: const Color(0xFF0f172a),
       onRefresh: () async {},
       child: SingleChildScrollView(
@@ -203,30 +166,21 @@ class _Content extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ORIGINAL: filterTabs inside scroll — scrolls away with content
             Padding(
               padding: EdgeInsets.only(
-                top: MediaQuery.of(context).orientation == Orientation.landscape
-                    ? MediaQuery.of(context).size.height * 0.04
-                    : 0,
-              ),
+                  top: MediaQuery.of(context).orientation == Orientation.landscape
+                      ? context.rs(8) : 0),
               child: filterTabs,
             ),
-            SizedBox(height: Responsive.responsiveSpacing(context,
-                mobile: 16, tablet: 20, desktop: 24)),
+            SizedBox(height: context.rs(16)),
             _SummaryCards(
-              isMobile:   isMobile,
-              isTablet:   isTablet,
-              sessions:   sessions,
-              alerts:     alerts,
-              drowsy:     drowsy,
-              distracted: distracted,
+              isMobile: isMobile, isTablet: isTablet,
+              sessions: sessions, alerts: alerts,
+              drowsy: drowsy, distracted: distracted,
             ),
-            SizedBox(height: Responsive.responsiveSpacing(context,
-                mobile: 24, tablet: 28, desktop: 32)),
+            SizedBox(height: context.rs(24)),
             Padding(
-              padding: EdgeInsets.symmetric(
-                  horizontal: MediaQuery.of(context).size.width * 0.05),
+              padding: EdgeInsets.symmetric(horizontal: context.rp(20)),
               child: isMobile || isTablet
                   ? _mobileCharts(context, dailyTrends, hourlyDist)
                   : _desktopCharts(context, dailyTrends, hourlyDist),
@@ -243,8 +197,7 @@ class _Content extends StatelessWidget {
       List<Map<String, dynamic>> hourly) =>
       Column(children: [
         _LineCard(dailyTrends: trends, selDays: selDays),
-        SizedBox(height: Responsive.responsiveSpacing(ctx,
-            mobile: 24, tablet: 28, desktop: 32)),
+        SizedBox(height: ctx.rs(24)),
         _BarCard(hourlyDist: hourly),
       ]);
 
@@ -252,67 +205,54 @@ class _Content extends StatelessWidget {
       List<Map<String, dynamic>> trends,
       List<Map<String, dynamic>> hourly) =>
       Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Expanded(flex: 6,
-            child: _LineCard(dailyTrends: trends, selDays: selDays)),
-        SizedBox(width: Responsive.responsiveSpacing(ctx,
-            mobile: 16, tablet: 24, desktop: 32)),
+        Expanded(flex: 6, child: _LineCard(dailyTrends: trends, selDays: selDays)),
+        SizedBox(width: ctx.rp(24)),
         Expanded(flex: 4, child: _BarCard(hourlyDist: hourly)),
       ]);
 }
 
 // ── SUMMARY CARDS ─────────────────────────────────────────────────────────────
-// ORIGINAL structure, FIX: drowsy/distracted cards get accentColor
 class _SummaryCards extends StatelessWidget {
   final bool isMobile, isTablet;
   final int  sessions, alerts, drowsy, distracted;
   const _SummaryCards({
-    required this.isMobile,   required this.isTablet,
-    required this.sessions,   required this.alerts,
-    required this.drowsy,     required this.distracted,
+    required this.isMobile, required this.isTablet,
+    required this.sessions, required this.alerts,
+    required this.drowsy, required this.distracted,
   });
 
   double _aspect(BuildContext ctx) {
-    final landscape =
-        MediaQuery.of(ctx).orientation == Orientation.landscape;
+    final landscape = MediaQuery.of(ctx).orientation == Orientation.landscape;
     if (landscape) {
       final screenW = MediaQuery.of(ctx).size.width;
-      final hPad    = screenW * 0.05 * 2;
-      final spacing = Responsive.responsiveSpacing(ctx,
-          mobile: 12, tablet: 14, desktop: 16) * 3;
+      final hPad    = ctx.rp(20) * 2;
+      final spacing = ctx.rp(10) * 3;
       final cardW   = (screenW - hPad - spacing) / 4;
-      return (cardW / 160).clamp(1.0, 2.0);
+      return (cardW / 130).clamp(1.0, 2.2);
     }
-    return Responsive.responsiveValue(ctx,
-        mobile: 0.95, tablet: 1.2, desktop: 1.5);
+    return ctx.forTier(base: 0.95, compact: 0.85, small: 0.90, large: 1.0);
   }
 
   @override
   Widget build(BuildContext ctx) {
-    final landscape =
-        MediaQuery.of(ctx).orientation == Orientation.landscape;
+    final landscape = MediaQuery.of(ctx).orientation == Orientation.landscape;
     return Padding(
-      padding: EdgeInsets.symmetric(
-          horizontal: MediaQuery.of(ctx).size.width * 0.05),
+      padding: EdgeInsets.symmetric(horizontal: ctx.rp(20)),
       child: GridView.count(
-        shrinkWrap:       true,
-        physics:          const NeverScrollableScrollPhysics(),
-        crossAxisCount:   landscape || !isMobile ? 4 : 2,
-        mainAxisSpacing:  Responsive.responsiveSpacing(ctx,
-            mobile: 12, tablet: 14, desktop: 16),
-        crossAxisSpacing: Responsive.responsiveSpacing(ctx,
-            mobile: 12, tablet: 14, desktop: 16),
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        crossAxisCount: landscape || !isMobile ? 4 : 2,
+        mainAxisSpacing:  ctx.rs(10),
+        crossAxisSpacing: ctx.rp(10),
         childAspectRatio: _aspect(ctx),
         children: [
           _StatCard(icon: Icons.timer_outlined,
               label: 'Total Sessions', value: '$sessions', positive: true),
           _StatCard(icon: Icons.warning_amber_outlined,
-              label: 'Total Alerts', value: '$alerts',
-              positive: alerts == 0),
-          // FIX: amber dot for drowsy
+              label: 'Total Alerts', value: '$alerts', positive: alerts == 0),
           _StatCard(icon: Icons.bedtime_outlined,
               label: 'Drowsiness', value: '$drowsy',
               positive: drowsy == 0, accentColor: _kDrowsyColor),
-          // FIX: purple dot for distracted
           _StatCard(icon: Icons.visibility_off_outlined,
               label: 'Distraction', value: '$distracted',
               positive: distracted == 0, accentColor: _kDistractedColor),
@@ -323,9 +263,6 @@ class _SummaryCards extends StatelessWidget {
 }
 
 // ── LINE CHART CARD ───────────────────────────────────────────────────────────
-// FIX: selDays param added.
-// 7-day  → _sevenDayChart: fills width, no scroll, no swipe hint in modal.
-// 30d/AT → _scrollableChart: horizontal scroll, swipe hint shown in modal.
 class _LineCard extends StatelessWidget {
   final List<Map<String, dynamic>> dailyTrends;
   final int? selDays;
@@ -339,34 +276,30 @@ class _LineCard extends StatelessWidget {
     return GestureDetector(
       onTap: () => _modal(context, parsed),
       child: Container(
-        height: Responsive.responsiveHeight(context,
-            mobile: 300, tablet: 320, desktop: 340),
-        decoration: _cardDecor(),
-        padding: EdgeInsets.all(Responsive.responsivePadding(context,
-            mobile: 20, tablet: 22, desktop: 24)),
+        height: context.rs(context.isSmallPhone ? 260 : 295),
+        decoration: _cardDecor(context),
+        padding: EdgeInsets.all(context.rp(18)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Drowsiness vs Distraction Trends',
-                style: TextStyle(fontSize: context.sp(14),
+                style: TextStyle(fontSize: context.sp(13),
                     fontWeight: FontWeight.w600,
                     color: const Color(0xFFcbd5e1)),
                 maxLines: 1, overflow: TextOverflow.ellipsis),
             SizedBox(height: context.rs(6)),
             Row(children: [
-              // FIX: updated legend colors
               _legend(context, 'Drowsiness', _kDrowsyColor),
               SizedBox(width: context.rp(10)),
               _legend(context, 'Distraction', _kDistractedColor),
               const Spacer(),
               _expandBadge(context),
             ]),
-            SizedBox(height: context.rs(12)),
-            // FIX: 7-day fills width; 30d/AT scrolls
+            SizedBox(height: context.rs(10)),
             Expanded(
               child: _is7Day
-                  ? _sevenDayChart(context, parsed, 10)
-                  : _scrollableChart(context, parsed, 10),
+                  ? _sevenDayChart(context, parsed, context.sp(9))
+                  : _scrollableChart(context, parsed, context.sp(9)),
             ),
           ],
         ),
@@ -376,14 +309,12 @@ class _LineCard extends StatelessWidget {
 
   void _modal(BuildContext context, _LineData d) {
     showModalBottomSheet(
-      context:            context,
-      isScrollControlled: true,
-      backgroundColor:    Colors.transparent,
-      barrierColor:       Colors.black.withValues(alpha: 0.75),
-      useSafeArea:        true, // FIX: correct height measurement in modal
+      context: context, isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.75),
+      useSafeArea: true,
       builder: (ctx) => _ChartModal(
         title: 'Drowsiness vs Distraction',
-        // FIX: 7-day has no swipe hint; 30d/AT does
         subtitle: _is7Day
             ? 'Tap a point to see its value'
             : 'Swipe chart sideways  •  Tap point to see value',
@@ -394,54 +325,42 @@ class _LineCard extends StatelessWidget {
             _legend(ctx, 'Distraction', _kDistractedColor),
           ]),
           SizedBox(height: ctx.rs(12)),
-          // FIX: Expanded so chart gets proper height (was SizedBox+chartH)
           Expanded(
             child: _is7Day
-                ? _sevenDayChart(ctx, d, 12)
-                : _scrollableChart(ctx, d, 12),
+                ? _sevenDayChart(ctx, d, ctx.sp(11))
+                : _scrollableChart(ctx, d, ctx.sp(11)),
           ),
-          // FIX: Swipe row only for 30d and All Time
-          if (!_is7Day) ...[
+          ...(!_is7Day ? [
             SizedBox(height: ctx.rs(6)),
             Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              const Icon(Icons.swipe_rounded,
-                  color: Color(0xFF475569), size: 13),
+              Icon(Icons.swipe_rounded,
+                  color: const Color(0xFF475569), size: ctx.ri(13)),
               SizedBox(width: ctx.rp(4)),
               Text('Swipe to see all dates',
                   style: TextStyle(color: const Color(0xFF475569),
                       fontSize: ctx.sp(10))),
             ]),
-          ],
+          ] : []),
         ]),
       ),
     );
   }
 
-  // FIX: 7-day — LayoutBuilder fills 100% of available width.
-  // All 7 labels always visible, no cropping, no scroll needed.
   Widget _sevenDayChart(BuildContext ctx, _LineData d, double fs) =>
       LayoutBuilder(builder: (ctx, con) => SizedBox(
-            width:  con.maxWidth,
-            height: con.maxHeight,
-            child:  _lineWidget(ctx, d, fs),
-          ));
+            width: con.maxWidth, height: con.maxHeight,
+            child: _lineWidget(ctx, d, fs)));
 
-  // FIX: 30d / All Time — AlwaysScrollableScrollPhysics (was Bouncing)
-  // so swipe always works even when content barely exceeds viewport.
   Widget _scrollableChart(BuildContext ctx, _LineData d, double fs) =>
       LayoutBuilder(builder: (ctx, con) {
         final pointCount = d.labels.length;
         final spacing    = pointCount <= 30 ? 48.0 : 40.0;
-        final minW       = (pointCount * spacing)
-            .clamp(con.maxWidth, double.infinity);
+        final minW = (pointCount * spacing).clamp(con.maxWidth, double.infinity);
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           physics: const AlwaysScrollableScrollPhysics(),
-          child: SizedBox(
-            width:  minW,
-            height: con.maxHeight,
-            child:  _lineWidget(ctx, d, fs),
-          ),
+          child: SizedBox(width: minW, height: con.maxHeight,
+              child: _lineWidget(ctx, d, fs)),
         );
       });
 
@@ -462,29 +381,30 @@ class _LineCard extends StatelessWidget {
                 sideTitles: SideTitles(showTitles: false)),
             bottomTitles: AxisTitles(
               sideTitles: SideTitles(
-                showTitles: true, reservedSize: 30, interval: 1,
+                showTitles: true,
+                reservedSize: ctx.rs(28),
+                interval: 1,
                 getTitlesWidget: (v, _) {
                   final i = v.round();
                   if (i < 0 || i >= d.labels.length) {
                     return const SizedBox.shrink();
                   }
                   return Padding(
-                    padding: EdgeInsets.only(top: ctx.rs(8)),
-                    child: Text(d.labels[i],
-                        style: TextStyle(color: const Color(0xFF64748b),
-                            fontSize: fs - 1)),
+                    padding: EdgeInsets.only(top: ctx.rs(6)),
+                    child: Text(d.labels[i], style: TextStyle(
+                        color: const Color(0xFF64748b), fontSize: fs)),
                   );
                 },
               ),
             ),
             leftTitles: AxisTitles(
               sideTitles: SideTitles(
-                showTitles: true, interval: d.yInterval, reservedSize: 38,
+                showTitles: true, interval: d.yInterval,
+                reservedSize: ctx.rp(34),
                 getTitlesWidget: (v, _) {
                   if (v == 0 || v == d.maxY) return const SizedBox.shrink();
-                  return Text('${v.toInt()}',
-                      style: TextStyle(color: const Color(0xFF64748b),
-                          fontSize: fs - 1));
+                  return Text('${v.toInt()}', style: TextStyle(
+                      color: const Color(0xFF64748b), fontSize: fs));
                 },
               ),
             ),
@@ -499,7 +419,7 @@ class _LineCard extends StatelessWidget {
             handleBuiltInTouches: true,
             touchTooltipData: LineTouchTooltipData(
               getTooltipColor: (_) => const Color(0xFF0f172a),
-              tooltipBorderRadius: BorderRadius.circular(12),
+              tooltipBorderRadius: BorderRadius.circular(ctx.rp(12)),
               tooltipPadding: EdgeInsets.all(ctx.rp(8)),
               getTooltipItems: (spots) => spots.map((s) => LineTooltipItem(
                     '${s.y.toInt()} '
@@ -516,12 +436,12 @@ class _LineCard extends StatelessWidget {
 
   LineChartBarData _bar(List<FlSpot> spots, Color c) => LineChartBarData(
         spots: spots, isCurved: spots.length > 2,
-        curveSmoothness: 0.3, color: c, barWidth: 3,
+        curveSmoothness: 0.3, color: c, barWidth: 2.5,
         isStrokeCapRound: true,
         dotData: FlDotData(
           show: true,
           getDotPainter: (p0, p1, p2, p3) => FlDotCirclePainter(
-              radius: 4, color: c, strokeWidth: 2,
+              radius: 3.5, color: c, strokeWidth: 2,
               strokeColor: const Color(0xFF0f172a)),
         ),
         belowBarData: BarAreaData(show: false),
@@ -573,15 +493,12 @@ class _LineData {
   final List<String> labels;
   final double       maxX, maxY, yInterval;
   const _LineData({
-    required this.drowsy, required this.distracted,
-    required this.labels, required this.maxX,
-    required this.maxY,   required this.yInterval,
+    required this.drowsy, required this.distracted, required this.labels,
+    required this.maxX,   required this.maxY,       required this.yInterval,
   });
 }
 
 // ── BAR CHART CARD ────────────────────────────────────────────────────────────
-// FIX: Modal now uses Expanded + AlwaysScrollableScrollPhysics.
-// Was using SizedBox(height: chartH) which gave wrong height in modal.
 class _BarCard extends StatelessWidget {
   final List<Map<String, dynamic>> hourlyDist;
   const _BarCard({required this.hourlyDist});
@@ -590,25 +507,23 @@ class _BarCard extends StatelessWidget {
   Widget build(BuildContext context) => GestureDetector(
         onTap: () => _modal(context),
         child: Container(
-          height: Responsive.responsiveHeight(context,
-              mobile: 240, tablet: 260, desktop: 280),
-          decoration: _cardDecor(),
-          padding: EdgeInsets.all(Responsive.responsivePadding(context,
-              mobile: 20, tablet: 22, desktop: 24)),
+          height: context.rs(context.isSmallPhone ? 210 : 235),
+          decoration: _cardDecor(context),
+          padding: EdgeInsets.all(context.rp(18)),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(children: [
                 Expanded(child: Text('Hourly Alert Distribution',
-                    style: TextStyle(fontSize: context.sp(14),
+                    style: TextStyle(fontSize: context.sp(13),
                         fontWeight: FontWeight.w600,
                         color: const Color(0xFFcbd5e1)),
                     maxLines: 1, overflow: TextOverflow.ellipsis)),
                 SizedBox(width: context.rp(8)),
                 _expandBadge(context),
               ]),
-              SizedBox(height: context.rs(16)),
-              Expanded(child: _barWidget(context, _preview(), 10, false)),
+              SizedBox(height: context.rs(14)),
+              Expanded(child: _barWidget(context, _preview(), context.sp(9))),
             ],
           ),
         ),
@@ -616,11 +531,10 @@ class _BarCard extends StatelessWidget {
 
   void _modal(BuildContext context) {
     showModalBottomSheet(
-      context:            context,
-      isScrollControlled: true,
-      backgroundColor:    Colors.transparent,
-      barrierColor:       Colors.black.withValues(alpha: 0.75),
-      useSafeArea:        true, // FIX: correct height in modal
+      context: context, isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.75),
+      useSafeArea: true,
       builder: (ctx) => _ChartModal(
         title:    'Hourly Alert Distribution',
         subtitle: 'All hours  •  Swipe to scroll  •  Local time',
@@ -628,27 +542,25 @@ class _BarCard extends StatelessWidget {
           Expanded(
             child: LayoutBuilder(builder: (ctx, con) {
               final full = _full();
-              final minW = (full.length * 44.0).clamp(
-                  MediaQuery.of(ctx).size.width - 32, double.infinity);
+              final minW = (full.length * ctx.rp(44)).clamp(
+                  MediaQuery.of(ctx).size.width - ctx.rp(32),
+                  double.infinity);
               return SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 physics: const AlwaysScrollableScrollPhysics(),
-                child: SizedBox(
-                  width:  minW,
-                  height: con.maxHeight,
-                  child:  _barWidget(ctx, full, 11, true),
-                ),
+                child: SizedBox(width: minW, height: con.maxHeight,
+                    child: _barWidget(ctx, full, ctx.sp(10))),
               );
             }),
           ),
           SizedBox(height: ctx.rs(6)),
           Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            const Icon(Icons.swipe_rounded,
-                color: Color(0xFF475569), size: 13),
+            Icon(Icons.swipe_rounded,
+                color: const Color(0xFF475569), size: ctx.ri(13)),
             SizedBox(width: ctx.rp(4)),
             Text('Swipe to see all hours',
-                style: TextStyle(
-                    color: const Color(0xFF475569), fontSize: ctx.sp(10))),
+                style: TextStyle(color: const Color(0xFF475569),
+                    fontSize: ctx.sp(10))),
           ]),
         ]),
       ),
@@ -656,7 +568,7 @@ class _BarCard extends StatelessWidget {
   }
 
   Widget _barWidget(BuildContext ctx, List<Map<String, dynamic>> dist,
-      double fs, bool full) {
+      double fs) {
     final groups = <BarChartGroupData>[];
     final labels = <String>[];
     for (int i = 0; i < dist.length; i++) {
@@ -665,9 +577,9 @@ class _BarCard extends StatelessWidget {
       labels.add(_hLabel(h));
       groups.add(BarChartGroupData(x: i, barRods: [
         BarChartRodData(
-          toY: c, borderRadius: BorderRadius.circular(4),
-          width: Responsive.responsiveValue(ctx,
-              mobile: 16.0, tablet: 18.0, desktop: 20.0),
+          toY: c,
+          width: ctx.rp(14),
+          borderRadius: BorderRadius.circular(ctx.rp(4)),
           gradient: LinearGradient(
             colors: c > 0
                 ? [const Color(0xFF22d3ee), const Color(0xFF3b82f6)]
@@ -684,13 +596,13 @@ class _BarCard extends StatelessWidget {
                  maxY <= 50 ? 10.0 : 20.0;
 
     return BarChart(BarChartData(
-      alignment:  BarChartAlignment.spaceAround,
-      maxY:       maxY,
+      alignment: BarChartAlignment.spaceAround,
+      maxY: maxY,
       barTouchData: BarTouchData(
         enabled: true,
         touchTooltipData: BarTouchTooltipData(
           getTooltipColor: (_) => const Color(0xFF1e293b),
-          tooltipBorderRadius: BorderRadius.circular(10),
+          tooltipBorderRadius: BorderRadius.circular(ctx.rp(10)),
           tooltipPadding: EdgeInsets.symmetric(
               horizontal: ctx.rp(10), vertical: ctx.rs(8)),
           getTooltipItem: (group, groupIndex, rod, rodIndex) =>
@@ -709,25 +621,26 @@ class _BarCard extends StatelessWidget {
             sideTitles: SideTitles(showTitles: false)),
         bottomTitles: AxisTitles(
           sideTitles: SideTitles(
-            showTitles: true, reservedSize: 30,
+            showTitles: true,
+            reservedSize: ctx.rs(28),
             getTitlesWidget: (v, _) {
               final i = v.toInt();
               if (i < 0 || i >= labels.length) return const SizedBox.shrink();
               return Padding(
-                padding: EdgeInsets.only(top: ctx.rs(8)),
+                padding: EdgeInsets.only(top: ctx.rs(6)),
                 child: Text(labels[i], style: TextStyle(
-                    color: const Color(0xFF64748b), fontSize: fs - 1)),
-              );
+                    color: const Color(0xFF64748b), fontSize: fs)));
             },
           ),
         ),
         leftTitles: AxisTitles(
           sideTitles: SideTitles(
-            showTitles: true, interval: yi, reservedSize: 30,
+            showTitles: true, interval: yi,
+            reservedSize: ctx.rp(28),
             getTitlesWidget: (v, _) {
               if (v == 0 || v == maxY) return const SizedBox.shrink();
               return Text('${v.toInt()}', style: TextStyle(
-                  color: const Color(0xFF64748b), fontSize: fs - 1));
+                  color: const Color(0xFF64748b), fontSize: fs));
             },
           ),
         ),
@@ -739,29 +652,28 @@ class _BarCard extends StatelessWidget {
             dashArray: [3, 3]),
       ),
       borderData: FlBorderData(show: false),
-      barGroups:  groups,
+      barGroups: groups,
     ));
   }
 
   List<Map<String, dynamic>> _preview() {
     const ph = [6, 9, 12, 15, 18, 21];
-    final m  = <int, int>{};
-     for (final r in hourlyDist) {
-        m[r['hour'] as int] = r['count'] as int;
-      }
-      return ph.map((h) => {'hour': h, 'count': m[h] ?? 0}).toList();
+    final m   = <int, int>{};
+    for (final r in hourlyDist) {
+      m[r['hour'] as int] = r['count'] as int;
     }
-
+    return ph.map((h) => {'hour': h, 'count': m[h] ?? 0}).toList();
+  }
 
   List<Map<String, dynamic>> _full() {
     final m = <int, int>{};
-     for (final r in hourlyDist) {
-        m[r['hour'] as int] = r['count'] as int;
-      }
-      return List.generate(24, (h) => {'hour': h, 'count': m[h] ?? 0})
-          .where((r) => (r['count'] as int) > 0 || (r['hour'] as int) >= 6)
-          .toList();
+    for (final r in hourlyDist) {
+      m[r['hour'] as int] = r['count'] as int;
     }
+    return List.generate(24, (h) => {'hour': h, 'count': m[h] ?? 0})
+        .where((r) => (r['count'] as int) > 0 || (r['hour'] as int) >= 6)
+        .toList();
+  }
 
   static String _hLabel(int h) {
     if (h == 0)  return '12AM';
@@ -771,15 +683,14 @@ class _BarCard extends StatelessWidget {
 }
 
 // ── STAT CARD ─────────────────────────────────────────────────────────────────
-// FIX: accentColor param added — drowsy/distracted cards override the dot color
 class _StatCard extends StatefulWidget {
   final IconData icon;
   final String   label, value;
   final bool     positive;
-  final Color?   accentColor; // FIX: optional color override for status dot
+  final Color?   accentColor;
   const _StatCard({
-    required this.icon,   required this.label,
-    required this.value,  required this.positive,
+    required this.icon, required this.label,
+    required this.value, required this.positive,
     this.accentColor,
   });
   @override
@@ -790,7 +701,6 @@ class _StatCardState extends State<_StatCard> {
   bool _hov = false;
   @override
   Widget build(BuildContext context) {
-    // FIX: use accentColor if provided, else fall back to positive/negative
     final dot = widget.accentColor ??
         (widget.positive ? const Color(0xFF10b981) : const Color(0xFFfbbf24));
     final ls  = MediaQuery.of(context).orientation == Orientation.landscape;
@@ -803,10 +713,7 @@ class _StatCardState extends State<_StatCard> {
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: const Color(0xFF0f172a),
-          borderRadius: BorderRadius.circular(
-            Responsive.responsiveBorderRadius(context,
-                mobile: 16, tablet: 18, desktop: 20),
-          ),
+          borderRadius: BorderRadius.circular(context.rp(14)),
           boxShadow: _hov
               ? const [
                   BoxShadow(color: Color(0xFF0b1120),
@@ -821,58 +728,44 @@ class _StatCardState extends State<_StatCard> {
                       offset: Offset(-6, -6), blurRadius: 12),
                 ],
         ),
-        padding: EdgeInsets.all(ls
-            ? context.rp(10)
-            : Responsive.responsivePadding(context,
-                mobile: 12, tablet: 16, desktop: 20)),
+        padding: EdgeInsets.all(ls ? context.rp(8) : context.rp(12)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment:  MainAxisAlignment.spaceBetween,
           children: [
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
               Container(
-                padding: EdgeInsets.all(ls
-                    ? context.rp(6)
-                    : Responsive.responsivePadding(context,
-                        mobile: 8, tablet: 9, desktop: 10)),
+                padding: EdgeInsets.all(ls ? context.rp(5) : context.rp(7)),
                 decoration: BoxDecoration(
                     color: const Color(0xFF1e293b),
-                    borderRadius: BorderRadius.circular(10)),
+                    borderRadius: BorderRadius.circular(context.rp(8))),
                 child: Icon(widget.icon,
-                    size: ls ? 14 : Responsive.responsiveIconSize(context,
-                        mobile: 18, tablet: 20, desktop: 24),
+                    size: ls ? context.ri(13) : context.ri(17),
                     color: const Color(0xFF22d3ee)),
               ),
               Container(
-                width:  ls ? 8 : 10, height: ls ? 8 : 10,
+                width:  ls ? context.ri(7) : context.ri(9),
+                height: ls ? context.ri(7) : context.ri(9),
                 decoration: BoxDecoration(
-                  color:  dot, shape: BoxShape.circle,
+                  color: dot, shape: BoxShape.circle,
                   boxShadow: [BoxShadow(
-                      color:        dot.withValues(alpha: 0.6),
-                      blurRadius:   ls ? 6 : 8,
+                      color: dot.withValues(alpha: 0.6),
+                      blurRadius: ls ? 6 : 8,
                       spreadRadius: ls ? 1 : 2)],
                 ),
               ),
             ]),
             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(widget.value,
-                  style: TextStyle(
-                    fontSize: ls ? context.sp(20) :
-                        Responsive.responsiveFont(context,
-                            mobile: 24, tablet: 28, desktop: 32),
-                    fontWeight: FontWeight.bold,
-                    color:      const Color(0xFFe2e8f0),
-                  )),
-              SizedBox(height: ls ? 2 : Responsive.responsiveSpacing(context,
-                  mobile: 4, tablet: 5, desktop: 6)),
-              Text(widget.label,
-                  style: TextStyle(
-                    fontSize: ls ? context.sp(9) :
-                        Responsive.responsiveFont(context,
-                            mobile: 10, tablet: 11, desktop: 13),
-                    color: const Color(0xFF64748b),
-                  ),
-                  maxLines: 2, overflow: TextOverflow.ellipsis),
+              Text(widget.value, style: TextStyle(
+                fontSize: ls ? context.sp(18) : context.sp(22),
+                fontWeight: FontWeight.bold,
+                color: const Color(0xFFe2e8f0),
+              )),
+              SizedBox(height: ls ? context.rs(1) : context.rs(3)),
+              Text(widget.label, style: TextStyle(
+                fontSize: ls ? context.sp(8) : context.sp(10),
+                color: const Color(0xFF64748b),
+              ), maxLines: 2, overflow: TextOverflow.ellipsis),
             ]),
           ],
         ),
@@ -882,7 +775,6 @@ class _StatCardState extends State<_StatCard> {
 }
 
 // ── CHART MODAL ───────────────────────────────────────────────────────────────
-// ORIGINAL structure preserved exactly — Expanded wraps child correctly.
 class _ChartModal extends StatelessWidget {
   final String title, subtitle;
   final Widget child;
@@ -899,18 +791,20 @@ class _ChartModal extends StatelessWidget {
 
     return Container(
       height: h,
-      decoration: const BoxDecoration(
-        color:        Color(0xFF0D1627),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D1627),
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(context.rp(24))),
       ),
       child: Column(children: [
         Center(child: Padding(
           padding: EdgeInsets.only(
               top: context.rs(12), bottom: context.rs(8)),
-          child: Container(width: 40, height: 4,
+          child: Container(
+              width: context.rp(40), height: context.rs(4),
               decoration: BoxDecoration(
                   color: const Color(0xFF1E2D45),
-                  borderRadius: BorderRadius.circular(2))),
+                  borderRadius: BorderRadius.circular(context.rp(2)))),
         )),
         Padding(
           padding: EdgeInsets.fromLTRB(
@@ -920,26 +814,29 @@ class _ChartModal extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(title, style: TextStyle(color: Colors.white,
-                    fontSize: context.sp(18), fontWeight: FontWeight.w700)),
-                const SizedBox(height: 3),
+                    fontSize: context.sp(17), fontWeight: FontWeight.w700)),
+                SizedBox(height: context.rs(3)),
                 Text(subtitle, style: TextStyle(
-                    color: const Color(0xFF6B7A99), fontSize: context.sp(11))),
+                    color: const Color(0xFF6B7A99),
+                    fontSize: context.sp(11))),
               ],
             )),
             GestureDetector(
               onTap: () => Navigator.pop(context),
-              child: Container(width: 34, height: 34,
+              child: Container(
+                  width: context.ri(34), height: context.ri(34),
                   decoration: BoxDecoration(
-                      color:  const Color(0xFF1A2235),
-                      shape:  BoxShape.circle,
+                      color: const Color(0xFF1A2235),
+                      shape: BoxShape.circle,
                       border: Border.all(color: const Color(0xFF1E2D45))),
-                  child: const Icon(Icons.close_rounded,
-                      color: Color(0xFF94A3B8), size: 18)),
+                  child: Icon(Icons.close_rounded,
+                      color: const Color(0xFF94A3B8),
+                      size: context.ri(18))),
             ),
           ]),
         ),
         Divider(color: const Color(0xFF1E2D45).withValues(alpha: 0.6),
-            height: 20),
+            height: context.rs(20)),
         Expanded(
           child: Padding(
             padding: EdgeInsets.fromLTRB(
@@ -953,10 +850,10 @@ class _ChartModal extends StatelessWidget {
 }
 
 // ── SHARED HELPERS ────────────────────────────────────────────────────────────
-BoxDecoration _cardDecor() => const BoxDecoration(
-      color:        Color(0xFF0f172a),
-      borderRadius: BorderRadius.all(Radius.circular(20)),
-      boxShadow: [
+BoxDecoration _cardDecor(BuildContext ctx) => BoxDecoration(
+      color:        const Color(0xFF0f172a),
+      borderRadius: BorderRadius.all(Radius.circular(ctx.rp(18))),
+      boxShadow: const [
         BoxShadow(color: Color(0xFF0b1120),
             offset: Offset(8, 8), blurRadius: 16),
         BoxShadow(color: Color(0xFF1e293b),
@@ -965,13 +862,12 @@ BoxDecoration _cardDecor() => const BoxDecoration(
     );
 
 Widget _legend(BuildContext ctx, String label, Color c) => Row(children: [
-      Container(width: 10, height: 10,
+      Container(
+          width: ctx.ri(10), height: ctx.ri(10),
           decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
       SizedBox(width: ctx.rp(5)),
       Text(label, style: TextStyle(
-          fontSize: Responsive.responsiveFont(ctx,
-              mobile: 11, tablet: 12, desktop: 13),
-          color: const Color(0xFF94a3b8))),
+          fontSize: ctx.sp(11), color: const Color(0xFF94a3b8))),
     ]);
 
 Widget _expandBadge(BuildContext ctx) => Container(
@@ -979,10 +875,10 @@ Widget _expandBadge(BuildContext ctx) => Container(
           horizontal: ctx.rp(6), vertical: ctx.rs(3)),
       decoration: BoxDecoration(
         color:        const Color(0xFF22d3ee).withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(ctx.rp(8)),
         border: Border.all(
             color: const Color(0xFF22d3ee).withValues(alpha: 0.25)),
       ),
-      child: const Icon(Icons.open_in_full_rounded,
-          color: Color(0xFF22d3ee), size: 13),
+      child: Icon(Icons.open_in_full_rounded,
+          color: const Color(0xFF22d3ee), size: ctx.ri(13)),
     );
