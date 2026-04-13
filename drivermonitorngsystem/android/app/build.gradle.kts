@@ -7,48 +7,51 @@ plugins {
 android {
     namespace = "com.example.smartalertdrive"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
-
-    aaptOptions {
-        noCompress += listOf("tflite")
-    }
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
     isCoreLibraryDesugaringEnabled = true
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
     }
     
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
+        jvmTarget = "21"
     }
 
     defaultConfig {
         applicationId = "com.example.smartalertdrive"
-        minSdk = flutter.minSdkVersion
+        minSdk = 26
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-
-        ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
-        }
+        multiDexEnabled = true
     }
 
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
-    }
-}
-dependencies {
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-    implementation("org.tensorflow:tensorflow-lite-select-tf-ops:2.16.1") {
-        exclude(group = "org.tensorflow", module = "tensorflow-lite")
-        exclude(group = "com.google.ai.edge.litert", module = "litert")
+        debug {
+            isDebuggable = true
+        }
     }
 }
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Core desugaring — required for flutter_foreground_task + java.time APIs
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+
+    // Required by flutter_foreground_task for background camera service
+    implementation("androidx.concurrent:concurrent-futures:1.2.0")
+    implementation("androidx.concurrent:concurrent-futures-ktx:1.2.0")
+
+    // Required for multidex support (minSdk < 21 not needed here, but safe to keep)
+    implementation("androidx.multidex:multidex:2.0.1")
 }

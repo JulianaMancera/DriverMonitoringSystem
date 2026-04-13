@@ -1,0 +1,104 @@
+{
+  "version": "2.1",
+  "description": "DMS-HybridNet V2.1 Decision Fusion Config",
+  "num_classes": 11,
+  "class_names": {
+    "0": "safe_driving",
+    "1": "yawning",
+    "2": "fatigue_head_droop",
+    "3": "texting",
+    "4": "phone_call",
+    "5": "adjusting_radio",
+    "6": "drinking",
+    "7": "reaching_behind",
+    "8": "hair_makeup",
+    "9": "talking_passenger",
+    "10": "eyes_closed_perclos"
+  },
+  "t02_to_full_mapping": {
+    "0": 0,
+    "1": 1,
+    "2": 2,
+    "3": 9,
+    "4": 10
+  },
+  "fusion_rules": {
+    "spatial_only_classes": [
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "drowsiness_classes": [
+      2,
+      10
+    ],
+    "other_temporal_classes": [
+      0,
+      1,
+      9
+    ],
+    "sub12_threshold": 0.25,
+    "sub12_boost_factor": 2.0,
+    "drowsiness_t02_weight": 0.8,
+    "drowsiness_t01_weight": 0.2,
+    "temporal_average_weight": 0.5
+  },
+  "t02_normalization": {
+    "mean": [
+      0.3316468289737513,
+      0.41771940573971506,
+      0.3746831173567465,
+      0.5549294876945747,
+      -114.96188322321962,
+      -27.546025853571035,
+      -0.6013167157224454
+    ],
+    "std": [
+      0.10642253236108944,
+      0.15415579936843213,
+      0.11262552152852298,
+      0.19060541509055687,
+      125.5252169549768,
+      34.82828854696445,
+      42.74963468627294
+    ],
+    "feature_order": [
+      "ear_l",
+      "ear_r",
+      "ear_avg",
+      "mar",
+      "pitch",
+      "yaw",
+      "roll"
+    ]
+  },
+  "t01_input": {
+    "shape": [
+      224,
+      224,
+      3
+    ],
+    "dtype": "uint8",
+    "range": [
+      0,
+      255
+    ]
+  },
+  "t02_input": {
+    "shape": [
+      30,
+      7
+    ],
+    "dtype": "float32",
+    "normalized": true
+  },
+  "model_files": {
+    "t01_int8": "t01_spatial_int8.tflite",
+    "t01_float16": "t01_spatial_float16.tflite",
+    "t02_int8": "t02_temporal_int8.tflite",
+    "t02_float16": "t02_temporal_float16.tflite"
+  }
+}

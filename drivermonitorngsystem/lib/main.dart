@@ -2,19 +2,20 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_riverpod/legacy.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'core/database/database_helper.dart';
 import 'core/services/notifications.dart';
-import 'screens/dashboard_screen.dart';
 import 'screens/monitor_screen.dart';
+import 'screens/dashboard_screen.dart' show DashboardScreen;
 import 'screens/analytics_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/history_screen.dart';
-import 'screens/splash_screen.dart';      // ← NEW
-import 'screens/onboarding_screen.dart';  // ← NEW
+import 'utils/responsive.dart';
+import 'constants/layout_constants.dart';
+import 'screens/splash_screen.dart';
+import 'screens/onboarding_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,17 +27,20 @@ void main() async {
     DeviceOrientation.landscapeRight,
   ]);
 
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor:           Colors.transparent,
-    statusBarIconBrightness:  Brightness.light,
-  ));
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+    ),
+  );
 
   await DatabaseHelper.instance.database;
 
   if (Platform.isAndroid) {
     final plugin = FlutterLocalNotificationsPlugin()
         .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>();
+          AndroidFlutterLocalNotificationsPlugin
+        >();
     await plugin?.requestNotificationsPermission();
   }
 
@@ -54,27 +58,26 @@ class BantayDriveApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return WithForegroundTask(
       child: MaterialApp(
-        title:                    'Bantay Drive',
+        title: 'Bantay Drive',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
-          brightness:              Brightness.dark,
+          brightness: Brightness.dark,
           scaffoldBackgroundColor: const Color(0xFF080E1A),
-          fontFamily:              'SF Pro Display',
+          fontFamily: 'SF Pro Display',
           colorScheme: const ColorScheme.dark(
-            primary:   Color(0xFF00D4FF),
+            primary: Color(0xFF00D4FF),
             secondary: Color(0xFF00D4FF),
-            surface:   Color(0xFF0D1627),
+            surface: Color(0xFF0D1627),
           ),
           useMaterial3: true,
         ),
-        home: const EntryPoint(), // ← was: MainShell()
+        home: const EntryPoint(),
       ),
     );
   }
 }
 
-// ─── ENTRY POINT  (splash → onboarding? → shell) ──────────────────────────────
-// NEW — only addition to this file. Everything below is unchanged from original.
+// ─── ENTRY POINT  (splash → onboarding? → shell) ─────────────────────────────
 
 enum _AppState { splash, onboarding, main }
 
@@ -86,14 +89,11 @@ class EntryPoint extends StatefulWidget {
 }
 
 class _EntryPointState extends State<EntryPoint> {
-  // ── DEV TOGGLE ───────────────────────────────────────────────────────────────
-  // Set to true to always show onboarding (ignores SharedPreferences).
-  // Set back to false when you're done previewing.
-  static const bool _forceOnboarding = true;
-  // ─────────────────────────────────────────────────────────────────────────────
+  // DEV TOGGLE — set true temporarily to preview onboarding UI
+  static const bool _forceOnboarding = false;
 
-  _AppState _state             = _AppState.splash;
-  bool      _onboardingNeeded  = false;
+  _AppState _state = _AppState.splash;
+  bool _onboardingNeeded = false;
 
   @override
   void initState() {
@@ -123,20 +123,20 @@ class _EntryPointState extends State<EntryPoint> {
   @override
   Widget build(BuildContext context) {
     return AnimatedSwitcher(
-      duration:        const Duration(milliseconds: 400),
-      switchInCurve:   Curves.easeOut,
-      switchOutCurve:  Curves.easeIn,
+      duration: const Duration(milliseconds: 400),
+      switchInCurve: Curves.easeOut,
+      switchOutCurve: Curves.easeIn,
       transitionBuilder: (child, animation) =>
           FadeTransition(opacity: animation, child: child),
       child: switch (_state) {
         _AppState.splash => SplashScreen(
-            key:        const ValueKey('splash'),
-            onComplete: _onSplashComplete,
-          ),
+          key: const ValueKey('splash'),
+          onComplete: _onSplashComplete,
+        ),
         _AppState.onboarding => OnboardingScreen(
-            key:        const ValueKey('onboarding'),
-            onComplete: _onOnboardingComplete,
-          ),
+          key: const ValueKey('onboarding'),
+          onComplete: _onOnboardingComplete,
+        ),
         _AppState.main => const MainShell(key: ValueKey('main')),
       },
     );
@@ -145,9 +145,31 @@ class _EntryPointState extends State<EntryPoint> {
 
 // ─── PROVIDERS ────────────────────────────────────────────────────────────────
 
-final navIndexProvider    = StateProvider<int>((ref) => 0);
-final sidebarOpenProvider = StateProvider<bool>((ref) => false);
+// FIX: Riverpod 3.x — StateProvider is replaced by NotifierProvider.
+// All providers that held simple state (int, bool) now use Notifier classes.
 
+class _NavIndexNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+  void set(int index) => state = index;
+}
+
+final navIndexProvider = NotifierProvider<_NavIndexNotifier, int>(
+  _NavIndexNotifier.new,
+);
+
+class _SidebarNotifier extends Notifier<bool> {
+  @override
+  bool build() => false;
+  void toggle() => state = !state;
+  void set(bool value) => state = value;
+}
+
+final sidebarOpenProvider = NotifierProvider<_SidebarNotifier, bool>(
+  _SidebarNotifier.new,
+);
+
+// FIX: FutureProvider is unchanged in Riverpod 3.x — no changes needed here.
 final deviceNameProvider = FutureProvider<String>((ref) async {
   try {
     if (Platform.isAndroid) {
@@ -173,7 +195,11 @@ class MainShell extends ConsumerWidget {
   const MainShell({super.key});
 
   static const List<String> _titles = [
-    'Dashboard', 'Monitor', 'Analytics', 'History', 'Settings',
+    'Dashboard',
+    'Monitor',
+    'Analytics',
+    'History',
+    'Settings',
   ];
 
   static final List<Widget> _screens = [
@@ -185,82 +211,92 @@ class MainShell extends ConsumerWidget {
   ];
 
   static const List<_NavData> _navItems = [
-    _NavData(icon: Icons.home_rounded,      label: 'Home'),
-    _NavData(icon: Icons.videocam_rounded,  label: 'Monitor'),
+    _NavData(icon: Icons.home_rounded, label: 'Home'),
+    _NavData(icon: Icons.videocam_rounded, label: 'Monitor'),
     _NavData(icon: Icons.bar_chart_rounded, label: 'Analytics'),
-    _NavData(icon: Icons.history_rounded,   label: 'History'),
-    _NavData(icon: Icons.settings_rounded,  label: 'Settings'),
+    _NavData(icon: Icons.history_rounded, label: 'History'),
+    _NavData(icon: Icons.settings_rounded, label: 'Settings'),
   ];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final currentIndex = ref.watch(navIndexProvider);
-    final isRecording  = ref.watch(isRecordingProvider);
-    final sidebarOpen  = ref.watch(sidebarOpenProvider);
-    final isInPip      = ref.watch(isInPipProvider);
-    final isLandscape  =
+    final isRecording = ref.watch(isRecordingProvider);
+    final sidebarOpen = ref.watch(sidebarOpenProvider);
+    final isInPip = ref.watch(isInPipProvider);
+    final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
 
+    // FIX: Riverpod 3.x — .when() error callback uses (error, stackTrace)
+    // The old code used (_, _) which caused "name '_' already defined" error
+    // because Dart doesn't allow the same wildcard name twice in one scope.
     final deviceName = ref.watch(deviceNameProvider).when(
-      data:    (name) => name,
+      data: (name) => name,
       loading: () => 'USER',
-      error:   (_, __) => 'USER',
+      error: (err, stack) => 'USER',
     );
 
-    final isMonitor     = currentIndex == 1;
+    final isMonitor = currentIndex == 1;
     final isTransparent = isLandscape && isMonitor;
 
     return Scaffold(
-      backgroundColor:        const Color(0xFF080E1A),
+      backgroundColor: const Color(0xFF080E1A),
       extendBodyBehindAppBar: isTransparent || isInPip,
 
       appBar: isInPip
           ? PreferredSize(
               preferredSize: Size.zero,
-              child:         const SizedBox.shrink(),
+              child: const SizedBox.shrink(),
             )
           : PreferredSize(
               preferredSize: Size.fromHeight(isLandscape ? 46 : 60),
               child: AppBar(
                 backgroundColor: isTransparent
-                    ? const Color(0xFF0D1627).withOpacity(0.55)
+                    ? const Color(0xFF0D1627).withValues(alpha: 0.55)
                     : const Color(0xFF0D1627),
-                elevation:   0,
+                elevation: 0,
                 centerTitle: false,
 
                 leading: isLandscape
                     ? IconButton(
                         icon: AnimatedSwitcher(
                           duration: const Duration(milliseconds: 250),
-                          transitionBuilder: (child, anim) => RotationTransition(
-                            turns: Tween(begin: 0.875, end: 1.0).animate(anim),
-                            child: FadeTransition(opacity: anim, child: child),
-                          ),
+                          transitionBuilder: (child, anim) =>
+                              RotationTransition(
+                                turns: Tween(
+                                  begin: 0.875,
+                                  end: 1.0,
+                                ).animate(anim),
+                                child: FadeTransition(
+                                  opacity: anim,
+                                  child: child,
+                                ),
+                              ),
                           child: Icon(
                             sidebarOpen
                                 ? Icons.close_rounded
                                 : Icons.menu_rounded,
-                            key:   ValueKey(sidebarOpen),
+                            key: ValueKey(sidebarOpen),
                             color: Colors.white,
-                            size:  26,
+                            size: 26,
                           ),
                         ),
-                        onPressed: () => ref
-                            .read(sidebarOpenProvider.notifier)
-                            .state = !sidebarOpen,
+                        // FIX: use notifier method instead of .state = directly
+                        onPressed: () =>
+                            ref.read(sidebarOpenProvider.notifier).toggle(),
                       )
                     : null,
 
                 title: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment:  MainAxisAlignment.center,
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
                       _titles[currentIndex],
                       style: TextStyle(
-                        color:         Colors.white,
-                        fontSize:      isLandscape ? 18 : 26,
-                        fontWeight:    FontWeight.w700,
+                        color: Colors.white,
+                        fontSize: isLandscape ? 18 : 26,
+                        fontWeight: FontWeight.w700,
                         letterSpacing: -0.5,
                       ),
                     ),
@@ -268,14 +304,14 @@ class MainShell extends ConsumerWidget {
                       text: TextSpan(
                         text: 'Connected: ',
                         style: TextStyle(
-                          color:    Colors.white54,
+                          color: Colors.white54,
                           fontSize: isLandscape ? 10 : 13,
                         ),
                         children: [
                           TextSpan(
                             text: deviceName,
                             style: const TextStyle(
-                              color:      Color(0xFF00D4FF),
+                              color: Color(0xFF00D4FF),
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -285,15 +321,14 @@ class MainShell extends ConsumerWidget {
                   ],
                 ),
 
-                // ── Original green-dot recording indicator — UNCHANGED ──────
                 actions: [
                   Padding(
-                    padding: const EdgeInsets.only(right: 20),
+                    padding: EdgeInsets.only(right: context.rp(20)),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 400),
-                      curve:    Curves.easeInOut,
-                      width:    10,
-                      height:   10,
+                      curve: Curves.easeInOut,
+                      width: 10,
+                      height: 10,
                       decoration: BoxDecoration(
                         color: isRecording
                             ? const Color(0xFF00FF88)
@@ -302,9 +337,10 @@ class MainShell extends ConsumerWidget {
                         boxShadow: isRecording
                             ? [
                                 BoxShadow(
-                                  color:        const Color(0xFF00FF88)
-                                      .withOpacity(0.6),
-                                  blurRadius:   8,
+                                  color: const Color(
+                                    0xFF00FF88,
+                                  ).withValues(alpha: 0.6),
+                                  blurRadius: 8,
                                   spreadRadius: 1,
                                 ),
                               ]
@@ -320,7 +356,7 @@ class MainShell extends ConsumerWidget {
                         preferredSize: const Size.fromHeight(1),
                         child: Container(
                           height: 1,
-                          color:  Colors.white.withOpacity(0.05),
+                          color: Colors.white.withValues(alpha: 0.05),
                         ),
                       ),
               ),
@@ -330,29 +366,27 @@ class MainShell extends ConsumerWidget {
         top: !isTransparent && !isInPip,
         child: isLandscape
             ? _LandscapeSidebarLayout(
-                sidebarOpen:  sidebarOpen,
+                sidebarOpen: sidebarOpen,
                 currentIndex: currentIndex,
-                navItems:     _navItems,
-                screens:      _screens,
+                navItems: _navItems,
+                screens: _screens,
                 onNavTap: (i) {
-                  ref.read(navIndexProvider.notifier).state = i;
+                  // FIX: use notifier method
+                  ref.read(navIndexProvider.notifier).set(i);
                 },
               )
-            : IndexedStack(
-                index:    currentIndex,
-                children: _screens,
-              ),
+            : IndexedStack(index: currentIndex, children: _screens),
       ),
 
       bottomNavigationBar: isInPip
           ? const SizedBox.shrink()
           : isLandscape
-              ? null
-              : _BottomNav(
-                  currentIndex: currentIndex,
-                  onTap: (i) =>
-                      ref.read(navIndexProvider.notifier).state = i,
-                ),
+          ? null
+          : _BottomNav(
+              currentIndex: currentIndex,
+              // FIX: use notifier method
+              onTap: (i) => ref.read(navIndexProvider.notifier).set(i),
+            ),
     );
   }
 }
@@ -360,13 +394,11 @@ class MainShell extends ConsumerWidget {
 // ─── LANDSCAPE SIDEBAR PUSH LAYOUT ───────────────────────────────────────────
 
 class _LandscapeSidebarLayout extends StatelessWidget {
-  final bool              sidebarOpen;
-  final int               currentIndex;
-  final List<_NavData>    navItems;
-  final List<Widget>      screens;
+  final bool sidebarOpen;
+  final int currentIndex;
+  final List<_NavData> navItems;
+  final List<Widget> screens;
   final ValueChanged<int> onNavTap;
-
-  static const double _sidebarWidth = 200.0;
 
   const _LandscapeSidebarLayout({
     required this.sidebarOpen,
@@ -382,18 +414,18 @@ class _LandscapeSidebarLayout extends StatelessWidget {
       children: [
         AnimatedContainer(
           duration: const Duration(milliseconds: 280),
-          curve:    Curves.easeInOutCubic,
-          width:    sidebarOpen ? _sidebarWidth : 0,
+          curve: Curves.easeInOutCubic,
+          width: sidebarOpen ? kSidebarWidth : 0,
           child: ClipRect(
             child: OverflowBox(
-              maxWidth:  _sidebarWidth,
+              maxWidth: kSidebarWidth,
               alignment: Alignment.centerLeft,
               child: SizedBox(
-                width: _sidebarWidth,
+                width: kSidebarWidth,
                 child: _LandscapeSidebar(
                   currentIndex: currentIndex,
-                  navItems:     navItems,
-                  onNavTap:     onNavTap,
+                  navItems: navItems,
+                  onNavTap: onNavTap,
                 ),
               ),
             ),
@@ -401,15 +433,12 @@ class _LandscapeSidebarLayout extends StatelessWidget {
         ),
         AnimatedContainer(
           duration: const Duration(milliseconds: 280),
-          curve:    Curves.easeInOutCubic,
-          width:    sidebarOpen ? 1 : 0,
-          color:    Colors.white.withOpacity(0.05),
+          curve: Curves.easeInOutCubic,
+          width: sidebarOpen ? 1 : 0,
+          color: Colors.white.withValues(alpha: 0.05),
         ),
         Expanded(
-          child: IndexedStack(
-            index:    currentIndex,
-            children: screens,
-          ),
+          child: IndexedStack(index: currentIndex, children: screens),
         ),
       ],
     );
@@ -419,8 +448,8 @@ class _LandscapeSidebarLayout extends StatelessWidget {
 // ─── LANDSCAPE SIDEBAR CONTENT ────────────────────────────────────────────────
 
 class _LandscapeSidebar extends StatelessWidget {
-  final int               currentIndex;
-  final List<_NavData>    navItems;
+  final int currentIndex;
+  final List<_NavData> navItems;
   final ValueChanged<int> onNavTap;
 
   const _LandscapeSidebar({
@@ -431,16 +460,15 @@ class _LandscapeSidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isMonitor   = currentIndex == 1;
-    final appBarH     = isMonitor ? 89.0 : 8.0;
-    final screenH     = MediaQuery.of(context).size.height;
-    final available   = screenH - appBarH - 16;
+    final isMonitor = currentIndex == 1;
+    final appBarH = isMonitor ? 89.0 : 8.0;
+    final screenH = MediaQuery.of(context).size.height;
+    final available = screenH - appBarH - 16;
     final needsScroll = available < 240;
 
     return Container(
       color: const Color(0xFF0D1627),
-      padding: EdgeInsets.only(
-          top: appBarH, bottom: 16, left: 12, right: 12),
+      padding: EdgeInsets.only(top: appBarH, bottom: 16, left: 12, right: 12),
       child: SingleChildScrollView(
         physics: needsScroll
             ? const ClampingScrollPhysics()
@@ -449,51 +477,58 @@ class _LandscapeSidebar extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.only(left: 8, bottom: 12),
+              padding: EdgeInsets.only(
+                left: context.rp(8),
+                bottom: context.rs(12),
+              ),
               child: Text(
                 'NAVIGATION',
                 style: TextStyle(
-                  color:         Colors.white.withOpacity(0.3),
-                  fontSize:      10,
-                  fontWeight:    FontWeight.w600,
+                  color: Colors.white.withValues(alpha: 0.3),
+                  fontSize: context.sp(10),
+                  fontWeight: FontWeight.w600,
                   letterSpacing: 1.4,
                 ),
               ),
             ),
             ...navItems.asMap().entries.map((entry) {
-              final i      = entry.key;
-              final item   = entry.value;
+              final i = entry.key;
+              final item = entry.value;
               final active = i == currentIndex;
 
               return Padding(
-                padding: const EdgeInsets.only(bottom: 4),
+                padding: EdgeInsets.only(bottom: context.rs(4)),
                 child: GestureDetector(
                   onTap: () => onNavTap(i),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
-                    curve:    Curves.easeInOut,
+                    curve: Curves.easeInOut,
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
                     decoration: BoxDecoration(
                       color: active
-                          ? const Color(0xFF00D4FF).withOpacity(0.12)
+                          ? const Color(0xFF00D4FF).withValues(alpha: 0.12)
                           : Colors.transparent,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                         color: active
-                            ? const Color(0xFF00D4FF).withOpacity(0.25)
+                            ? const Color(0xFF00D4FF).withValues(alpha: 0.25)
                             : Colors.transparent,
                         width: 1,
                       ),
                     ),
                     child: Row(
                       children: [
-                        Icon(item.icon,
-                            size:  20,
-                            color: active
-                                ? const Color(0xFF00D4FF)
-                                : Colors.white38),
-                        const SizedBox(width: 12),
+                        Icon(
+                          item.icon,
+                          size: 20,
+                          color: active
+                              ? const Color(0xFF00D4FF)
+                              : Colors.white38,
+                        ),
+                        SizedBox(width: context.rp(12)),
                         Expanded(
                           child: Text(
                             item.label,
@@ -501,7 +536,7 @@ class _LandscapeSidebar extends StatelessWidget {
                               color: active
                                   ? const Color(0xFF00D4FF)
                                   : Colors.white54,
-                              fontSize:   14,
+                              fontSize: context.sp(14),
                               fontWeight: active
                                   ? FontWeight.w600
                                   : FontWeight.w400,
@@ -510,11 +545,12 @@ class _LandscapeSidebar extends StatelessWidget {
                         ),
                         if (active)
                           Container(
-                            width:  4,
+                            width: 4,
                             height: 4,
                             decoration: const BoxDecoration(
-                                color: Color(0xFF00D4FF),
-                                shape: BoxShape.circle),
+                              color: Color(0xFF00D4FF),
+                              shape: BoxShape.circle,
+                            ),
                           ),
                       ],
                     ),
@@ -532,17 +568,17 @@ class _LandscapeSidebar extends StatelessWidget {
 // ─── PORTRAIT BOTTOM NAV ──────────────────────────────────────────────────────
 
 class _BottomNav extends StatelessWidget {
-  final int               currentIndex;
+  final int currentIndex;
   final ValueChanged<int> onTap;
 
   const _BottomNav({required this.currentIndex, required this.onTap});
 
   static const List<_NavData> _items = [
-    _NavData(icon: Icons.home_rounded,      label: 'Home'),
-    _NavData(icon: Icons.videocam_rounded,  label: 'Monitor'),
+    _NavData(icon: Icons.home_rounded, label: 'Home'),
+    _NavData(icon: Icons.videocam_rounded, label: 'Monitor'),
     _NavData(icon: Icons.bar_chart_rounded, label: 'Analytics'),
-    _NavData(icon: Icons.history_rounded,   label: 'History'),
-    _NavData(icon: Icons.settings_rounded,  label: 'Settings'),
+    _NavData(icon: Icons.history_rounded, label: 'History'),
+    _NavData(icon: Icons.settings_rounded, label: 'Settings'),
   ];
 
   @override
@@ -551,13 +587,17 @@ class _BottomNav extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF0D1627),
         border: Border(
-            top: BorderSide(
-                color: Colors.white.withOpacity(0.05), width: 1)),
+          top: BorderSide(
+            color: Colors.white.withValues(alpha: 0.05),
+            width: 1,
+          ),
+        ),
         boxShadow: [
           BoxShadow(
-              color:      Colors.black.withOpacity(0.4),
-              blurRadius: 20,
-              offset:     const Offset(0, -4)),
+            color: Colors.black.withValues(alpha: 0.4),
+            blurRadius: 20,
+            offset: const Offset(0, -4),
+          ),
         ],
       ),
       child: SafeArea(
@@ -566,10 +606,10 @@ class _BottomNav extends StatelessWidget {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final totalWidth = constraints.maxWidth;
-              final itemWidth  = totalWidth / _items.length;
-              const pillWidth  = 48.0;
+              final itemWidth = totalWidth / _items.length;
+              const pillWidth = 48.0;
               const pillHeight = 40.0;
-              final pillLeft   =
+              final pillLeft =
                   currentIndex * itemWidth + (itemWidth - pillWidth) / 2;
 
               return Stack(
@@ -577,46 +617,47 @@ class _BottomNav extends StatelessWidget {
                 children: [
                   AnimatedPositioned(
                     duration: const Duration(milliseconds: 280),
-                    curve:    Curves.easeInOutCubic,
-                    left:     pillLeft,
-                    top:      (56 - pillHeight) / 2,
+                    curve: Curves.easeInOutCubic,
+                    left: pillLeft,
+                    top: (56 - pillHeight) / 2,
                     child: Container(
-                      width:  pillWidth,
+                      width: pillWidth,
                       height: pillHeight,
                       decoration: BoxDecoration(
-                        color:        const Color(0xFF00D4FF).withOpacity(0.13),
+                        color: const Color(0xFF00D4FF).withValues(alpha: 0.13),
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                              color:        const Color(0xFF00D4FF)
-                                  .withOpacity(0.15),
-                              blurRadius:   10,
-                              spreadRadius: 1),
+                            color: const Color(
+                              0xFF00D4FF,
+                            ).withValues(alpha: 0.15),
+                            blurRadius: 10,
+                            spreadRadius: 1,
+                          ),
                         ],
                       ),
                     ),
                   ),
                   Row(
                     children: _items.asMap().entries.map((entry) {
-                      final i      = entry.key;
-                      final item   = entry.value;
+                      final i = entry.key;
+                      final item = entry.value;
                       final active = i == currentIndex;
                       return GestureDetector(
-                        onTap:     () => onTap(i),
-                        behavior:  HitTestBehavior.opaque,
+                        onTap: () => onTap(i),
+                        behavior: HitTestBehavior.opaque,
                         child: SizedBox(
-                          width:  itemWidth,
+                          width: itemWidth,
                           height: 56,
                           child: Center(
                             child: AnimatedSwitcher(
                               duration: const Duration(milliseconds: 200),
                               transitionBuilder: (child, anim) =>
-                                  ScaleTransition(
-                                      scale: anim, child: child),
+                                  ScaleTransition(scale: anim, child: child),
                               child: Icon(
                                 item.icon,
-                                key:   ValueKey('nav_${i}_$active'),
-                                size:  active ? 25 : 23,
+                                key: ValueKey('nav_${i}_$active'),
+                                size: active ? 25 : 23,
                                 color: active
                                     ? const Color(0xFF00D4FF)
                                     : Colors.white38,
@@ -641,6 +682,6 @@ class _BottomNav extends StatelessWidget {
 
 class _NavData {
   final IconData icon;
-  final String   label;
+  final String label;
   const _NavData({required this.icon, required this.label});
 }

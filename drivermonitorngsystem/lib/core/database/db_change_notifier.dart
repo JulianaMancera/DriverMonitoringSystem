@@ -1,3 +1,13 @@
-import 'package:flutter_riverpod/legacy.dart';
+// db_change_notifier.dart
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-final dbChangeCounterProvider = StateProvider<int>((ref) => 0);
+class DbChangeCounter extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  void increment() => state++;
+}
+
+final dbChangeCounterProvider = NotifierProvider<DbChangeCounter, int>(
+  DbChangeCounter.new,
+);

@@ -1,218 +1,184 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// notifications.dart
+//
+// PURPOSE:
+//   Manages the foreground service persistent notification bar shown while
+//   Bantay Drive is actively monitoring in the background.
+//
+// WHAT IT DOES:
+//   • Shows a LOW-priority persistent notification in the status bar:
+//     "✅ Monitoring actively..." / "😴 Drowsiness detected!" etc.
+//   • Has a "⏹ Stop" button in the notification that stops recording
+//   • Keeps running when user presses Home or switches apps (background mode)
+//   • Sends heartbeat every 5 seconds to keep the service alive
+//
+// WHAT IT DOES NOT DO:
+//   • Does NOT request notification permission from the user
+//     → Foreground service notifications are system-level and don't need
+//       explicit user permission on Android (they appear automatically)
+//   • Does NOT show popup alert notifications
+//     → All L1/L2/L3 driver alerts are handled IN-APP by monitor_screen.dart
+//       (banners and full-screen overlay) — not via system notifications
+//
+// CALLED BY:
+//   • main.dart          — initialize() on app start
+//   • monitor_screen.dart— startService(), stopService(), updateState()
+// ─────────────────────────────────────────────────────────────────────────────
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
-// Prefixed to avoid ambiguous clash with flutter_foreground_task's
-// NotificationVisibility, NotificationChannelImportance, etc.
-import 'package:flutter_local_notifications/flutter_local_notifications.dart' as fln;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// BantayDriveService
-//
-// Background notification fix checklist:
-//   1. Alert channel uses Importance.max (not just .high) — heads-up in bg.
-//   2. fullScreenIntent: true — forces notification onto the lock screen.
-//   3. visibility: NotificationVisibility.public — visible on lock screen.
-//   4. Unique IDs per alert type (1003 drowsy, 1004 distracted) so a new
-//      alert replaces the old one instead of stacking.
-//   5. showAlertNotification() uses _notifReady (not _serviceReady) so
-//      alerts fire even if the foreground service isn't up yet.
-//   6. initialize() is idempotent — safe to call multiple times.
-// ─────────────────────────────────────────────────────────────────────────────
 
 class BantayDriveService {
-  static final _notif = fln.FlutterLocalNotificationsPlugin();
-
-  static const _alertChannelId   = 'bantay_drive_alerts';
   static const _monitorChannelId = 'bantay_drive_monitoring';
 
-  static const _idDrowsy     = 1003;
-  static const _idDistracted = 1004;
-
-  static bool _notifReady   = false;
   static bool _serviceReady = false;
   static bool get isReady => _serviceReady;
 
-  // ─── INIT ──────────────────────────────────────────────────────────────────
+  // ── INIT ───────────────────────────────────────────────────────────────────
+  //
+  // FIX: Removed FlutterLocalNotificationsPlugin.requestNotificationsPermission()
+  // call that was in main.dart. That call triggered the "Allow notifications?"
+  // system popup which confused users — our app doesn't use popup notifications.
+  //
+  // Foreground service notifications (the persistent status bar entry) are
+  // exempt from this permission on Android — they show automatically when
+  // startService() is called, no user approval needed.
   static Future<void> initialize() async {
     try {
-      // ── 1. Local notifications ─────────────────────────────────────────────
-      const android  = fln.AndroidInitializationSettings('@mipmap/ic_launcher');
-      const settings = fln.InitializationSettings(android: android);
-      await _notif.initialize(settings: settings);
-
-      final androidPlugin =
-          _notif.resolvePlatformSpecificImplementation<
-              fln.AndroidFlutterLocalNotificationsPlugin>();
-
-      if (androidPlugin != null) {
-        await androidPlugin.requestNotificationsPermission();
-
-        // Android 14+ requires explicit permission for fullScreenIntent
-        // This prompts the user once if not already granted
-        await androidPlugin.requestFullScreenIntentPermission();
-
-        // HIGH-PRIORITY alert channel — must be max for heads-up in background
-        await androidPlugin.createNotificationChannel(
-          const fln.AndroidNotificationChannel(
-            _alertChannelId,
-            'Bantay Drive Alerts',
-            description:     'Drowsiness and distraction alerts.',
-            importance:      fln.Importance.max,
-            playSound:       true,
-            enableVibration: true,
-            showBadge:       true,
-          ),
-        );
-
-        // Low-priority persistent monitoring channel
-        await androidPlugin.createNotificationChannel(
-          const fln.AndroidNotificationChannel(
-            _monitorChannelId,
-            'Bantay Drive Monitoring',
-            description:     'Shown while Bantay Drive is actively monitoring.',
-            importance:      fln.Importance.low,
-            playSound:       false,
-            enableVibration: false,
-          ),
-        );
-      }
-
-      _notifReady = true;
-      debugPrint('>>> [BantayDrive] local notifications READY');
-
-      // ── 2. Foreground service ──────────────────────────────────────────────
       FlutterForegroundTask.init(
         androidNotificationOptions: AndroidNotificationOptions(
           channelId:          _monitorChannelId,
           channelName:        'Bantay Drive Monitoring',
           channelDescription: 'Shown while Bantay Drive is actively monitoring.',
+          // LOW importance = no sound, no heads-up popup, just status bar entry
+          // This is intentional — we don't want the notification itself to
+          // distract the driver. Only the in-app alerts (monitor_screen) do that.
           channelImportance:  NotificationChannelImportance.LOW,
           priority:           NotificationPriority.LOW,
         ),
-        // Required by flutter_foreground_task API signature — has no effect
-        // on Android. Cannot be removed without a compile error.
+        // Required by flutter_foreground_task API — no effect on Android.
         iosNotificationOptions: const IOSNotificationOptions(),
         foregroundTaskOptions: ForegroundTaskOptions(
+          // Heartbeat every 5 seconds — keeps service alive in background
           eventAction:   ForegroundTaskEventAction.repeat(5000),
+          // Don't auto-restart on device boot — user must open app manually
           autoRunOnBoot: false,
+          // Keep WiFi active during monitoring (useful for future GPS features)
           allowWifiLock: true,
         ),
       );
 
-      // ── 3. Battery optimization exemption ─────────────────────────────────
-      await FlutterForegroundTask.requestIgnoreBatteryOptimization();
-
       _serviceReady = true;
-      debugPrint('>>> [BantayDrive] FULLY READY');
+      debugPrint('[BantayDrive] ✅ Service initialized');
     } catch (e, stack) {
-      debugPrint('>>> [BantayDrive] initialize() FAILED: $e\n$stack');
+      debugPrint('[BantayDrive] ❌ initialize() failed: $e\n$stack');
       _serviceReady = false;
     }
   }
 
-  // ─── START FOREGROUND SERVICE ──────────────────────────────────────────────
+  // ── START FOREGROUND SERVICE ───────────────────────────────────────────────
+  //
+  // Called by monitor_screen when user taps START recording.
+  // If service is already running (e.g. app was backgrounded), updates it.
   static Future<void> startService({String state = 'neutral'}) async {
     if (!_serviceReady) return;
     try {
       if (await FlutterForegroundTask.isRunningService) {
+        // Already running — just update the notification text
         await FlutterForegroundTask.updateService(
-          notificationTitle: 'Bantay Drive',
-          notificationText:  _monitoringText(state),
+          notificationTitle:   'Bantay Drive',
+          notificationText:    _monitoringText(state),
+          notificationButtons: [
+            const NotificationButton(id: 'stop_recording', text: '⏹ Stop'),
+          ],
         );
       } else {
+        // Start fresh foreground service
         await FlutterForegroundTask.startService(
-          notificationTitle: 'Bantay Drive',
-          notificationText:  _monitoringText(state),
-          callback:          startCallback,
+          notificationTitle:   'Bantay Drive',
+          notificationText:    _monitoringText(state),
+          callback:            startCallback,
+          notificationButtons: [
+            const NotificationButton(id: 'stop_recording', text: '⏹ Stop'),
+          ],
         );
       }
+      debugPrint('[BantayDrive] ✅ Service started — state: $state');
     } catch (e) {
-      debugPrint('>>> [BantayDrive] startService() FAILED: $e');
+      debugPrint('[BantayDrive] ❌ startService() failed: $e');
     }
   }
 
-  // ─── STOP FOREGROUND SERVICE ───────────────────────────────────────────────
+  // ── STOP FOREGROUND SERVICE ────────────────────────────────────────────────
+  //
+  // Called by monitor_screen when user taps STOP recording,
+  // or when the "⏹ Stop" notification button is pressed.
   static Future<void> stopService() async {
     if (!_serviceReady) return;
     try {
       await FlutterForegroundTask.stopService();
-      await _notif.cancel(id: _idDrowsy);
-      await _notif.cancel(id: _idDistracted);
+      debugPrint('[BantayDrive] ✅ Service stopped');
     } catch (e) {
-      debugPrint('>>> [BantayDrive] stopService() FAILED: $e');
+      debugPrint('[BantayDrive] ❌ stopService() failed: $e');
     }
   }
 
-  // ─── UPDATE FOREGROUND TEXT ────────────────────────────────────────────────
+  // ── UPDATE NOTIFICATION TEXT ───────────────────────────────────────────────
+  //
+  // Called by monitor_screen every time the driver state changes.
+  // Keeps the persistent notification in sync with the current detection.
+  // FIX: Added isRunningService check — avoids calling updateService()
+  // when the service isn't running, which caused silent failures before.
   static Future<void> updateState(String state) async {
     if (!_serviceReady) return;
     try {
+      // FIX: Only update if service is actually running
+      if (!await FlutterForegroundTask.isRunningService) return;
+
       await FlutterForegroundTask.updateService(
-        notificationTitle: 'Bantay Drive',
-        notificationText:  _monitoringText(state),
+        notificationTitle:   'Bantay Drive',
+        notificationText:    _monitoringText(state),
+        notificationButtons: [
+          const NotificationButton(id: 'stop_recording', text: '⏹ Stop'),
+        ],
       );
     } catch (e) {
-      debugPrint('>>> [BantayDrive] updateState() FAILED: $e');
+      debugPrint('[BantayDrive] ❌ updateState() failed: $e');
     }
   }
 
-  // ─── ALERT NOTIFICATION ────────────────────────────────────────────────────
-  /// Shows a high-priority heads-up notification even when backgrounded.
-  /// Uses _notifReady (not _serviceReady) so it fires before foreground
-  /// service is confirmed ready.
-  static Future<void> showAlertNotification(String type) async {
-    if (!_notifReady) {
-      debugPrint('>>> [BantayDrive] showAlertNotification skipped — not ready');
-      return;
-    }
+  // ── CHECK SERVICE STATUS ───────────────────────────────────────────────────
+
+  /// Returns true if the foreground service is currently running.
+  /// Used by monitor_screen to sync UI state on app resume.
+  static Future<bool> get isRunning async {
     try {
-      final isDrowsy = type == 'DROWSY';
-      final notifId  = isDrowsy ? _idDrowsy : _idDistracted;
-
-      await _notif.show(
-        id:    notifId,
-        title: isDrowsy ? '⚠️ Drowsiness Detected!' : '⚠️ Distraction Detected!',
-        body:  isDrowsy
-            ? 'Stay alert — eyes on the road!'
-            : 'Focus on the road ahead!',
-        notificationDetails: fln.NotificationDetails(
-          android: fln.AndroidNotificationDetails(
-            _alertChannelId,
-            'Bantay Drive Alerts',
-            importance:       fln.Importance.max,
-            priority:         fln.Priority.max,
-            fullScreenIntent: true,
-            visibility:       fln.NotificationVisibility.public,
-            autoCancel:       true,
-            playSound:        true,
-            enableVibration:  true,
-            showWhen:         true,
-            ticker:           'Bantay Drive Alert',
-          ),
-        ),
-      );
-
-      // Auto-cancel after 8 seconds
-      Future.delayed(const Duration(seconds: 8), () async {
-        await _notif.cancel(id: notifId);
-      });
-
-      debugPrint('>>> [BantayDrive] showAlertNotification OK — type=$type');
-    } catch (e) {
-      debugPrint('>>> [BantayDrive] showAlertNotification FAILED: $e');
+      return await FlutterForegroundTask.isRunningService;
+    } catch (_) {
+      return false;
     }
   }
 
-  // ─── HELPERS ──────────────────────────────────────────────────────────────
+  // ── NOTIFICATION TEXT ──────────────────────────────────────────────────────
+
   static String _monitoringText(String state) {
-    switch (state) {
-      case 'drowsy':     return '😴 Drowsiness detected — stay alert!';
-      case 'distracted': return '👀 Distraction detected — focus ahead!';
-      default:           return '✅ Monitoring actively...';
+    switch (state.toLowerCase()) {
+      case 'drowsy':
+        return '😴 Drowsiness detected — stay alert!';
+      case 'distracted':
+        return '👀 Distraction detected — focus ahead!';
+      default:
+        return '✅ Monitoring actively...';
     }
   }
 }
 
-// ─── FOREGROUND TASK CALLBACK ──────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// FOREGROUND TASK CALLBACK
+// Must be a top-level function with @pragma('vm:entry-point') so the Android
+// foreground service can find it across isolate boundaries.
+// ─────────────────────────────────────────────────────────────────────────────
+
 @pragma('vm:entry-point')
 void startCallback() {
   FlutterForegroundTask.setTaskHandler(BantayDriveTaskHandler());
@@ -221,16 +187,30 @@ void startCallback() {
 class BantayDriveTaskHandler extends TaskHandler {
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
-    debugPrint('>>> [TaskHandler] onStart');
+    debugPrint('[TaskHandler] onStart — foreground service active');
   }
 
+  // Called every 5 seconds (per eventAction repeat interval).
+  // Sends heartbeat to main isolate so monitor_screen knows
+  // the service is still alive.
   @override
   void onRepeatEvent(DateTime timestamp) {
     FlutterForegroundTask.sendDataToMain('heartbeat');
   }
 
+  // Called when user taps the "⏹ Stop" button in the notification.
+  // Forwards the event to monitor_screen via sendDataToMain().
+  // monitor_screen listens for this and calls _stopRecording().
+  @override
+  void onNotificationButtonPressed(String id) {
+    if (id == 'stop_recording') {
+      FlutterForegroundTask.sendDataToMain('stop_recording');
+      debugPrint('[TaskHandler] Stop button pressed');
+    }
+  }
+
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
-    debugPrint('>>> [TaskHandler] onDestroy isTimeout=$isTimeout');
+    debugPrint('[TaskHandler] onDestroy — isTimeout: $isTimeout');
   }
 }
