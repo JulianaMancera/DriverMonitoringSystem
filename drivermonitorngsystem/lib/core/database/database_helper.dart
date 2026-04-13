@@ -435,45 +435,73 @@ class DatabaseHelper {
 
   /// Daily drowsy vs distracted counts — Analytics line chart.
   /// Returns one row per day with drowsy_count and distracted_count.
+  /// days = null means All Time — no date filter applied.
   Future<List<Map<String, dynamic>>> getDailyAlertTrends({
-    int days = 7,
+    int? days,
   }) async {
     final db = await database;
-    final since = DateTime.now()
-        .subtract(Duration(days: days))
-        .toUtc()
-        .toIso8601String();
-    return await db.rawQuery('''
-      SELECT
-        DATE(triggered_at) as date,
-        SUM(CASE WHEN alert_type = 'DROWSY'     THEN 1 ELSE 0 END) as drowsy_count,
-        SUM(CASE WHEN alert_type = 'DISTRACTED' THEN 1 ELSE 0 END) as distracted_count
-      FROM alert_events
-      WHERE triggered_at >= ?
-      GROUP BY DATE(triggered_at)
-      ORDER BY date ASC
-    ''', [since]);
+    if (days != null) {
+      final since = DateTime.now()
+          .subtract(Duration(days: days))
+          .toUtc()
+          .toIso8601String();
+      return await db.rawQuery('''
+        SELECT
+          DATE(datetime(triggered_at, 'localtime')) as date,
+          SUM(CASE WHEN alert_type = 'DROWSY'     THEN 1 ELSE 0 END) as drowsy_count,
+          SUM(CASE WHEN alert_type = 'DISTRACTED' THEN 1 ELSE 0 END) as distracted_count
+        FROM alert_events
+        WHERE triggered_at >= ?
+        GROUP BY DATE(datetime(triggered_at, 'localtime'))
+        ORDER BY date ASC
+      ''', [since]);
+    } else {
+      // All Time — no WHERE clause
+      return await db.rawQuery('''
+        SELECT
+          DATE(datetime(triggered_at, 'localtime')) as date,
+          SUM(CASE WHEN alert_type = 'DROWSY'     THEN 1 ELSE 0 END) as drowsy_count,
+          SUM(CASE WHEN alert_type = 'DISTRACTED' THEN 1 ELSE 0 END) as distracted_count
+        FROM alert_events
+        GROUP BY DATE(datetime(triggered_at, 'localtime'))
+        ORDER BY date ASC
+      ''');
+    }
   }
 
   /// Hourly alert distribution — Analytics bar chart (all 24 hours).
   /// Returns one row per hour that had at least one alert.
+  /// days = null means All Time — no date filter applied.
+  /// Uses localtime so Philippine users see correct hour buckets.
   Future<List<Map<String, dynamic>>> getHourlyAlertDistribution({
-    int days = 7,
+    int? days,
   }) async {
     final db = await database;
-    final since = DateTime.now()
-        .subtract(Duration(days: days))
-        .toUtc()
-        .toIso8601String();
-    return await db.rawQuery('''
-      SELECT
-        CAST(strftime('%H', triggered_at) AS INTEGER) as hour,
-        COUNT(*) as count
-      FROM alert_events
-      WHERE triggered_at >= ?
-      GROUP BY hour
-      ORDER BY hour ASC
-    ''', [since]);
+    if (days != null) {
+      final since = DateTime.now()
+          .subtract(Duration(days: days))
+          .toUtc()
+          .toIso8601String();
+      return await db.rawQuery('''
+        SELECT
+          CAST(strftime('%H', datetime(triggered_at, 'localtime')) AS INTEGER) as hour,
+          COUNT(*) as count
+        FROM alert_events
+        WHERE triggered_at >= ?
+        GROUP BY hour
+        ORDER BY hour ASC
+      ''', [since]);
+    } else {
+      // All Time — no WHERE clause
+      return await db.rawQuery('''
+        SELECT
+          CAST(strftime('%H', datetime(triggered_at, 'localtime')) AS INTEGER) as hour,
+          COUNT(*) as count
+        FROM alert_events
+        GROUP BY hour
+        ORDER BY hour ASC
+      ''');
+    }
   }
 
   /// All alerts for one session — History session detail sheet.
@@ -609,16 +637,18 @@ class DatabaseHelper {
   }
 
   /// All data needed by analytics_screen in one parallel fetch.
-  /// days = null means "All Time".
+  /// days = null means "All Time" — no date filter on any query.
   Future<Map<String, dynamic>> getAnalyticsSummary({int? days}) async {
-    final effectiveDays = days ?? 7;
+    // FIX: removed effectiveDays = days ?? 7.
+    // getDailyAlertTrends and getHourlyAlertDistribution now accept int?
+    // so null is passed through correctly for All Time.
     final results = await Future.wait([
       getTotalSessionCount(days: days),                          // index 0
       getTotalAlertCount(days: days),                            // index 1
       getAlertCountByType(alertType: 'DROWSY', days: days),     // index 2
       getAlertCountByType(alertType: 'DISTRACTED', days: days), // index 3
-      getDailyAlertTrends(days: effectiveDays),                  // index 4
-      getHourlyAlertDistribution(days: effectiveDays),           // index 5
+      getDailyAlertTrends(days: days),                           // index 4 — now nullable
+      getHourlyAlertDistribution(days: days),                    // index 5 — now nullable
       getAvgSafetyScore(days: days),                             // index 6
     ]);
 

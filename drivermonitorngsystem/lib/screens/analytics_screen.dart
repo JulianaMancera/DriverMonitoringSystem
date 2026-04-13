@@ -381,7 +381,7 @@ class _LineCard extends StatelessWidget {
       backgroundColor:    Colors.transparent,
       barrierColor:       Colors.black.withValues(alpha: 0.75),
       useSafeArea:        true, // FIX: correct height measurement in modal
-      builder: (_) => _ChartModal(
+      builder: (ctx) => _ChartModal(
         title: 'Drowsiness vs Distraction',
         // FIX: 7-day has no swipe hint; 30d/AT does
         subtitle: _is7Day
@@ -389,27 +389,27 @@ class _LineCard extends StatelessWidget {
             : 'Swipe chart sideways  •  Tap point to see value',
         child: Column(children: [
           Row(children: [
-            _legend(_, 'Drowsiness', _kDrowsyColor),
-            SizedBox(width: _.rp(16)),
-            _legend(_, 'Distraction', _kDistractedColor),
+            _legend(ctx, 'Drowsiness', _kDrowsyColor),
+            SizedBox(width: ctx.rp(16)),
+            _legend(ctx, 'Distraction', _kDistractedColor),
           ]),
-          SizedBox(height: _.rs(12)),
+          SizedBox(height: ctx.rs(12)),
           // FIX: Expanded so chart gets proper height (was SizedBox+chartH)
           Expanded(
             child: _is7Day
-                ? _sevenDayChart(_, d, 12)
-                : _scrollableChart(_, d, 12),
+                ? _sevenDayChart(ctx, d, 12)
+                : _scrollableChart(ctx, d, 12),
           ),
           // FIX: Swipe row only for 30d and All Time
           if (!_is7Day) ...[
-            SizedBox(height: _.rs(6)),
+            SizedBox(height: ctx.rs(6)),
             Row(mainAxisAlignment: MainAxisAlignment.center, children: [
               const Icon(Icons.swipe_rounded,
                   color: Color(0xFF475569), size: 13),
-              SizedBox(width: _.rp(4)),
+              SizedBox(width: ctx.rp(4)),
               Text('Swipe to see all dates',
                   style: TextStyle(color: const Color(0xFF475569),
-                      fontSize: _.sp(10))),
+                      fontSize: ctx.sp(10))),
             ]),
           ],
         ]),
@@ -621,12 +621,9 @@ class _BarCard extends StatelessWidget {
       backgroundColor:    Colors.transparent,
       barrierColor:       Colors.black.withValues(alpha: 0.75),
       useSafeArea:        true, // FIX: correct height in modal
-      builder: (_) => _ChartModal(
+      builder: (ctx) => _ChartModal(
         title:    'Hourly Alert Distribution',
         subtitle: 'All hours  •  Swipe to scroll  •  Local time',
-        // FIX: Expanded + LayoutBuilder replaces SizedBox(height: chartH).
-        // chartH was calculated wrong from LayoutBuilder constraints
-        // inside a bottom sheet — chart got 0px and swipe didn't work.
         child: Column(children: [
           Expanded(
             child: LayoutBuilder(builder: (ctx, con) {
@@ -644,14 +641,14 @@ class _BarCard extends StatelessWidget {
               );
             }),
           ),
-          SizedBox(height: _.rs(6)),
+          SizedBox(height: ctx.rs(6)),
           Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             const Icon(Icons.swipe_rounded,
                 color: Color(0xFF475569), size: 13),
-            SizedBox(width: _.rp(4)),
+            SizedBox(width: ctx.rp(4)),
             Text('Swipe to see all hours',
                 style: TextStyle(
-                    color: const Color(0xFF475569), fontSize: _.sp(10))),
+                    color: const Color(0xFF475569), fontSize: ctx.sp(10))),
           ]),
         ]),
       ),
@@ -749,17 +746,22 @@ class _BarCard extends StatelessWidget {
   List<Map<String, dynamic>> _preview() {
     const ph = [6, 9, 12, 15, 18, 21];
     final m  = <int, int>{};
-    for (final r in hourlyDist) m[r['hour'] as int] = r['count'] as int;
-    return ph.map((h) => {'hour': h, 'count': m[h] ?? 0}).toList();
-  }
+     for (final r in hourlyDist) {
+        m[r['hour'] as int] = r['count'] as int;
+      }
+      return ph.map((h) => {'hour': h, 'count': m[h] ?? 0}).toList();
+    }
+
 
   List<Map<String, dynamic>> _full() {
     final m = <int, int>{};
-    for (final r in hourlyDist) m[r['hour'] as int] = r['count'] as int;
-    return List.generate(24, (h) => {'hour': h, 'count': m[h] ?? 0})
-        .where((r) => (r['count'] as int) > 0 || (r['hour'] as int) >= 6)
-        .toList();
-  }
+     for (final r in hourlyDist) {
+        m[r['hour'] as int] = r['count'] as int;
+      }
+      return List.generate(24, (h) => {'hour': h, 'count': m[h] ?? 0})
+          .where((r) => (r['count'] as int) > 0 || (r['hour'] as int) >= 6)
+          .toList();
+    }
 
   static String _hLabel(int h) {
     if (h == 0)  return '12AM';
