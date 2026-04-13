@@ -579,11 +579,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       child: Stack(
         children: [
           if (isDesktop)
-            _buildDesktopLayout()
+            SafeArea(child: _buildDesktopLayout())
           else if (isLandscape)
             _buildLandscapeLayout()
           else
-            _buildPortraitLayout(),
+            SafeArea(bottom: false, child: _buildPortraitLayout()),
 
           if (showAlert && !isLevel3)
             Positioned(
@@ -608,7 +608,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Column(children: [
-            const SizedBox(height: 8),
+            const SizedBox(height: 28),
             _buildCameraWithOverlay(
                 height:      MediaQuery.of(context).size.height * 0.40,
                 isLandscape: false),
@@ -1096,11 +1096,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     return Column(children: [
       Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Flexible(child: _MetricGauge(
+        Expanded(child: _MetricGauge(
             label: 'Alertness', value: alertness,
             color: const Color(0xFF22d3ee), icon: Icons.bolt)),
         const SizedBox(width: 12),
-        Flexible(child: GestureDetector(
+        Expanded(child: GestureDetector(
           onTap: drowsiness > 0 ? () => _showSubclassSheet('drowsy') : null,
           child: _MetricGauge(
               label: 'Drowsiness', value: drowsiness,
@@ -1108,7 +1108,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               icon: Icons.visibility_off, tapHint: drowsiness > 0),
         )),
         const SizedBox(width: 12),
-        Flexible(child: GestureDetector(
+        Expanded(child: GestureDetector(
           onTap: distraction > 0
               ? () => _showSubclassSheet('distracted') : null,
           child: _MetricGauge(
@@ -1281,12 +1281,12 @@ class _MetricGauge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final clamped = value.clamp(0.0, 100.0);
-    return LayoutBuilder(builder: (ctx, constraints) {
-      final gaugeD = (constraints.maxWidth * 0.55).clamp(44.0, 96.0);
-      final fSize  = (gaugeD * 0.30).clamp(12.0, 24.0);
-      final pSize  = (gaugeD * 0.14).clamp(8.0, 12.0);
+    // Fixed gauge size so all three boxes are identical regardless of label length
+    const double gaugeD = 72.0;
+    const double fSize  = 22.0;
+    const double pSize  = 11.0;
 
-      return Container(
+    return Container(
         decoration: BoxDecoration(
           color: const Color(0xFF0f172a),
           borderRadius: BorderRadius.circular(16),
@@ -1354,7 +1354,6 @@ class _MetricGauge extends StatelessWidget {
           ),
         ]),
       );
-    });
   }
 }
 
