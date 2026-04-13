@@ -129,10 +129,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     // This prevents the "30% avg alertness" showing on a fresh install.
     final bool hasAnySessions = dailyScores.isNotEmpty;
 
-    String scoreLabel = 'EXCELLENT';
-    if (safetyScore < 60)      scoreLabel = 'POOR';
-    else if (safetyScore < 75) scoreLabel = 'FAIR';
-    else if (safetyScore < 90) scoreLabel = 'GOOD';
+    String scoreLabel = "EXCELLENT";
+      if (safetyScore < 60) {
+          scoreLabel = "POOR";
+      } else if (safetyScore < 75) {
+          scoreLabel = "FAIR";
+      } else if (safetyScore < 90) {
+          scoreLabel = "GOOD";
+      }
 
     final isMobile = Responsive.isMobile(context);
 
@@ -850,9 +854,7 @@ class _StatCard extends StatelessWidget {
                     context, mobile: 8, tablet: 9, desktop: 10),
               ),
               decoration: BoxDecoration(
-                color: accent
-                    ? const Color(0xFF22d3ee).withValues(alpha: 0.1)
-                    : const Color(0xFF1e293b),
+                color: const Color(0xFF22d3ee).withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(
                   Responsive.responsiveBorderRadius(
                       context, mobile: 10, tablet: 11, desktop: 12),
@@ -861,9 +863,7 @@ class _StatCard extends StatelessWidget {
               child: Icon(icon,
                   size: Responsive.responsiveIconSize(
                       context, mobile: 20, tablet: 21, desktop: 22),
-                  color: accent
-                      ? const Color(0xFF22d3ee)
-                      : const Color(0xFF64748b)),
+                  color: const Color(0xFF22d3ee)),
             ),
             if (accent)
               Padding(
