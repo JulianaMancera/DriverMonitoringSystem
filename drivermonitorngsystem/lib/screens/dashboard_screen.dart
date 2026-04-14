@@ -90,15 +90,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
     final bool hasAnySessions = dailyScores.isNotEmpty;
 
-    String scoreLabel = "EXCELLENT";
-
-      if (safetyScore < 60) {
-          scoreLabel = "POOR";
-      } else if (safetyScore < 75) {
-          scoreLabel = "FAIR";
-      } else if (safetyScore < 90) {
-          scoreLabel = "GOOD";
-      }
+    String scoreLabel = 'EXCELLENT';
+    if (safetyScore < 60)      scoreLabel = 'POOR';
+    else if (safetyScore < 75) scoreLabel = 'FAIR';
+    else if (safetyScore < 90) scoreLabel = 'GOOD';
 
     final isMobile = Responsive.isMobile(context);
 
@@ -544,7 +539,9 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
   // FIX: point spacing and y-axis width now use responsive helpers
   // so charts on compact phones don't cram labels together
   static const double _chartMin = 0.0;
-  static const double _chartMax = 105.0;
+  // FIX: was 105.0 — when score is near 100% the dot+stroke was clipped.
+  // 112.0 gives ~12 units breathing room above 100 so high scores show fully.
+  static const double _chartMax = 112.0;
 
   @override
   void initState() {
@@ -581,7 +578,9 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
     // FIX: point spacing and y-axis width responsive
     final pointSpacing = context.rp(46);
     final yAxisWidth   = context.rp(38);
-    final rightPad     = context.rp(14);
+    // FIX: was rp(14) — last date label "Apr 13" was cropped on right edge.
+    // Increased to rp(36) so the last dot + label always has room to render.
+    final rightPad     = context.rp(36);
     final chartW       = yAxisWidth + (spots.length * pointSpacing) + rightPad;
 
     return SingleChildScrollView(
@@ -602,8 +601,14 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
             titlesData: FlTitlesData(
               rightTitles: const AxisTitles(
                   sideTitles: SideTitles(showTitles: false)),
-              topTitles: const AxisTitles(
-                  sideTitles: SideTitles(showTitles: false)),
+              // FIX: add top reserved space so the 100% dot is never clipped
+              // at the top edge of the chart area
+              topTitles: AxisTitles(
+                sideTitles: SideTitles(
+                  showTitles:   false,
+                  reservedSize: context.rs(12),
+                ),
+              ),
               bottomTitles: AxisTitles(
                 sideTitles: SideTitles(
                   showTitles:   true,
@@ -632,16 +637,15 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
                 sideTitles: SideTitles(
                   showTitles:   true,
                   interval:     20,
-                  // FIX: was hardcoded _yAxisWidth = 42.0
                   reservedSize: yAxisWidth,
                   getTitlesWidget: (value, meta) {
                     final v = value.toInt();
+                    // FIX: only show 0,20,40,60,80,100 — not 112 (our breathing room)
                     if (v < 0 || v > 100 || v % 20 != 0) {
                       return const SizedBox.shrink();
                     }
                     return Text('$v', style: TextStyle(
                       color:    const Color(0xFF64748b),
-                      // FIX: was Responsive.responsiveFont(mobile:11)
                       fontSize: context.sp(10),
                     ));
                   },

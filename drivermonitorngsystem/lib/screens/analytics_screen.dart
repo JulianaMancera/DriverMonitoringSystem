@@ -340,7 +340,10 @@ class _LineCard extends StatelessWidget {
                   style: TextStyle(color: const Color(0xFF475569),
                       fontSize: ctx.sp(10))),
             ]),
-          ] : []),
+            SizedBox(height: MediaQuery.of(ctx).padding.bottom),
+          ] : [
+            SizedBox(height: MediaQuery.of(ctx).padding.bottom),
+          ]),
         ]),
       ),
     );
@@ -787,7 +790,7 @@ class _ChartModal extends StatelessWidget {
     final landscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
     final h = MediaQuery.of(context).size.height *
-        (landscape ? 0.95 : 0.85);
+        (landscape ? 0.95 : 0.90);
 
     return Container(
       height: h,
@@ -840,7 +843,8 @@ class _ChartModal extends StatelessWidget {
         Expanded(
           child: Padding(
             padding: EdgeInsets.fromLTRB(
-                context.rp(16), 0, context.rp(16), context.rs(16)),
+                context.rp(16), 0, context.rp(16),
+                context.rs(16) + MediaQuery.of(context).padding.bottom),
             child: child,
           ),
         ),
