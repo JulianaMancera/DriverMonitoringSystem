@@ -14,14 +14,48 @@ import 'package:flutter/material.dart';
 //   Large    410–429   → big phones          (e.g. Pixel 7 Pro)
 //   XLarge   ≥ 430 dp  → max size phones     (e.g. Galaxy S23 Ultra)
 //
+// BRAND-AWARE SCALING:
+//   Samsung  → 0.95×  (One UI inflates default UI chrome & text)
+//   Xiaomi   → 0.97×  (MIUI renders slightly larger than stock)
+//   Others   → 1.00×  (no adjustment)
+//
 // ALL scaling (fonts, padding, spacing, icons) uses the SAME scale factor
 // so nothing drifts relative to anything else.
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ── Android OEM brand enum ────────────────────────────────────────────────────
+enum DeviceBrand { samsung, xiaomi, oppo, vivo, pixel, other }
 
 class Responsive {
   // ── Design base ─────────────────────────────────────────────────────────────
   static const double _baseW = 390.0;
   static const double _baseH = 844.0;
+
+  // ── Brand-aware scale tweak ───────────────────────────────────────────────
+  // Set once at app startup via Responsive.setBrand(). All scale functions
+  // read this so every font, padding, and icon shrinks or grows together.
+  static DeviceBrand _deviceBrand = DeviceBrand.other;
+
+  /// Call this from main() after reading DeviceInfoPlugin.
+  static void setBrand(DeviceBrand brand) => _deviceBrand = brand;
+
+  /// The currently detected brand (readable from anywhere).
+  static DeviceBrand get deviceBrand => _deviceBrand;
+
+  /// Per-brand multiplier applied on top of the screen-size scale.
+  /// Samsung One UI and MIUI ship with larger default UI chrome and a
+  /// textScaleFactor above 1.0 even on "Normal" — this nudge compensates
+  /// so layouts don't overflow on those devices.
+  static double _brandFactor() {
+    switch (_deviceBrand) {
+      case DeviceBrand.samsung: return 0.95;
+      case DeviceBrand.xiaomi:  return 0.97;
+      case DeviceBrand.oppo:    return 0.97;
+      case DeviceBrand.vivo:    return 0.97;
+      case DeviceBrand.pixel:   return 1.00;
+      case DeviceBrand.other:   return 1.00;
+    }
+  }
 
   // ── Legacy breakpoints (kept for tablet/desktop guards) ───────────────────
   static const double mobileBreakpoint  = 600;
@@ -45,12 +79,13 @@ class Responsive {
   static double _shortSide(BuildContext context) =>
       MediaQuery.of(context).size.shortestSide;
 
-  // ── Unified scale factor (width-driven) ──────────────────────────────────
+  // ── Unified scale factor (width-driven + brand-aware) ────────────────────
   /// All sp / rp / rs / ri use this ONE factor so they stay proportional.
   /// Clamped to [0.82, 1.20] to prevent extreme sizes on very small or
-  /// very large phones.
+  /// very large phones. Multiplied by _brandFactor() to compensate for
+  /// OEM-specific UI inflation (e.g. Samsung One UI, MIUI).
   static double scaleFactor(BuildContext context) =>
-      (_shortSide(context) / _baseW).clamp(0.82, 1.20);
+      (_shortSide(context) / _baseW * _brandFactor()).clamp(0.82, 1.20);
 
   // ── Height scale (for vertical spacing only) ──────────────────────────────
   /// Separate vertical scale so tall/short phones don't break layouts.

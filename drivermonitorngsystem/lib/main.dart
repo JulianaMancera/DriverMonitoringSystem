@@ -36,6 +36,25 @@ void main() async {
 
   await DatabaseHelper.instance.database;
 
+  // ── Brand detection — set once so Responsive uses the right scale factor ──
+  if (Platform.isAndroid) {
+    try {
+      final mfr =
+          (await DeviceInfoPlugin().androidInfo).manufacturer.toLowerCase();
+      if (mfr.contains('samsung')) {
+        Responsive.setBrand(DeviceBrand.samsung);
+      } else if (mfr.contains('xiaomi') || mfr.contains('redmi')) {
+        Responsive.setBrand(DeviceBrand.xiaomi);
+      } else if (mfr.contains('oppo') || mfr.contains('realme')) {
+        Responsive.setBrand(DeviceBrand.oppo);
+      } else if (mfr.contains('vivo')) {
+        Responsive.setBrand(DeviceBrand.vivo);
+      } else if (mfr.contains('google')) {
+        Responsive.setBrand(DeviceBrand.pixel);
+      }
+    } catch (_) {}
+  }
+
   if (Platform.isAndroid) {
     final plugin = FlutterLocalNotificationsPlugin()
         .resolvePlatformSpecificImplementation<
@@ -71,6 +90,25 @@ class BantayDriveApp extends StatelessWidget {
           ),
           useMaterial3: true,
         ),
+        // Clamp system text scale so OEM font-size settings (e.g. Samsung
+        // One UI "Normal" ships at ~1.1×) cannot inflate text past what
+        // layouts can absorb. Range 0.85–1.10 covers all real user prefs
+        // while still respecting accessibility needs.
+        builder: (context, child) {
+          final mq = MediaQuery.of(context);
+          final maxScale = Responsive.deviceBrand == DeviceBrand.samsung
+              ? 1.05   // tighter cap for Samsung One UI
+              : 1.10;
+          return MediaQuery(
+            data: mq.copyWith(
+              textScaler: mq.textScaler.clamp(
+                minScaleFactor: 0.85,
+                maxScaleFactor: maxScale,
+              ),
+            ),
+            child: child!,
+          );
+        },
         home: const EntryPoint(),
       ),
     );
