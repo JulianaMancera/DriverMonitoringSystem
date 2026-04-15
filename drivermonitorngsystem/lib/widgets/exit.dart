@@ -1,0 +1,102 @@
+// lib/widgets/exit_dialog.dart
+
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+Future<bool> showExitDialog(BuildContext context) async {
+  final result = await showDialog<bool>(
+    context: context,
+    barrierDismissible: false,
+    barrierColor: Colors.black.withValues(alpha: 0.7),
+    builder: (ctx) => const _ExitDialog(),
+  );
+  return result ?? false;
+}
+
+class _ExitDialog extends StatelessWidget {
+  const _ExitDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF0D1627),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(
+          color: const Color(0xFF00D4FF).withValues(alpha: 0.25),
+          width: 1,
+        ),
+      ),
+      title: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF00D4FF).withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.exit_to_app_rounded,
+              color: Color(0xFF00D4FF),
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Text(
+            'Exit Bantay Drive?',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+      content: Text(
+        'Monitoring will stop and all active alerts will be dismissed.',
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.6),
+          fontSize: 14,
+          height: 1.5,
+        ),
+      ),
+      actionsAlignment: MainAxisAlignment.end,
+      actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          style: TextButton.styleFrom(
+            foregroundColor: Colors.white54,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          ),
+          child: const Text('Stay', style: TextStyle(fontSize: 15)),
+        ),
+        FilledButton(
+          onPressed: () {
+            Navigator.of(context).pop(true);
+            // Exits the app completely
+            if (Platform.isAndroid) {
+              SystemNavigator.pop(); // Android: removes from recents-friendly
+            } else {
+              exit(0); // iOS / fallback
+            }
+          },
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFF00D4FF).withValues(alpha: 0.15),
+            foregroundColor: const Color(0xFF00D4FF),
+            side: const BorderSide(color: Color(0xFF00D4FF), width: 1),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          child: const Text(
+            'Exit',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    );
+  }
+}
