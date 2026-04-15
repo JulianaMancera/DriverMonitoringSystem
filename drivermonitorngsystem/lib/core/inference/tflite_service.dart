@@ -193,6 +193,11 @@ class TfliteService {
   // FIX: Use List.filled with growable:false for fixed-size output buffers.
   final List<List<double>> _t01Out = [List<double>.filled(11, 0.0)];
 
+  // Pre-allocated T01 input tensor [1][224][224][3] — filled in-place each call.
+  // Avoids the 50 000+ List allocations that were causing 3-second GC pauses.
+  // Allocated once in initialize(), never reallocated.
+  late final List<List<List<List<double>>>> _t01In;
+
   // T02 rolling feature buffer [30 frames × 7 features]
   static const int _kSeqLen  = 30;
   static const int _kNumFeat = 7;
@@ -233,6 +238,22 @@ class TfliteService {
 
       _t02!.resizeInputTensor(0, [1, _kSeqLen, _kNumFeat]);
       _t02!.allocateTensors();
+
+      // Allocate T01 input tensor once — 224×224 inner [r,g,b] lists created here,
+      // never again.  _runT01 fills them in-place with no new allocations.
+      _t01In = List.generate(
+        1,
+        (_) => List.generate(
+          224,
+          (_) => List.generate(
+            224,
+            (_) => List<double>.filled(3, 0.0, growable: false),
+            growable: false,
+          ),
+          growable: false,
+        ),
+        growable: false,
+      );
 
       _isInitialized = true;
       debugPrint('[TfliteService] ✅ T01 + T02 loaded — dual-model ready');
@@ -337,24 +358,25 @@ class TfliteService {
   // do NOT normalize to [0,1], pass raw pixel values as float32.
   List<double>? _runT01(Float32List rgbFloat32) {
     try {
-      // FIX: Build the nested input list T01 expects: [1][224][224][3]
-      // Using a flat reshaping loop is faster than nested List.generate.
+      // Fill the pre-allocated [1][224][224][3] tensor in-place.
+      // Zero new allocations — eliminates the GC pressure that caused 3-second
+      // periodic freezes (previously 50 000+ List objects were created here).
       const h = 224, w = 224;
-      final img = List.generate(
-        h,
-        (r) => List.generate(
-          w,
-          (c) {
-            final i = (r * w + c) * 3;
-            return [rgbFloat32[i], rgbFloat32[i + 1], rgbFloat32[i + 2]];
-          },
-        ),
-      );
+      for (int r = 0; r < h; r++) {
+        final row = _t01In[0][r];
+        for (int c = 0; c < w; c++) {
+          final i   = (r * w + c) * 3;
+          final px  = row[c];
+          px[0] = rgbFloat32[i];
+          px[1] = rgbFloat32[i + 1];
+          px[2] = rgbFloat32[i + 2];
+        }
+      }
 
       // Reset output buffer before each run to avoid stale values
       for (int i = 0; i < 11; i++) _t01Out[0][i] = 0.0;
 
-      _t01!.run([img], _t01Out);
+      _t01!.run(_t01In, _t01Out);
 
       // FIX: Apply softmax to T01 output.
       // tflite_flutter returns raw logits from float16 models in some cases.
@@ -394,12 +416,10 @@ class TfliteService {
       // Reset output buffer
       for (int i = 0; i < 5; i++) _t02Out[0][i] = 0.0;
 
-      final input = [
-        List<List<double>>.from(
-          _featureBuf.map((row) => List<double>.from(row)),
-        ),
-      ];
-      _t02!.run(input, _t02Out);
+      // Pass _featureBuf directly — avoids the per-call [30×7] copy.
+      // TFLite reads input synchronously before run() returns, so sharing
+      // the live buffer is safe.
+      _t02!.run([_featureBuf], _t02Out);
 
       // FIX: Apply softmax to T02 output as well.
       final t02Softmax = _softmax(List<double>.from(_t02Out[0]));
