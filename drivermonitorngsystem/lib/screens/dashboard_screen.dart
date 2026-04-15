@@ -548,6 +548,8 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_sc.hasClients && _sc.position.maxScrollExtent > 0) {
+        // Jump to absolute end so the last date label is fully visible.
+        // Using maxScrollExtent directly ensures all right padding is shown.
         _sc.jumpTo(_sc.position.maxScrollExtent);
       }
     });
@@ -568,20 +570,18 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
     if (widget.spots.length == 1) {
       spots  = [FlSpot(0, widget.spots[0].y), FlSpot(1, widget.spots[0].y)];
       labels = ['', widget.xLabels[0]];
-      maxX   = 1;
+      maxX   = 1.5;
     } else {
       spots  = widget.spots;
-      labels = widget.xLabels;
-      maxX   = (widget.spots.length - 1).toDouble().clamp(1.0, double.infinity);
+      labels = widget.xLabels;  // ← back to original, NO phantom
+      maxX   = (widget.spots.length - 1).toDouble() + 0.4; 
     }
 
     // FIX: point spacing and y-axis width responsive
     final pointSpacing = context.rp(46);
-    final yAxisWidth   = context.rp(38);
-    // FIX: was rp(14) — last date label "Apr 13" was cropped on right edge.
-    // Increased to rp(36) so the last dot + label always has room to render.
-    final rightPad     = context.rp(36);
-    final chartW       = yAxisWidth + (spots.length * pointSpacing) + rightPad;
+    final yAxisWidth   = context.rp(40);
+    final rightPad     = context.rp(40);
+    final chartW = yAxisWidth + ((spots.length - 1) * pointSpacing) + rightPad;
 
     return SingleChildScrollView(
       controller:      _sc,
@@ -616,18 +616,24 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
                   reservedSize: context.rs(34),
                   interval:     1,
                   getTitlesWidget: (value, meta) {
+                    // fl_chart calls getTitlesWidget at maxX even when it is
+                    // not integer-aligned (e.g. 6.3).  value.toInt() would map
+                    // that to the same index as the real last point at 6.0,
+                    // drawing the label twice.  Skip any non-integer value.
+                    if ((value - value.roundToDouble()).abs() > 0.01) {
+                      return const SizedBox.shrink();
+                    }
                     final idx = value.toInt();
-                    if (idx < 0 || idx >= labels.length) {
+                    // skip if out of real data range
+                    if (idx < 0 || idx >= widget.xLabels.length) {
                       return const SizedBox.shrink();
                     }
                     final text = labels[idx];
                     if (text.isEmpty) return const SizedBox.shrink();
                     return Padding(
-                      // FIX: was const EdgeInsets.only(top: 10)
                       padding: EdgeInsets.only(top: context.rs(8)),
                       child: Text(text, style: TextStyle(
                           color: const Color(0xFF64748b),
-                          // FIX: was hardcoded 10.5
                           fontSize: context.sp(10))),
                     );
                   },
@@ -640,7 +646,7 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
                   reservedSize: yAxisWidth,
                   getTitlesWidget: (value, meta) {
                     final v = value.toInt();
-                    // FIX: only show 0,20,40,60,80,100 — not 112 (our breathing room)
+                    // FIX: only show 0,20,40,60,80,100 
                     if (v < 0 || v > 100 || v % 20 != 0) {
                       return const SizedBox.shrink();
                     }
@@ -687,11 +693,15 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
             lineTouchData: LineTouchData(
               touchTooltipData: LineTouchTooltipData(
                 getTooltipColor: (_) => const Color(0xFF0f172a),
-                // FIX: was hardcoded BorderRadius.circular(12)
                 tooltipBorderRadius: BorderRadius.circular(context.rp(12)),
-                // FIX: was const EdgeInsets.symmetric(horizontal:12, vertical:8)
                 tooltipPadding: EdgeInsets.symmetric(
                     horizontal: context.rp(12), vertical: context.rs(8)),
+                // FIX: Always keep tooltip inside the chart drawing area.
+                // Without these, tooltip is clipped on Samsung/Xiaomi when
+                // score is near 100% (tooltip goes above the top boundary)
+                // or when the last point is near the right edge.
+                fitInsideHorizontally: true,
+                fitInsideVertically:   true,
                 getTooltipItems: (touchedSpots) =>
                     touchedSpots.map((s) {
                   final idx   = s.x.toInt();
