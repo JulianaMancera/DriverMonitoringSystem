@@ -340,7 +340,10 @@ class _LineCard extends StatelessWidget {
                   style: TextStyle(color: const Color(0xFF475569),
                       fontSize: ctx.sp(10))),
             ]),
-          ] : []),
+            SizedBox(height: ctx.rs(8)),
+          ] : [
+            SizedBox(height: ctx.rs(8)),
+          ]),
         ]),
       ),
     );
@@ -562,6 +565,7 @@ class _BarCard extends StatelessWidget {
                 style: TextStyle(color: const Color(0xFF475569),
                     fontSize: ctx.sp(10))),
           ]),
+          SizedBox(height: ctx.rs(8)),
         ]),
       ),
     );
@@ -670,9 +674,7 @@ class _BarCard extends StatelessWidget {
     for (final r in hourlyDist) {
       m[r['hour'] as int] = r['count'] as int;
     }
-    return List.generate(24, (h) => {'hour': h, 'count': m[h] ?? 0})
-        .where((r) => (r['count'] as int) > 0 || (r['hour'] as int) >= 6)
-        .toList();
+    return List.generate(24, (h) => {'hour': h, 'count': m[h] ?? 0});
   }
 
   static String _hLabel(int h) {
@@ -786,8 +788,11 @@ class _ChartModal extends StatelessWidget {
   Widget build(BuildContext context) {
     final landscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
-    final h = MediaQuery.of(context).size.height *
-        (landscape ? 0.95 : 0.85);
+    final mq = MediaQuery.of(context);
+    // Use 0.92 in portrait so the modal is taller, giving the chart and
+    // the bottom hint row more room on all devices (including Samsung with
+    // button-style navigation).
+    final h = mq.size.height * (landscape ? 0.95 : 0.92);
 
     return Container(
       height: h,
@@ -840,7 +845,12 @@ class _ChartModal extends StatelessWidget {
         Expanded(
           child: Padding(
             padding: EdgeInsets.fromLTRB(
-                context.rp(16), 0, context.rp(16), context.rs(16)),
+                context.rp(16), 0, context.rp(16),
+                // useSafeArea:true positions the sheet above the nav bar and
+                // sets padding.bottom = 0 inside the modal; use a larger fixed
+                // clearance so the bottom hint/label is never flush with the
+                // sheet edge on small or button-nav devices.
+                context.rs(24)),
             child: child,
           ),
         ),
