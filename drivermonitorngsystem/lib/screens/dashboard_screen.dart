@@ -91,9 +91,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final bool hasAnySessions = dailyScores.isNotEmpty;
 
     String scoreLabel = 'EXCELLENT';
-    if (safetyScore < 60)      scoreLabel = 'POOR';
-    else if (safetyScore < 75) scoreLabel = 'FAIR';
-    else if (safetyScore < 90) scoreLabel = 'GOOD';
+     if (safetyScore < 60) {
+          scoreLabel = "POOR";
+      } else if (safetyScore < 75) {
+          scoreLabel = "FAIR";
+      } else if (safetyScore < 90) {
+          scoreLabel = "GOOD";
+      }
 
     final isMobile = Responsive.isMobile(context);
 
