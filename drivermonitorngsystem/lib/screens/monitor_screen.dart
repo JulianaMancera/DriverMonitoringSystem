@@ -136,10 +136,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   DateTime _lastInferTs  = DateTime.fromMillisecondsSinceEpoch(0);
   static const int _kInferThrottleMs = 200;
 
-  bool     _isInferring  = false;
-  DateTime _lastFrameTs  = DateTime.fromMillisecondsSinceEpoch(0);
-  Timer?   _cameraWatchdog;
-
   // ─── LIFECYCLE ─────────────────────────────────────────────────────────────
 
   @override
@@ -170,7 +166,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _snapshotTimer?.cancel();
-    _cameraWatchdog?.cancel();
     _warningController.dispose();
     _notifController?.dispose();
     _camDisposing = true;
@@ -213,86 +208,16 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   Future<void> _resumeCameraStream() async {
-    if (_camDisposing) return;
-    if (!ref.read(isRecordingProvider)) {
-      if (mounted) setState(() {});
-      return;
-    }
-    // Controller gone or not initialized — needs a full reinit
-    if (_cameraController == null ||
-        !_cameraController!.value.isInitialized) {
-      await _reinitCameraForRecovery();
-      return;
-    }
+    if (_cameraController == null || _camDisposing) return;
+    if (!ref.read(isRecordingProvider)) return;
     try {
       if (!_cameraController!.value.isStreamingImages) {
         await _cameraController!.startImageStream(_onCameraFrame);
-        _lastFrameTs = DateTime.now();
       }
     } catch (e) {
-      debugPrint('[Camera] resumeStream error: $e — reinitializing');
-      await _reinitCameraForRecovery();
-      return;
+      debugPrint('[Camera] resumeStream error: $e');
     }
     if (mounted) setState(() {});
-  }
-
-  // ─── CAMERA RECOVERY ─────────────────────────────────────────────────────
-
-  void _startCameraWatchdog() {
-    _cameraWatchdog?.cancel();
-    _cameraWatchdog = Timer.periodic(
-        const Duration(seconds: 5), (_) => _checkCameraHealth());
-  }
-
-  Future<void> _checkCameraHealth() async {
-    if (!mounted || _camDisposing || !ref.read(isRecordingProvider)) return;
-    final staleMs = DateTime.now().difference(_lastFrameTs).inMilliseconds;
-    if (staleMs > 4000) {
-      debugPrint('[Camera] Watchdog: no frame for ${staleMs}ms — recovering');
-      await _recoverCameraStream();
-    }
-  }
-
-  Future<void> _recoverCameraStream() async {
-    if (_camDisposing || _cameraController == null) return;
-    try {
-      if (_cameraController!.value.isStreamingImages) {
-        await _cameraController!.stopImageStream();
-      }
-      await Future.delayed(const Duration(milliseconds: 300));
-      if (!_camDisposing && mounted && ref.read(isRecordingProvider)) {
-        await _cameraController!.startImageStream(_onCameraFrame);
-        _lastFrameTs = DateTime.now();
-      }
-    } catch (e) {
-      debugPrint('[Camera] Stream recovery failed: $e — doing full reinit');
-      await _reinitCameraForRecovery();
-    }
-  }
-
-  Future<void> _reinitCameraForRecovery() async {
-    if (!mounted || _camDisposing) return;
-    final old = _cameraController;
-    _cameraController = null;
-    if (mounted) setState(() => _cameraInitialized = false);
-    try {
-      if (old?.value.isStreamingImages == true) await old!.stopImageStream();
-      await old?.dispose();
-    } catch (_) {}
-    if (!mounted || _camDisposing) return;
-    await _initCamera();
-    if (mounted && !_camDisposing &&
-        ref.read(isRecordingProvider) && _cameraInitialized) {
-      try {
-        if (!_cameraController!.value.isStreamingImages) {
-          await _cameraController!.startImageStream(_onCameraFrame);
-          _lastFrameTs = DateTime.now();
-        }
-      } catch (e) {
-        debugPrint('[Camera] Failed to restart stream after reinit: $e');
-      }
-    }
   }
 
   // ─── CAMERA ───────────────────────────────────────────────────────────────
@@ -363,7 +288,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       try {
         if (!_cameraController!.value.isStreamingImages) {
           await _cameraController!.startImageStream(_onCameraFrame);
-          _lastFrameTs = DateTime.now();
         }
       } catch (e) {
         _addLogSync('Inference stream error: $e', 'WARNING');
@@ -373,11 +297,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(isRecordingProvider.notifier).set(true);
     ref.read(driverStateProvider.notifier).set('neutral');
     _startNotificationWithRetry();
-    _startCameraWatchdog();
 
     _addLogSync('System Initialized', 'INFO');
     _addLogSync(
-      _modelLoaded ? 'DMS-HybridNet Active (T01+T02)' : 'Demo Mode — No Model',
+      _modelLoaded ? 'DMS-HybridNet V3 Active' : 'Demo Mode — No Model',
       _modelLoaded ? 'SUCCESS' : 'WARNING',
     );
     _addLogSync('Monitoring Started', 'INFO');
@@ -404,7 +327,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   Future<void> _stopRecording() async {
     if (_currentSessionId == null) return;
     _snapshotTimer?.cancel();
-    _cameraWatchdog?.cancel();
     await _pauseCameraStream();
     await _alarmPlayer.stop();
     _alertLevel            = 0;
@@ -418,21 +340,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final alerts =
         await DatabaseHelper.instance.getAlertsBySession(_currentSessionId!);
     double penalty = 0.0;
-      for (final a in alerts) {
-        final level = (a['alert_level'] as int?) ?? 1;
-        switch (level) {
-          case 1:
-            penalty += 1.5;   
-            break;
-          case 2:
-            penalty += 3.0;   
-            break;
-          default:
-            penalty += 6.0;  
-        }
-      }
-
-    final safetyScore = (100.0 - penalty).clamp(0.0, 100.0);
+    for (final a in alerts) {
+      final level = (a['alert_level'] as int?) ?? 1;
+      if (level == 1)      penalty += 2.0;
+      else if (level == 2) penalty += 4.0;
+      else                 penalty += 8.0;
+    }
+    final safetyScore = (alertness - penalty).clamp(0.0, 100.0);
 
     await DatabaseHelper.instance.endSession(
       sessionId:    _currentSessionId!,
@@ -459,20 +373,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   Future<void> _onCameraFrame(CameraImage frame) async {
     if (_camDisposing) return;
-    _lastFrameTs = DateTime.now(); // heartbeat for watchdog
-    if (_isInferring) return;      // drop frame if previous inference still running
-    final now = _lastFrameTs;
+    final now = DateTime.now();
     if (now.difference(_lastInferTs).inMilliseconds < _kInferThrottleMs) return;
     _lastInferTs = now;
     if (!mounted || !ref.read(isRecordingProvider)) return;
-    _isInferring = true;
-    try {
-      final result = await TfliteService.instance.runInference(frame);
-      if (result == null) return;
-      if (mounted && ref.read(isRecordingProvider)) onModelOutput(result);
-    } finally {
-      _isInferring = false;
-    }
+    final result = await TfliteService.instance.runInference(frame);
+    if (result == null) return;
+    if (mounted && ref.read(isRecordingProvider)) onModelOutput(result);
   }
 
   void onModelOutput(InferenceResult r) {
@@ -532,17 +439,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (consecutive < thresholds[0]) return;
 
     int newLevel = 1;
+    if (consecutive >= thresholds[2])      newLevel = 3;
+    else if (consecutive >= thresholds[1]) newLevel = 2;
 
-      if (consecutive >= thresholds[2]) {
-        newLevel = 3;
-      } else if (consecutive >= thresholds[1]) {
-        newLevel = 2;
-      }
-
-      if (newLevel > _alertLevel) {
-        _alertLevel = newLevel;
-      }
-
+    // Only trigger if this is a NEW or HIGHER alert level
+    if (newLevel <= _alertLevel) return;
+    _alertLevel = newLevel;
 
     ref.read(showAlertBannerProvider.notifier).set(true);
     ref.read(alertBannerTypeProvider.notifier).set(type);
@@ -1245,7 +1147,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      useSafeArea: true,
       builder: (_) => Container(
         padding: EdgeInsets.fromLTRB(
             // FIX: was const EdgeInsets.fromLTRB(20, 12, 20, 32)
