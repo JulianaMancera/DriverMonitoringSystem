@@ -219,17 +219,20 @@ final deviceNameProvider = FutureProvider<String>((ref) async {
 
 // ─── MAIN SHELL ───────────────────────────────────────────────────────────────
 
-class MainShell extends ConsumerWidget {
+cclass MainShell extends ConsumerStatefulWidget {
   const MainShell({super.key});
-
+  @override
+  ConsumerState<MainShell> createState() => _MainShellState();
+}
+ 
+class _MainShellState extends ConsumerState<MainShell> {
+  // ── NEW: controls whether AppBar/nav are visible in landscape-monitor ──
+  bool _uiVisible = true;
+ 
   static const List<String> _titles = [
-    'Dashboard',
-    'Monitor',
-    'Analytics',
-    'History',
-    'Settings',
+    'Dashboard', 'Monitor', 'Analytics', 'History', 'Settings',
   ];
-
+ 
   static final List<Widget> _screens = [
     const DashboardScreen(),
     const MonitorScreen(),
@@ -237,155 +240,215 @@ class MainShell extends ConsumerWidget {
     const HistoryScreen(),
     const SettingsScreen(),
   ];
-
+ 
   static const List<_NavData> _navItems = [
-    _NavData(icon: Icons.home_rounded, label: 'Home'),
-    _NavData(icon: Icons.videocam_rounded, label: 'Monitor'),
+    _NavData(icon: Icons.home_rounded,      label: 'Home'),
+    _NavData(icon: Icons.videocam_rounded,  label: 'Monitor'),
     _NavData(icon: Icons.bar_chart_rounded, label: 'Analytics'),
-    _NavData(icon: Icons.history_rounded, label: 'History'),
-    _NavData(icon: Icons.settings_rounded, label: 'Settings'),
+    _NavData(icon: Icons.history_rounded,   label: 'History'),
+    _NavData(icon: Icons.settings_rounded,  label: 'Settings'),
   ];
-
+ 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final currentIndex = ref.watch(navIndexProvider);
-    final isRecording = ref.watch(isRecordingProvider);
-    final sidebarOpen = ref.watch(sidebarOpenProvider);
-    final isLandscape =
+    final isRecording  = ref.watch(isRecordingProvider);
+    final sidebarOpen  = ref.watch(sidebarOpenProvider);
+    final isLandscape  =
         MediaQuery.of(context).orientation == Orientation.landscape;
-
+ 
     final deviceName = ref.watch(deviceNameProvider).when(
-          data: (name) => name,
-          loading: () => 'USER',
-          error: (err, stack) => 'USER',
-        );
-
-    final isMonitor = currentIndex == 1;
-    final isTransparent = isLandscape && isMonitor;
-
-    // ─── EXIT INTERCEPT ───────────────────────────────────────────────────────
+      data:    (name) => name,
+      loading: () => 'USER',
+      error:   (_, __) => 'USER',
+    );
+ 
+    final isMonitor     = currentIndex == 1;
+    // ── In landscape+monitor the shell becomes "cinematic" by default ──
+    final isCinematic   = isLandscape && isMonitor;
+    // AppBar is transparent overlay when cinematic
+    final isTransparent = isCinematic;
+ 
+    // ── Tap anywhere on the body to toggle chrome visibility ──────────────
+    Widget body = isLandscape
+        ? _LandscapeSidebarLayout(
+            sidebarOpen:  sidebarOpen,
+            currentIndex: currentIndex,
+            navItems:     _navItems,
+            screens:      _screens,
+            onNavTap: (i) {
+              ref.read(navIndexProvider.notifier).set(i);
+              // Switching away from monitor → always show UI
+              if (i != 1) setState(() => _uiVisible = true);
+            },
+          )
+        : IndexedStack(index: currentIndex, children: _screens);
+ 
+    if (isCinematic) {
+      body = GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () => setState(() => _uiVisible = !_uiVisible),
+        child: body,
+      );
+    }
+ 
+    // ── When cinematic + hidden, show only a small "tap hint" ─────────────
+    final showChrome = !isCinematic || _uiVisible;
+ 
     return PopScope(
       canPop: false,
-      onPopInvokedWithResult: (didPop, result) async {
+      onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
         await showExitDialog(context);
       },
-      // ─── SCAFFOLD ─────────────────────────────────────────────────────────
       child: Scaffold(
         backgroundColor: const Color(0xFF080E1A),
         extendBodyBehindAppBar: isTransparent,
-        appBar: PreferredSize(
-          preferredSize: Size.fromHeight(isLandscape ? 46 : 60),
-          child: AppBar(
-            backgroundColor: isTransparent
-                ? const Color(0xFF0D1627).withValues(alpha: 0.55)
-                : const Color(0xFF0D1627),
-            elevation: 0,
-            centerTitle: false,
-            leading: isLandscape
-                ? IconButton(
-                    icon: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 250),
-                      transitionBuilder: (child, anim) => RotationTransition(
-                        turns: Tween(begin: 0.875, end: 1.0).animate(anim),
-                        child: FadeTransition(opacity: anim, child: child),
-                      ),
-                      child: Icon(
-                        sidebarOpen ? Icons.close_rounded : Icons.menu_rounded,
-                        key: ValueKey(sidebarOpen),
-                        color: Colors.white,
-                        size: 26,
-                      ),
-                    ),
-                    onPressed: () =>
-                        ref.read(sidebarOpenProvider.notifier).toggle(),
-                  )
-                : null,
-            title: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  _titles[currentIndex],
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: isLandscape ? 18 : 26,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.5,
-                  ),
-                ),
-                RichText(
-                  text: TextSpan(
-                    text: 'Connected: ',
-                    style: TextStyle(
-                      color: Colors.white54,
-                      fontSize: isLandscape ? 10 : 13,
-                    ),
+        // ── AppBar: animate in/out ─────────────────────────────────────────
+        appBar: showChrome
+            ? PreferredSize(
+                preferredSize: Size.fromHeight(isLandscape ? 46 : 60),
+                child: AppBar(
+                  backgroundColor: isTransparent
+                      ? const Color(0xFF0D1627).withValues(alpha: 0.55)
+                      : const Color(0xFF0D1627),
+                  elevation: 0,
+                  centerTitle: false,
+                  leading: isLandscape
+                      ? IconButton(
+                          icon: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 250),
+                            transitionBuilder: (child, anim) => RotationTransition(
+                              turns: Tween(begin: 0.875, end: 1.0).animate(anim),
+                              child: FadeTransition(opacity: anim, child: child),
+                            ),
+                            child: Icon(
+                              sidebarOpen
+                                  ? Icons.close_rounded
+                                  : Icons.menu_rounded,
+                              key: ValueKey(sidebarOpen),
+                              color: Colors.white,
+                              size: 26,
+                            ),
+                          ),
+                          onPressed: () =>
+                              ref.read(sidebarOpenProvider.notifier).toggle(),
+                        )
+                      : null,
+                  title: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      TextSpan(
-                        text: deviceName,
-                        style: const TextStyle(
-                          color: Color(0xFF00D4FF),
-                          fontWeight: FontWeight.w600,
+                      Text(
+                        _titles[currentIndex],
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: isLandscape ? 18 : 26,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      RichText(
+                        text: TextSpan(
+                          text: 'Connected: ',
+                          style: TextStyle(
+                            color: Colors.white54,
+                            fontSize: isLandscape ? 10 : 13,
+                          ),
+                          children: [
+                            TextSpan(
+                              text: deviceName,
+                              style: const TextStyle(
+                                color: Color(0xFF00D4FF),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
+                  actions: [
+                    Padding(
+                      padding: EdgeInsets.only(right: context.rp(20)),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 400),
+                        curve: Curves.easeInOut,
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: isRecording
+                              ? const Color(0xFF00FF88)
+                              : const Color(0xFF3A4A5C),
+                          shape: BoxShape.circle,
+                          boxShadow: isRecording
+                              ? [BoxShadow(
+                                  color: const Color(0xFF00FF88)
+                                      .withValues(alpha: 0.6),
+                                  blurRadius: 8,
+                                  spreadRadius: 1,
+                                )]
+                              : [],
+                        ),
+                      ),
+                    ),
+                  ],
+                  bottom: isTransparent
+                      ? null
+                      : PreferredSize(
+                          preferredSize: const Size.fromHeight(1),
+                          child: Container(
+                            height: 1,
+                            color: Colors.white.withValues(alpha: 0.05),
+                          ),
+                        ),
                 ),
-              ],
-            ),
-            actions: [
-              Padding(
-                padding: EdgeInsets.only(right: context.rp(20)),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 400),
-                  curve: Curves.easeInOut,
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    color: isRecording
-                        ? const Color(0xFF00FF88)
-                        : const Color(0xFF3A4A5C),
-                    shape: BoxShape.circle,
-                    boxShadow: isRecording
-                        ? [
-                            BoxShadow(
-                              color: const Color(0xFF00FF88)
-                                  .withValues(alpha: 0.6),
-                              blurRadius: 8,
-                              spreadRadius: 1,
-                            ),
-                          ]
-                        : [],
+              )
+            : null, // AppBar hidden → camera takes full screen
+ 
+        body: SafeArea(
+          top: !isTransparent,
+          child: Stack(children: [
+            body,
+            // ── "Tap to show controls" hint when chrome is hidden ─────────
+            if (isCinematic && !_uiVisible)
+              Positioned(
+                bottom: context.rs(24),
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: IgnorePointer( // GestureDetector above handles tap
+                    child: AnimatedOpacity(
+                      opacity: 0.55,
+                      duration: const Duration(milliseconds: 300),
+                      child: Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: context.rp(14),
+                          vertical:   context.rs(6),
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(context.rp(20)),
+                        ),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.touch_app_rounded,
+                              size: context.ri(14),
+                              color: Colors.white60),
+                          SizedBox(width: context.rp(6)),
+                          Text('Tap to show controls',
+                              style: TextStyle(
+                                color:    Colors.white60,
+                                fontSize: context.sp(11),
+                              )),
+                        ]),
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ],
-            bottom: isTransparent
-                ? null
-                : PreferredSize(
-                    preferredSize: const Size.fromHeight(1),
-                    child: Container(
-                      height: 1,
-                      color: Colors.white.withValues(alpha: 0.05),
-                    ),
-                  ),
-          ),
+          ]),
         ),
-        body: SafeArea(
-          top: !isTransparent,
-          child: isLandscape
-              ? _LandscapeSidebarLayout(
-                  sidebarOpen: sidebarOpen,
-                  currentIndex: currentIndex,
-                  navItems: _navItems,
-                  screens: _screens,
-                  onNavTap: (i) {
-                    ref.read(navIndexProvider.notifier).set(i);
-                  },
-                )
-              : IndexedStack(index: currentIndex, children: _screens),
-        ),
+ 
         bottomNavigationBar: isLandscape
             ? null
             : _BottomNav(
