@@ -56,12 +56,13 @@ const List<String> kClassNames = [
 enum ModelSource { v3 }
 String modelSourceLabel(ModelSource src) => 'V3 HybridNet';
 
-// ── Alert debounce thresholds (per integration spec) ─────────────────────────
-// 65%/10 frames (from spec) is for real MediaPipe landmarks.
-// With luminance proxy features confidence rarely exceeds 50% for non-neutral.
-// 30%/3 frames is responsive while still filtering random flicker.
-const double _kConfidenceThreshold  = 0.30;
-const int    _kConsecutiveThreshold = 3;
+// ── Alert debounce thresholds ────────────────────────────────────────────────
+// Tuned from logcat analysis:
+// • When safe: distracted group ~75% spread across many classes (each 15-25%)
+// • True detection: ONE class dominates at 45%+, group > 70%
+// • Consecutive frames required: 5 to filter single-frame flickers
+const double _kConfidenceThreshold  = 0.30; // kept for soft debounce decay
+const int    _kConsecutiveThreshold = 5;    // 5 frames to confirm
 
 // ── Temporal buffer constants ─────────────────────────────────────────────────
 const int _kSeqLen  = 30; // 30-frame rolling window
@@ -119,14 +120,14 @@ class TfliteService {
   int  _consecutiveUnsafe = 0;
 
   // Minimum gap between inference calls (~5 FPS on mid-range phones)
-  static const int _kMinInferenceGapMs = 200;
+  static const int _kMinInferenceGapMs = 300; // ~3 FPS — stable on mid-range
 
   // ── Pre-allocated nested spatial input [1][224][224][3] ─────────────────
   // runForMultipleInputs infers tensor shape from List nesting depth.
   // A flat Float32List is treated as 1D [150528] → causes dims!=4 error.
   // Nested 4-level list correctly maps to [1, 224, 224, 3].
   // Allocated once in initialize(), filled in-place each frame.
-  late final List<List<List<List<double>>>> _spatialNested;
+  List<List<List<List<double>>>>? _spatialNested;
 
   // ── Output buffer [1][12] ─────────────────────────────────────────────────
   final List<List<double>> _outputBuf = [List<double>.filled(12, 0.0)];
@@ -152,7 +153,6 @@ class TfliteService {
       _interpreter!.allocateTensors();
 
       // Pre-allocate nested spatial tensor [1][224][224][3].
-      // Using List.generate so each inner list is a separate allocation.
       _spatialNested = List.generate(
         1,
         (_) => List.generate(
@@ -184,9 +184,11 @@ class TfliteService {
     _interpreter?.close();
     _interpreter       = null;
     _isInitialized     = false;
-    _isRunning         = false;
+    _isRunning         = false;  // reset lock so next init works
     _bufFill           = 0;
     _consecutiveUnsafe = 0;
+    _lastInferenceMs   = 0;
+    debugPrint('[TfliteService] disposed');
   }
 
   // ── Main inference entry point ────────────────────────────────────────────
@@ -201,6 +203,8 @@ class TfliteService {
     _isRunning = true;
     try {
       // ── Step 1: Preprocess in background isolate ──────────────────────────
+      // Note: CameraImage on Android always delivers in sensor orientation
+      // (width = wider dimension). The resize handles any aspect ratio correctly.
       final prep = await compute(
         _preprocessFrameV3,
         _PrepInput(
@@ -223,7 +227,7 @@ class TfliteService {
       const h = 224, w = 224;
       final flat = prep.rgbNormalized;
       for (int r = 0; r < h; r++) {
-        final row = _spatialNested[0][r];
+        final row = _spatialNested![0][r];
         for (int c = 0; c < w; c++) {
           final i  = (r * w + c) * 3;
           final px = row[c];
@@ -247,7 +251,7 @@ class TfliteService {
       for (int i = 0; i < 12; i++) { _outputBuf[0][i] = 0.0; }
 
       _interpreter!.runForMultipleInputs(
-        <Object>[temporalNested, _spatialNested],
+        <Object>[temporalNested, _spatialNested!],
         <int, Object>{0: _outputBuf},
       );
 
@@ -321,18 +325,21 @@ class TfliteService {
       }
     }
 
-    // ── Decision rules (tuned from logcat observations) ───────────────────
-    // DROWSY:     drowsy group ≥ 38% — only 3 drowsy classes so they pool well
-    // DISTRACTED: distracted group ≥ 60% AND top class ≥ 38%
-    //             → requires BOTH high total AND one dominant class
-    //             → prevents false positive when spread across many classes
-    // NEUTRAL:    everything else
+    // ── Decision rules (tuned from logcat analysis) ──────────────────────
+    // When safe/neutral: model spreads ~80% across ALL distracted classes,
+    // each getting 15-25% with no dominant winner.
+    // True DROWSY:     3 classes pool → group easily hits 45%+
+    // True DISTRACTED: one class dominates at 45%+ AND group > 70%
+    // NEUTRAL:         anything that doesn't meet the above strict criteria
+    //
+    // Thresholds are intentionally strict because false positives are worse
+    // than missed detections for a thesis demo (alarming when safe = bad UX).
     String rawState;
     int    bestIdx;
-    if (drowsyPct >= 38.0) {
+    if (drowsyPct >= 45.0) {
       rawState = 'drowsy';
       bestIdx  = bestDrowsyIdx;
-    } else if (distractedPct >= 60.0 && bestDistScore >= 38.0) {
+    } else if (distractedPct >= 70.0 && bestDistScore >= 45.0) {
       rawState = 'distracted';
       bestIdx  = bestDistIdx;
     } else {
