@@ -219,20 +219,25 @@ final deviceNameProvider = FutureProvider<String>((ref) async {
 
 // ─── MAIN SHELL ───────────────────────────────────────────────────────────────
 
-cclass MainShell extends ConsumerStatefulWidget {
+class MainShell extends ConsumerStatefulWidget {
   const MainShell({super.key});
+
   @override
   ConsumerState<MainShell> createState() => _MainShellState();
 }
- 
+
 class _MainShellState extends ConsumerState<MainShell> {
-  // ── NEW: controls whether AppBar/nav are visible in landscape-monitor ──
+  // Controls whether the AppBar/nav chrome is visible in landscape+monitor
   bool _uiVisible = true;
- 
+
   static const List<String> _titles = [
-    'Dashboard', 'Monitor', 'Analytics', 'History', 'Settings',
+    'Dashboard',
+    'Monitor',
+    'Analytics',
+    'History',
+    'Settings',
   ];
- 
+
   static final List<Widget> _screens = [
     const DashboardScreen(),
     const MonitorScreen(),
@@ -240,15 +245,15 @@ class _MainShellState extends ConsumerState<MainShell> {
     const HistoryScreen(),
     const SettingsScreen(),
   ];
- 
+
   static const List<_NavData> _navItems = [
-    _NavData(icon: Icons.home_rounded,      label: 'Home'),
-    _NavData(icon: Icons.videocam_rounded,  label: 'Monitor'),
+    _NavData(icon: Icons.home_rounded, label: 'Home'),
+    _NavData(icon: Icons.videocam_rounded, label: 'Monitor'),
     _NavData(icon: Icons.bar_chart_rounded, label: 'Analytics'),
-    _NavData(icon: Icons.history_rounded,   label: 'History'),
-    _NavData(icon: Icons.settings_rounded,  label: 'Settings'),
+    _NavData(icon: Icons.history_rounded, label: 'History'),
+    _NavData(icon: Icons.settings_rounded, label: 'Settings'),
   ];
- 
+
   @override
   Widget build(BuildContext context) {
     final currentIndex = ref.watch(navIndexProvider);
@@ -256,20 +261,19 @@ class _MainShellState extends ConsumerState<MainShell> {
     final sidebarOpen  = ref.watch(sidebarOpenProvider);
     final isLandscape  =
         MediaQuery.of(context).orientation == Orientation.landscape;
- 
+
     final deviceName = ref.watch(deviceNameProvider).when(
       data:    (name) => name,
       loading: () => 'USER',
       error:   (_, __) => 'USER',
     );
- 
-    final isMonitor     = currentIndex == 1;
-    // ── In landscape+monitor the shell becomes "cinematic" by default ──
-    final isCinematic   = isLandscape && isMonitor;
-    // AppBar is transparent overlay when cinematic
-    final isTransparent = isCinematic;
- 
-    // ── Tap anywhere on the body to toggle chrome visibility ──────────────
+
+    final isMonitor   = currentIndex == 1;
+    // Cinematic = landscape + on Monitor tab → chrome can be hidden
+    final isCinematic = isLandscape && isMonitor;
+    final showChrome  = !isCinematic || _uiVisible;
+
+    // Body content
     Widget body = isLandscape
         ? _LandscapeSidebarLayout(
             sidebarOpen:  sidebarOpen,
@@ -283,7 +287,8 @@ class _MainShellState extends ConsumerState<MainShell> {
             },
           )
         : IndexedStack(index: currentIndex, children: _screens);
- 
+
+    // In cinematic mode, tap anywhere to toggle chrome
     if (isCinematic) {
       body = GestureDetector(
         behavior: HitTestBehavior.translucent,
@@ -291,25 +296,23 @@ class _MainShellState extends ConsumerState<MainShell> {
         child: body,
       );
     }
- 
-    // ── When cinematic + hidden, show only a small "tap hint" ─────────────
-    final showChrome = !isCinematic || _uiVisible;
- 
+
     return PopScope(
       canPop: false,
-      onPopInvokedWithResult: (didPop, _) async {
+      onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
         await showExitDialog(context);
       },
       child: Scaffold(
         backgroundColor: const Color(0xFF080E1A),
-        extendBodyBehindAppBar: isTransparent,
-        // ── AppBar: animate in/out ─────────────────────────────────────────
+        // When chrome is hidden the camera should fill behind where AppBar was
+        extendBodyBehindAppBar: true,
+
         appBar: showChrome
             ? PreferredSize(
                 preferredSize: Size.fromHeight(isLandscape ? 46 : 60),
                 child: AppBar(
-                  backgroundColor: isTransparent
+                  backgroundColor: isCinematic
                       ? const Color(0xFF0D1627).withValues(alpha: 0.55)
                       : const Color(0xFF0D1627),
                   elevation: 0,
@@ -318,9 +321,12 @@ class _MainShellState extends ConsumerState<MainShell> {
                       ? IconButton(
                           icon: AnimatedSwitcher(
                             duration: const Duration(milliseconds: 250),
-                            transitionBuilder: (child, anim) => RotationTransition(
-                              turns: Tween(begin: 0.875, end: 1.0).animate(anim),
-                              child: FadeTransition(opacity: anim, child: child),
+                            transitionBuilder: (child, anim) =>
+                                RotationTransition(
+                              turns: Tween(begin: 0.875, end: 1.0)
+                                  .animate(anim),
+                              child:
+                                  FadeTransition(opacity: anim, child: child),
                             ),
                             child: Icon(
                               sidebarOpen
@@ -382,18 +388,20 @@ class _MainShellState extends ConsumerState<MainShell> {
                               : const Color(0xFF3A4A5C),
                           shape: BoxShape.circle,
                           boxShadow: isRecording
-                              ? [BoxShadow(
-                                  color: const Color(0xFF00FF88)
-                                      .withValues(alpha: 0.6),
-                                  blurRadius: 8,
-                                  spreadRadius: 1,
-                                )]
+                              ? [
+                                  BoxShadow(
+                                    color: const Color(0xFF00FF88)
+                                        .withValues(alpha: 0.6),
+                                    blurRadius: 8,
+                                    spreadRadius: 1,
+                                  ),
+                                ]
                               : [],
                         ),
                       ),
                     ),
                   ],
-                  bottom: isTransparent
+                  bottom: isCinematic
                       ? null
                       : PreferredSize(
                           preferredSize: const Size.fromHeight(1),
@@ -404,22 +412,23 @@ class _MainShellState extends ConsumerState<MainShell> {
                         ),
                 ),
               )
-            : null, // AppBar hidden → camera takes full screen
- 
+            : null, // AppBar hidden — camera fills the screen
+
         body: SafeArea(
-          top: !isTransparent,
+          top: !isCinematic,
           child: Stack(children: [
             body,
-            // ── "Tap to show controls" hint when chrome is hidden ─────────
+
+            // "Tap to show controls" hint shown when chrome is hidden
             if (isCinematic && !_uiVisible)
               Positioned(
                 bottom: context.rs(24),
                 left: 0,
                 right: 0,
                 child: Center(
-                  child: IgnorePointer( // GestureDetector above handles tap
+                  child: IgnorePointer(
                     child: AnimatedOpacity(
-                      opacity: 0.55,
+                      opacity: 0.60,
                       duration: const Duration(milliseconds: 300),
                       child: Container(
                         padding: EdgeInsets.symmetric(
@@ -428,19 +437,25 @@ class _MainShellState extends ConsumerState<MainShell> {
                         ),
                         decoration: BoxDecoration(
                           color: Colors.black.withValues(alpha: 0.45),
-                          borderRadius: BorderRadius.circular(context.rp(20)),
+                          borderRadius:
+                              BorderRadius.circular(context.rp(20)),
                         ),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(Icons.touch_app_rounded,
-                              size: context.ri(14),
-                              color: Colors.white60),
-                          SizedBox(width: context.rp(6)),
-                          Text('Tap to show controls',
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.touch_app_rounded,
+                                size:  context.ri(14),
+                                color: Colors.white60),
+                            SizedBox(width: context.rp(6)),
+                            Text(
+                              'Tap to show controls',
                               style: TextStyle(
                                 color:    Colors.white60,
                                 fontSize: context.sp(11),
-                              )),
-                        ]),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -448,7 +463,7 @@ class _MainShellState extends ConsumerState<MainShell> {
               ),
           ]),
         ),
- 
+
         bottomNavigationBar: isLandscape
             ? null
             : _BottomNav(
@@ -530,14 +545,15 @@ class _LandscapeSidebar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isMonitor = currentIndex == 1;
-    final appBarH = isMonitor ? 89.0 : 8.0;
-    final screenH = MediaQuery.of(context).size.height;
+    final appBarH   = isMonitor ? 89.0 : 8.0;
+    final screenH   = MediaQuery.of(context).size.height;
     final available = screenH - appBarH - 16;
     final needsScroll = available < 240;
 
     return Container(
       color: const Color(0xFF0D1627),
-      padding: EdgeInsets.only(top: appBarH, bottom: 16, left: 12, right: 12),
+      padding:
+          EdgeInsets.only(top: appBarH, bottom: 16, left: 12, right: 12),
       child: SingleChildScrollView(
         physics: needsScroll
             ? const ClampingScrollPhysics()
@@ -547,22 +563,22 @@ class _LandscapeSidebar extends StatelessWidget {
           children: [
             Padding(
               padding: EdgeInsets.only(
-                left: context.rp(8),
+                left:   context.rp(8),
                 bottom: context.rs(12),
               ),
               child: Text(
                 'NAVIGATION',
                 style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.3),
-                  fontSize: context.sp(10),
-                  fontWeight: FontWeight.w600,
+                  color:         Colors.white.withValues(alpha: 0.3),
+                  fontSize:      context.sp(10),
+                  fontWeight:    FontWeight.w600,
                   letterSpacing: 1.4,
                 ),
               ),
             ),
             ...navItems.asMap().entries.map((entry) {
-              final i = entry.key;
-              final item = entry.value;
+              final i      = entry.key;
+              final item   = entry.value;
               final active = i == currentIndex;
 
               return Padding(
@@ -574,7 +590,7 @@ class _LandscapeSidebar extends StatelessWidget {
                     curve: Curves.easeInOut,
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
-                      vertical: 10,
+                      vertical:   10,
                     ),
                     decoration: BoxDecoration(
                       color: active
@@ -592,9 +608,10 @@ class _LandscapeSidebar extends StatelessWidget {
                       children: [
                         Icon(
                           item.icon,
-                          size: 20,
-                          color:
-                              active ? const Color(0xFF00D4FF) : Colors.white38,
+                          size:  20,
+                          color: active
+                              ? const Color(0xFF00D4FF)
+                              : Colors.white38,
                         ),
                         SizedBox(width: context.rp(12)),
                         Expanded(
@@ -604,15 +621,16 @@ class _LandscapeSidebar extends StatelessWidget {
                               color: active
                                   ? const Color(0xFF00D4FF)
                                   : Colors.white54,
-                              fontSize: context.sp(14),
-                              fontWeight:
-                                  active ? FontWeight.w600 : FontWeight.w400,
+                              fontSize:   context.sp(14),
+                              fontWeight: active
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
                             ),
                           ),
                         ),
                         if (active)
                           Container(
-                            width: 4,
+                            width:  4,
                             height: 4,
                             decoration: const BoxDecoration(
                               color: Color(0xFF00D4FF),
@@ -641,11 +659,11 @@ class _BottomNav extends StatelessWidget {
   const _BottomNav({required this.currentIndex, required this.onTap});
 
   static const List<_NavData> _items = [
-    _NavData(icon: Icons.home_rounded, label: 'Home'),
-    _NavData(icon: Icons.videocam_rounded, label: 'Monitor'),
+    _NavData(icon: Icons.home_rounded,      label: 'Home'),
+    _NavData(icon: Icons.videocam_rounded,  label: 'Monitor'),
     _NavData(icon: Icons.bar_chart_rounded, label: 'Analytics'),
-    _NavData(icon: Icons.history_rounded, label: 'History'),
-    _NavData(icon: Icons.settings_rounded, label: 'Settings'),
+    _NavData(icon: Icons.history_rounded,   label: 'History'),
+    _NavData(icon: Icons.settings_rounded,  label: 'Settings'),
   ];
 
   @override
@@ -661,9 +679,9 @@ class _BottomNav extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.4),
+            color:      Colors.black.withValues(alpha: 0.4),
             blurRadius: 20,
-            offset: const Offset(0, -4),
+            offset:     const Offset(0, -4),
           ),
         ],
       ),
@@ -673,10 +691,10 @@ class _BottomNav extends StatelessWidget {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final totalWidth = constraints.maxWidth;
-              final itemWidth = totalWidth / _items.length;
-              const pillWidth = 48.0;
+              final itemWidth  = totalWidth / _items.length;
+              const pillWidth  = 48.0;
               const pillHeight = 40.0;
-              final pillLeft =
+              final pillLeft   =
                   currentIndex * itemWidth + (itemWidth - pillWidth) / 2;
 
               return Stack(
@@ -686,18 +704,18 @@ class _BottomNav extends StatelessWidget {
                     duration: const Duration(milliseconds: 280),
                     curve: Curves.easeInOutCubic,
                     left: pillLeft,
-                    top: (56 - pillHeight) / 2,
+                    top:  (56 - pillHeight) / 2,
                     child: Container(
-                      width: pillWidth,
+                      width:  pillWidth,
                       height: pillHeight,
                       decoration: BoxDecoration(
                         color: const Color(0xFF00D4FF).withValues(alpha: 0.13),
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                            color:
-                                const Color(0xFF00D4FF).withValues(alpha: 0.15),
-                            blurRadius: 10,
+                            color: const Color(0xFF00D4FF)
+                                .withValues(alpha: 0.15),
+                            blurRadius:   10,
                             spreadRadius: 1,
                           ),
                         ],
@@ -706,14 +724,14 @@ class _BottomNav extends StatelessWidget {
                   ),
                   Row(
                     children: _items.asMap().entries.map((entry) {
-                      final i = entry.key;
-                      final item = entry.value;
+                      final i      = entry.key;
+                      final item   = entry.value;
                       final active = i == currentIndex;
                       return GestureDetector(
-                        onTap: () => onTap(i),
-                        behavior: HitTestBehavior.opaque,
+                        onTap:     () => onTap(i),
+                        behavior:  HitTestBehavior.opaque,
                         child: SizedBox(
-                          width: itemWidth,
+                          width:  itemWidth,
                           height: 56,
                           child: Center(
                             child: AnimatedSwitcher(
@@ -722,8 +740,8 @@ class _BottomNav extends StatelessWidget {
                                   ScaleTransition(scale: anim, child: child),
                               child: Icon(
                                 item.icon,
-                                key: ValueKey('nav_${i}_$active'),
-                                size: active ? 25 : 23,
+                                key:   ValueKey('nav_${i}_$active'),
+                                size:  active ? 25 : 23,
                                 color: active
                                     ? const Color(0xFF00D4FF)
                                     : Colors.white38,
@@ -748,6 +766,6 @@ class _BottomNav extends StatelessWidget {
 
 class _NavData {
   final IconData icon;
-  final String label;
+  final String   label;
   const _NavData({required this.icon, required this.label});
 }
