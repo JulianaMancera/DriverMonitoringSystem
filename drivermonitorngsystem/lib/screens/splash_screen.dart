@@ -201,7 +201,7 @@ class _SplashScreenState extends State<SplashScreen>
                     ),
                   ),
 
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 20),
 
                   // ── Wordmark ────────────────────────────────────────────
                   SlideTransition(
@@ -254,7 +254,7 @@ class _SplashScreenState extends State<SplashScreen>
                     ),
                   ),
 
-                  const SizedBox(height: 56),
+                  const SizedBox(height: 32),
 
                   // ── Progress bar ────────────────────────────────────────
                   FadeTransition(
@@ -296,7 +296,7 @@ class _SplashScreenState extends State<SplashScreen>
 
             // ── Version stamp ────────────────────────────────────────────────
             Positioned(
-              bottom: 40,
+              bottom: 14,
               left:   0,
               right:  0,
               child: FadeTransition(
