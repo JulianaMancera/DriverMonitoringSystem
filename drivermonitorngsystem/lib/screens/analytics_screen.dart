@@ -1,17 +1,3 @@
-// analytics_screen.dart — fully responsive
-// Every px value replaced with context.sp() / context.rp() / context.rs() / context.ri()
-// Phones + tablets only (no desktop breakpoints per project scope)
-// Key fixes:
-//   • Filter tab padding: MediaQuery*0.05 → context.rp()
-//   • Chart heights: hardcoded 300/240 → context.rs() with compact check
-//   • All reservedSize in charts: hardcoded 30/38 → ctx.rs()/ctx.rp()
-//   • Stat card icon/dot/font: hardcoded sizes → context.ri()/sp()
-//   • Modal close button: hardcoded 34 → context.ri()
-//   • Bar width: hardcoded 16 → ctx.rp(14)
-//   • Legend dot: hardcoded 10 → ctx.ri(10)
-//   • All SizedBox gaps: hardcoded → context.rs()/rp()
-//   • All border radii: hardcoded → context.rp()
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_chart/fl_chart.dart';

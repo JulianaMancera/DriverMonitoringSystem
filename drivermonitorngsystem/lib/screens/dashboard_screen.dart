@@ -1,10 +1,3 @@
-// dashboard_screen.dart — fully responsive
-// All Responsive.responsiveFont/Spacing/Padding/Value/BorderRadius/IconSize
-// replaced with context.sp() / context.rp() / context.rs() / context.ri()
-// All const EdgeInsets / const SizedBox → responsive equivalents
-// Chart hardcoded sizes → responsive
-// Phones + tablets only (no desktop per project scope)
-
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,14 +6,12 @@ import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
 import '../utils/responsive.dart';
 
-// ─── PROVIDER ─────────────────────────────────────────────────────────────────
+// PROVIDER
 final dashboardProvider =
     FutureProvider<Map<String, dynamic>>((ref) async {
   ref.watch(dbChangeCounterProvider);
   return await DatabaseHelper.instance.getDashboardSummary();
 });
-
-// ─────────────────────────────────────────────────────────────────────────────
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
   @override
@@ -111,7 +102,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             horizontal: context.hPad, vertical: context.rs(10)),
         child: Column(children: [
 
-          // ── Safety score + stat cards ──────────────────────────────────
+          // Safety score + stat cards 
           LayoutBuilder(builder: (context, constraints) {
             if (isMobile || Responsive.isTablet(context)) {
               return Column(children: [
@@ -155,8 +146,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  // ── SAFETY SCORE CARD ──────────────────────────────────────────────────────
-
+  // SAFETY SCORE CARD 
   Widget _buildSafetyScoreCard(
     BuildContext context,
     double score,
@@ -178,7 +168,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       child: Stack(children: [
         Positioned(top: 0, left: 0, right: 0,
           child: Container(
-            // FIX: was Responsive.responsiveValue(mobile:6.0)
             height: context.rs(6),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
@@ -192,8 +181,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         ),
         Center(
           child: Padding(
-            // FIX: was Responsive.responsivePadding(mobile: isMobile ? 48 : 60)
-            // compact phones need less padding so the ring doesn't get clipped
             padding: EdgeInsets.all(context.forTier(
                 base: 40.0, compact: 28.0, small: 32.0, large: 44.0)),
             child: Column(
@@ -235,15 +222,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     String label,
     bool hasAnySessions,
   ) {
-    // FIX: outer ring size — was (sw * 0.42).clamp(140, 220)
-    // On compact 360dp phones sw*0.42 = 151px which was fine but the padding
-    // around it was too large. Now use forTier for both size and padding.
     final outerSize = context.forTier<double>(
         base: 160.0, compact: 130.0, small: 140.0, large: 170.0,
         xlarge: 180.0);
-    // progress ring slightly smaller than outer
     final progressSize = outerSize * 0.88;
-    // inner circle (score text area)
     final innerSize    = outerSize * 0.73;
 
     return SizedBox(
@@ -316,8 +298,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  // ── QUICK STATS GRID ───────────────────────────────────────────────────────
-
+  // QUICK STATS GRID
   Widget _buildQuickStatsGrid(
     BuildContext context, {
     required double totalDriveHrs,
@@ -325,17 +306,42 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     required int    safetyStreak,
     required double avgAlertness,
   }) {
+    final isPortrait =
+        MediaQuery.orientationOf(context) == Orientation.portrait;
+
+    // Portrait: original 2-column layout with original spacing & aspect ratio.
+    // Landscape: 4-column single row with dynamic compact aspect ratio.
+    final int    crossCount;
+    final double mainSpacing;
+    final double crossSpacing;
+    final double aspect;
+
+    if (isPortrait) {
+      crossCount   = 2;
+      mainSpacing  = context.rs(12);
+      crossSpacing = context.rp(12);
+      aspect       = context.forTier(
+          base: 1.0, compact: 0.90, small: 0.95, large: 1.05);
+    } else {
+      crossCount   = 4;
+      mainSpacing  = context.rs(10);
+      crossSpacing = context.rp(10);
+      final gapCount = crossCount - 1;
+      final screenW  = context.sw;
+      final hPad     = context.hPad * 2;
+      final spacing  = crossSpacing * gapCount;
+      final cardW    = (screenW - hPad - spacing) / crossCount;
+      // Match Analytics _SummaryCards landscape aspect ratio
+      aspect         = (cardW / 130).clamp(1.0, 2.2);
+    }
+
     return GridView.count(
-      crossAxisCount: 2,
-      shrinkWrap:     true,
-      physics:        const NeverScrollableScrollPhysics(),
-      // FIX: was Responsive.responsiveSpacing(mobile:12)
-      mainAxisSpacing:  context.rs(12),
-      crossAxisSpacing: context.rp(12),
-      // FIX: was Responsive.responsiveValue(mobile:1.0)
-      // compact phones need slightly taller cards
-      childAspectRatio: context.forTier(
-          base: 1.0, compact: 0.90, small: 0.95, large: 1.05),
+      crossAxisCount:   crossCount,
+      shrinkWrap:       true,
+      physics:          const NeverScrollableScrollPhysics(),
+      mainAxisSpacing:  mainSpacing,
+      crossAxisSpacing: crossSpacing,
+      childAspectRatio: aspect,
       children: [
         _StatCard(
           icon:    Icons.access_time_outlined,
@@ -354,8 +360,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         _StatCard(
           icon:    Icons.local_fire_department_outlined,
           label:   'Safety Streak',
-          value:   '$safetyStreak days',
-          subtext: safetyStreak > 0 ? 'No incidents!' : 'Stay alert!',
+          value:   '${safetyStreak} days',
+          subtext: safetyStreak > 0 ? 'Keep it up!' : 'Stay alert!',
           accent:  false,
         ),
         _StatCard(
@@ -369,30 +375,54 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
+
   Widget _buildEmptyStatsGrid(BuildContext context) {
+    final isPortrait =
+        MediaQuery.orientationOf(context) == Orientation.portrait;
+
+    // Portrait: original 2-column layout with original spacing & aspect ratio.
+    // Landscape: 4-column single row with dynamic compact aspect ratio.
+    final int    crossCount;
+    final double mainSpacing;
+    final double crossSpacing;
+    final double aspect;
+
+    if (isPortrait) {
+      crossCount   = 2;
+      mainSpacing  = context.rs(12);
+      crossSpacing = context.rp(12);
+      aspect       = context.forTier(
+          base: 1.0, compact: 0.90, small: 0.95, large: 1.05);
+    } else {
+      crossCount   = 4;
+      mainSpacing  = context.rs(10);
+      crossSpacing = context.rp(10);
+      final gapCount = crossCount - 1;
+      final screenW  = context.sw;
+      final hPad     = context.hPad * 2;
+      final spacing  = crossSpacing * gapCount;
+      final cardW    = (screenW - hPad - spacing) / crossCount;
+      // Match Analytics _SummaryCards landscape aspect ratio
+      aspect         = (cardW / 130).clamp(1.0, 2.2);
+    }
+
     return GridView.count(
-      crossAxisCount: 2,
-      shrinkWrap:     true,
-      physics:        const NeverScrollableScrollPhysics(),
-      mainAxisSpacing:  context.rs(12),
-      crossAxisSpacing: context.rp(12),
-      childAspectRatio: context.forTier(
-          base: 1.0, compact: 0.90, small: 0.95, large: 1.05),
+      crossAxisCount:   crossCount,
+      shrinkWrap:       true,
+      physics:          const NeverScrollableScrollPhysics(),
+      mainAxisSpacing:  mainSpacing,
+      crossAxisSpacing: crossSpacing,
+      childAspectRatio: aspect,
       children: const [
-        _EmptyStatCard(icon: Icons.access_time_outlined,
-            label: 'Total Drive Time'),
-        _EmptyStatCard(icon: Icons.shield_outlined,
-            label: 'Alert Triggered'),
-        _EmptyStatCard(icon: Icons.local_fire_department_outlined,
-            label: 'Safety Streak'),
-        _EmptyStatCard(icon: Icons.trending_up,
-            label: 'Avg Alertness'),
+        _EmptyStatCard(icon: Icons.access_time_outlined, label: 'Total Drive Time'),
+        _EmptyStatCard(icon: Icons.shield_outlined,      label: 'Alert Triggered'),
+        _EmptyStatCard(icon: Icons.local_fire_department_outlined, label: 'Safety Streak'),
+        _EmptyStatCard(icon: Icons.trending_up,          label: 'Avg Alertness'),
       ],
     );
   }
 
-  // ── SAFETY SCORE HISTORY ───────────────────────────────────────────────────
-
+  // SAFETY SCORE HISTORY 
   Widget _buildSafetyScoreHistory(
     BuildContext context,
     List<Map<String, dynamic>> dailyScores,
@@ -494,11 +524,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   Widget _buildEmptyChartState(BuildContext context) {
     return Container(
-      // FIX: was hardcoded 200
       height: context.rs(context.isSmallPhone ? 160 : 190),
       decoration: BoxDecoration(
         color:        const Color(0xFF0D1627),
-        // FIX: was hardcoded 12
         borderRadius: BorderRadius.circular(context.rp(12)),
         border: Border.all(color: const Color(0xFF1e293b), width: 1),
       ),
@@ -748,55 +776,52 @@ class _StatCard extends StatelessWidget {
   });
 
   @override
+  @override
   Widget build(BuildContext context) {
+    final isLandscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       curve:    Curves.easeInOut,
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
-        // FIX: was Responsive.responsiveBorderRadius(mobile:16)
-        borderRadius: BorderRadius.circular(context.rp(16)),
+        borderRadius: BorderRadius.circular(context.rp(14)),
         boxShadow: const [
-          BoxShadow(color: Color(0xFF0b1120),
-              offset: Offset(3, 3), blurRadius: 8),
-          BoxShadow(color: Color(0xFF1e293b),
-              offset: Offset(-3, -3), blurRadius: 8),
+          BoxShadow(color: Color(0xFF0b1120), offset: Offset(3, 3), blurRadius: 8),
+          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-3, -3), blurRadius: 8),
         ],
       ),
-      // FIX: was Responsive.responsivePadding(mobile:16)
-      padding: EdgeInsets.all(context.rp(14)),
+      padding: EdgeInsets.all(isLandscape ? context.rp(8) : context.rp(12)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment:  MainAxisAlignment.spaceBetween,
         children: [
           Row(children: [
             Container(
-              // FIX: was Responsive.responsivePadding(mobile:8)
-              padding: EdgeInsets.all(context.rp(7)),
+              padding: EdgeInsets.all(isLandscape ? context.rp(5) : context.rp(7)),
               decoration: BoxDecoration(
                 color: const Color(0xFF22d3ee).withValues(alpha: 0.1),
-                // FIX: was Responsive.responsiveBorderRadius(mobile:10)
-                borderRadius: BorderRadius.circular(context.rp(9)),
+                borderRadius: BorderRadius.circular(context.rp(8)),
               ),
               child: Icon(icon,
-                  // FIX: was Responsive.responsiveIconSize(mobile:20)
-                  size:  context.ri(19),
+                  size: isLandscape ? context.ri(13) : context.ri(17),
                   color: const Color(0xFF22d3ee)),
             ),
             if (accent)
               Padding(
-                padding: EdgeInsets.only(left: context.rp(10)),
+                padding: EdgeInsets.only(left: context.rp(6)),
                 child: Container(
-                  // FIX: was Responsive.responsiveValue(mobile:7.0)
-                  width:  context.ri(7), height: context.ri(7),
+                  width:  isLandscape ? context.ri(6) : context.ri(8),
+                  height: isLandscape ? context.ri(6) : context.ri(8),
                   decoration: BoxDecoration(
                     color:  const Color(0xFF22d3ee),
                     shape:  BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                          color:        const Color(0xFF22d3ee)
-                              .withValues(alpha: 0.4),
-                          blurRadius:   8, spreadRadius: 2),
+                        color:      const Color(0xFF22d3ee).withValues(alpha: 0.4),
+                        blurRadius: isLandscape ? 6 : 8,
+                        spreadRadius: isLandscape ? 1 : 2),
                     ],
                   ),
                 ),
@@ -805,25 +830,25 @@ class _StatCard extends StatelessWidget {
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(label, style: TextStyle(
               color:      const Color(0xFF64748b),
-              // FIX: was Responsive.responsiveFont(mobile:12)
-              fontSize:   context.sp(11),
+              // Portrait: restored original sp(11); Landscape: compact sp(8)
+              fontSize:   isLandscape ? context.sp(8) : context.sp(11),
               fontWeight: FontWeight.w500,
-            )),
-            SizedBox(height: context.rs(3)),
+            ), maxLines: 1, overflow: TextOverflow.ellipsis),
+            SizedBox(height: context.rs(2)),
             Text(value, style: TextStyle(
-              // FIX: was Responsive.responsiveFont(mobile:22)
-              // compact phones get smaller value text to avoid overflow
-              fontSize:   context.forTier(
-                  base: 20.0, compact: 16.0, small: 18.0, large: 22.0),
+              // Portrait: restored original sizes; Landscape: compact
+              fontSize: isLandscape
+                  ? context.forTier(base: 15.0, compact: 13.0, small: 14.0, large: 16.0)
+                  : context.forTier(base: 20.0, compact: 16.0, small: 18.0, large: 22.0),
               fontWeight: FontWeight.bold,
               color:      const Color(0xFFe2e8f0),
             ), overflow: TextOverflow.ellipsis),
-            SizedBox(height: context.rs(2)),
+            SizedBox(height: context.rs(1)),
             Text(subtext, style: TextStyle(
-              // FIX: was Responsive.responsiveFont(mobile:10)
-              fontSize: context.sp(10),
+              // Portrait: restored original sp(10); Landscape: compact sp(8)
+              fontSize: isLandscape ? context.sp(8) : context.sp(10),
               color:    const Color(0xFF475569),
-            )),
+            ), maxLines: 1, overflow: TextOverflow.ellipsis),
           ]),
         ],
       ),
@@ -831,7 +856,7 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-// ── EMPTY STAT CARD ───────────────────────────────────────────────────────────
+// EMPTY STAT CARD 
 class _EmptyStatCard extends StatelessWidget {
   final IconData icon;
   final String   label;
@@ -839,49 +864,51 @@ class _EmptyStatCard extends StatelessWidget {
   const _EmptyStatCard({required this.icon, required this.label});
 
   @override
+    @override
   Widget build(BuildContext context) {
+    final isLandscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
-        borderRadius: BorderRadius.circular(context.rp(16)),
+        borderRadius: BorderRadius.circular(context.rp(14)),
         boxShadow: const [
-          BoxShadow(color: Color(0xFF0b1120),
-              offset: Offset(3, 3), blurRadius: 8),
-          BoxShadow(color: Color(0xFF1e293b),
-              offset: Offset(-3, -3), blurRadius: 8),
+          BoxShadow(color: Color(0xFF0b1120), offset: Offset(3, 3), blurRadius: 8),
+          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-3, -3), blurRadius: 8),
         ],
       ),
-      padding: EdgeInsets.all(context.rp(14)),
+      padding: EdgeInsets.all(isLandscape ? context.rp(8) : context.rp(12)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment:  MainAxisAlignment.spaceBetween,
         children: [
           Container(
-            padding: EdgeInsets.all(context.rp(7)),
+            padding: EdgeInsets.all(isLandscape ? context.rp(5) : context.rp(7)),
             decoration: BoxDecoration(
-                color:        const Color(0xFF1e293b),
-                // FIX: was hardcoded 10
-                borderRadius: BorderRadius.circular(context.rp(9))),
+              color:        const Color(0xFF1e293b),
+              borderRadius: BorderRadius.circular(context.rp(8))),
             child: Icon(icon,
-                size:  context.ri(19),
+                size: isLandscape ? context.ri(13) : context.ri(17),
                 color: const Color(0xFF334155)),
           ),
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(label, style: TextStyle(
-                color:      const Color(0xFF334155),
-                fontSize:   context.sp(11),
-                fontWeight: FontWeight.w500)),
-            SizedBox(height: context.rs(3)),
-            Text('—', style: TextStyle(
-                // FIX: was Responsive.responsiveFont(mobile:22)
-                fontSize:   context.forTier(
-                    base: 20.0, compact: 16.0, small: 18.0, large: 22.0),
-                fontWeight: FontWeight.bold,
-                color:      const Color(0xFF1e293b))),
+              color: const Color(0xFF334155),
+              fontSize: isLandscape ? context.sp(8) : context.sp(11),
+              fontWeight: FontWeight.w500,
+            ), maxLines: 1, overflow: TextOverflow.ellipsis),
             SizedBox(height: context.rs(2)),
-            Text('No data yet', style: TextStyle(
-                fontSize: context.sp(10),
-                color:    const Color(0xFF1e293b))),
+            Text('—', style: TextStyle(
+              fontSize: isLandscape
+                  ? context.forTier(base: 15.0, compact: 13.0, small: 14.0, large: 16.0)
+                  : context.forTier(base: 20.0, compact: 16.0, small: 18.0, large: 22.0),
+              fontWeight: FontWeight.bold,
+              color:      const Color(0xFF1e293b))),
+            SizedBox(height: context.rs(1)),
+            Text('No data', style: TextStyle(
+              fontSize: isLandscape ? context.sp(8) : context.sp(10),
+              color:    const Color(0xFF1e293b))),
           ]),
         ],
       ),
