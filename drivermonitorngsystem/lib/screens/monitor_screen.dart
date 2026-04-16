@@ -717,16 +717,19 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       child: Stack(fit: StackFit.expand, children: [
         cameraWidget,
         _buildGradientOverlay(),
-        if (isRecording) _buildRecBadge(fullscreenLandscape: fullscreen && isLandscape),
 
-        // AI/DEMO badge position:
-        // • Fullscreen landscape: status bar height + margin (camera starts at y=0)
-        // • Portrait / non-fullscreen landscape: rs(10) — AppBar already above
-        Positioned(
-          top: (fullscreen && isLandscape)
-              ? MediaQuery.of(context).padding.top + context.rs(6)
-              : context.rs(10),
-          left: context.rp(10),
+        SafeArea(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (isRecording) _buildRecBadge(isLandscape: isLandscape, fullscreen: fullscreen),
+
+              // AI/DEMO badge position:
+              Positioned(
+                top: (!fullscreen && isLandscape)
+                    ? context.rs(44) + context.rs(6)
+                    : context.rs(10),
+                left: context.rp(10),
           child: Container(
             padding: EdgeInsets.symmetric(
                 // FIX: was horizontal:8, vertical:4
@@ -851,6 +854,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             ),
           ),
         ),
+            ],
+          ),
+        ),
       ]),
     );
 
@@ -927,9 +933,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         ),
       );
 
-  Widget _buildRecBadge({bool fullscreenLandscape = false}) => Positioned(
-        top: fullscreenLandscape
-            ? MediaQuery.of(context).padding.top + context.rs(6)
+  Widget _buildRecBadge({required bool isLandscape, required bool fullscreen}) => Positioned(
+        top: (!fullscreen && isLandscape)
+            ? context.rs(44) + context.rs(6)
             : context.rs(10),
         right: context.rp(10),
         child: Container(

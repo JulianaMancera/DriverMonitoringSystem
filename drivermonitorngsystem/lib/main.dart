@@ -286,13 +286,11 @@ class MainShell extends ConsumerWidget {
       extendBodyBehindAppBar: isFullscreen || isTransparent || isInPip,
 
       appBar: (isFullscreen || isInPip)
-          // Fullscreen landscape Monitor: hide AppBar entirely
           ? PreferredSize(
               preferredSize: Size.zero,
               child: const SizedBox.shrink(),
             )
           : PreferredSize(
-              // FIX: was hardcoded 46/60 — now scales with screen
               preferredSize: Size.fromHeight(
                   isLandscape ? context.rs(44) : context.rs(58)),
               child: AppBar(
