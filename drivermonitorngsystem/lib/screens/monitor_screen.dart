@@ -129,8 +129,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   DateTime _lastInferTs  = DateTime.fromMillisecondsSinceEpoch(0);
   static const int _kInferThrottleMs = 200;
 
-  Orientation? _lastOrientation;
-
   // ─── LIFECYCLE ─────────────────────────────────────────────────────────────
 
   @override
@@ -182,7 +180,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) async {
-    final isRecording = ref.read(isRecordingProvider);
     switch (state) {
       case AppLifecycleState.inactive:
       case AppLifecycleState.paused:
@@ -268,17 +265,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  Size _getPreviewSize(bool isLandscape) {
-    if (!_cameraInitialized ||
-        _cameraController?.value.previewSize == null) {
-      return isLandscape ? const Size(640, 480) : const Size(480, 640);
-    }
-    final ps = _cameraController!.value.previewSize!;
-    return isLandscape
-        ? Size(ps.width, ps.height)
-        : Size(ps.height, ps.width);
-  }
-
   // ─── SESSION ──────────────────────────────────────────────────────────────
 
   Future<void> _startRecording() async {
@@ -340,9 +326,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     double penalty = 0.0;
     for (final a in alerts) {
       final level = (a['alert_level'] as int?) ?? 1;
-      if (level == 1)      penalty += 2.0;
-      else if (level == 2) penalty += 4.0;
-      else                 penalty += 8.0;
+      if (level == 1) {
+        penalty += 2.0;
+      } else if (level == 2) {
+        penalty += 4.0;
+      } else {
+        penalty += 8.0;
+      }
     }
     final safetyScore = (alertness - penalty).clamp(0.0, 100.0);
 
@@ -445,8 +435,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (consecutive < thresholds[0]) return;
 
     int newLevel = 1;
-    if (consecutive >= thresholds[2])      newLevel = 3;
-    else if (consecutive >= thresholds[1]) newLevel = 2;
+    if (consecutive >= thresholds[2]) {
+      newLevel = 3;
+    } else if (consecutive >= thresholds[1]) {
+      newLevel = 2;
+    }
 
     if (newLevel <= _alertLevel) return;
     _alertLevel = newLevel;
@@ -525,9 +518,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final isDesktop   = MediaQuery.of(context).size.width >= 1024;
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
-    final orientation = MediaQuery.of(context).orientation;
 
-    _lastOrientation = orientation;
     final showAlert = ref.watch(showAlertBannerProvider);
     final alertType = ref.watch(alertBannerTypeProvider);
     final isLevel3  = _alertLevel == 3;
