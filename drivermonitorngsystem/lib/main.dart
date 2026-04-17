@@ -15,6 +15,8 @@ import 'utils/responsive.dart';
 import 'constants/layout_constants.dart';
 import 'screens/splash_screen.dart';
 import 'screens/onboarding_screen.dart';
+import 'core/services/pip_service.dart';
+import 'widgets/exit.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -165,8 +167,34 @@ class _EntryPointState extends State<EntryPoint> {
           key: const ValueKey('onboarding'),
           onComplete: _onOnboardingComplete,
         ),
-        _AppState.main => const MainShell(key: ValueKey('main')),
+        _AppState.main => _ExitWrapper(key: const ValueKey('main')),
       },
+    );
+  }
+}
+
+class _ExitWrapper extends ConsumerWidget {
+  const _ExitWrapper({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        // Don't show exit dialog if in PiP — back is handled natively
+        if (ref.read(isInPipProvider)) return;
+        final shouldExit = await showExitDialog(context);
+        if (shouldExit && context.mounted) {
+          // Stop service if recording before exit
+          if (ref.read(isRecordingProvider)) {
+            await BantayDriveService.stopService();
+            PipService.setRecording(false);
+          }
+          SystemNavigator.pop();
+        }
+      },
+      child: const MainShell(),
     );
   }
 }
@@ -280,14 +308,16 @@ class MainShell extends ConsumerWidget {
     final isFullscreen  = isLandscape && isMonitor && lsFullscreen;
     final isTransparent = isLandscape && isMonitor && !lsFullscreen;
 
-    // PiP: hide all chrome so MonitorScreen._buildPipView() fills the window
     if (isInPip) {
       return Scaffold(
         backgroundColor: Colors.black,
-        body: _screens[1], // MonitorScreen handles PiP rendering internally
+        body: SafeArea(
+          top: false, bottom: false,
+          child: _screens[1],
+        ),
       );
     }
-
+    
     return Scaffold(
       backgroundColor: const Color(0xFF080E1A),
       extendBodyBehindAppBar: isFullscreen || isTransparent,

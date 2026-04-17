@@ -64,17 +64,18 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // ── Back pressed while recording → PiP instead of closing ────────────────
     @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        if (isRecording && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        override fun onBackPressed() {
+        // Only enter PiP on back if recording AND we're NOT already in PiP
+        if (isRecording && !isInPip && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val isLandscape = resources.configuration.orientation ==
                 Configuration.ORIENTATION_LANDSCAPE
             val entered = enterPipMode(isLandscape)
             if (entered) return
         }
+        // Let Flutter handle back — this triggers PopScope/WillPopScope
         super.onBackPressed()
-    }
+        }
 
     // ── PiP state changed ─────────────────────────────────────────────────────
     // FIX: Track isInPip natively so onUserLeaveHint doesn't try to enter PiP

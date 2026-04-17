@@ -1,16 +1,16 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 class BantayDriveService {
   static const _channelId = 'bantay_drive_monitoring';
-  static const _serviceId = 256; // required by flutter_foreground_task v8+
+  static const _serviceId = 256;
   static bool _serviceReady = false;
   static bool get isReady => _serviceReady;
 
   static Future<void> initialize() async {
     try {
+      // Request notification permission once at startup (Android 13+)
       if (Platform.isAndroid) {
         await FlutterForegroundTask.requestNotificationPermission();
       }
@@ -20,7 +20,6 @@ class BantayDriveService {
           channelId: _channelId,
           channelName: 'Bantay Drive',
           channelDescription: 'Active while Bantay Drive is monitoring.',
-          // FIX: LOW gets suppressed on many devices — DEFAULT always shows
           channelImportance: NotificationChannelImportance.DEFAULT,
           priority: NotificationPriority.DEFAULT,
         ),
@@ -42,23 +41,8 @@ class BantayDriveService {
   static Future<void> startService({String state = 'neutral'}) async {
     if (!_serviceReady) return;
     try {
-      // Android 14+ requires camera permission granted before
-      // starting a foreground service with type=camera
-      if (Platform.isAndroid) {
-        final camStatus = await Permission.camera.status;
-        if (!camStatus.isGranted) {
-          final result = await Permission.camera.request();
-          if (!result.isGranted) {
-            debugPrint(
-                '[BantayDrive] ❌ Camera permission denied — cannot start service');
-            return;
-          }
-        }
-      }
-
       final running = await FlutterForegroundTask.isRunningService;
       if (running) {
-        // Already running — just sync the text
         await FlutterForegroundTask.updateService(
           notificationTitle: 'Bantay Drive',
           notificationText: _statusText(state),
@@ -67,7 +51,6 @@ class BantayDriveService {
           ],
         );
       } else {
-        // FIX: serviceId is required — without it the service never registers
         await FlutterForegroundTask.startService(
           serviceId: _serviceId,
           notificationTitle: 'Bantay Drive',
@@ -127,6 +110,8 @@ class BantayDriveService {
   }
 }
 
+// ── Foreground task entry point ───────────────────────────────────────────────
+
 @pragma('vm:entry-point')
 void startCallback() {
   FlutterForegroundTask.setTaskHandler(BantayDriveTaskHandler());
@@ -140,11 +125,15 @@ class BantayDriveTaskHandler extends TaskHandler {
 
   @override
   void onRepeatEvent(DateTime timestamp) {
+    // Heartbeat keeps service alive — monitor_screen ignores it
     FlutterForegroundTask.sendDataToMain('heartbeat');
   }
 
   @override
   void onNotificationButtonPressed(String id) {
+    // Only send data to main isolate — do NOT call stopService() here.
+    // stopService() here kills the service before Flutter receives the message,
+    // so _onReceiveTaskData in monitor_screen never fires and session never saves.
     if (id == 'stop_recording') {
       FlutterForegroundTask.sendDataToMain('stop_recording');
     }
