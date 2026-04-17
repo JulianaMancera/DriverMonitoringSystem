@@ -264,6 +264,7 @@ class MainShell extends ConsumerWidget {
     final currentIndex = ref.watch(navIndexProvider);
     final isRecording  = ref.watch(isRecordingProvider);
     final sidebarOpen  = ref.watch(sidebarOpenProvider);
+    final isInPip = ref.watch(isInPipProvider);
     final lsFullscreen = ref.watch(landscapeFullscreenProvider);
     final isLandscape  =
         MediaQuery.of(context).orientation == Orientation.landscape;
@@ -278,6 +279,14 @@ class MainShell extends ConsumerWidget {
     // Fullscreen: landscape + Monitor + user hasn't tapped to reveal nav
     final isFullscreen  = isLandscape && isMonitor && lsFullscreen;
     final isTransparent = isLandscape && isMonitor && !lsFullscreen;
+
+    // PiP: hide all chrome so MonitorScreen._buildPipView() fills the window
+    if (isInPip) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: _screens[1], // MonitorScreen handles PiP rendering internally
+      );
+    }
 
     return Scaffold(
       backgroundColor: const Color(0xFF080E1A),

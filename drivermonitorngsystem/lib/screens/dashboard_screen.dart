@@ -360,7 +360,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         _StatCard(
           icon:    Icons.local_fire_department_outlined,
           label:   'Safety Streak',
-          value:   '${safetyStreak} days',
+          value:   '$safetyStreak days',
           subtext: safetyStreak > 0 ? 'Keep it up!' : 'Stay alert!',
           accent:  false,
         ),

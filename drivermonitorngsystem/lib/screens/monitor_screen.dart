@@ -1,11 +1,9 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:camera/camera.dart';
 import 'package:audioplayers/audioplayers.dart';
-import 'package:permission_handler/permission_handler.dart';
 import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
 import '../core/inference/tflite_service.dart';
@@ -13,6 +11,7 @@ import '../core/services/notifications.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import '../utils/responsive.dart';
+import '../core/services/pip_service.dart';
 import '../main.dart' show landscapeFullscreenProvider, sidebarOpenProvider;
 
 // ─── PROVIDERS ────────────────────────────────────────────────────────────────
@@ -77,7 +76,8 @@ final activeSubclassProvider =
         _NullableStringNotifier.new);
 final activeSubclassIndexProvider = NotifierProvider<_IntNotifier, int>(
     () => _IntNotifier(0));
-
+final isInPipProvider = NotifierProvider<_BoolNotifier, bool>(
+    () => _BoolNotifier(false));
 // ─────────────────────────────────────────────────────────────────────────────
 class MonitorScreen extends ConsumerStatefulWidget {
   const MonitorScreen({super.key});
@@ -129,6 +129,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   DateTime _lastInferTs  = DateTime.fromMillisecondsSinceEpoch(0);
   static const int _kInferThrottleMs = 200;
 
+  bool _isResumingCamera = false;
+
+  StreamSubscription<Map<String, dynamic>>? _pipSubscription;
+
   // ─── LIFECYCLE ─────────────────────────────────────────────────────────────
 
   @override
@@ -154,7 +158,25 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     _loadPreferencesAndInit();
     FlutterForegroundTask.addTaskDataCallback(_onReceiveTaskData);
-  }
+
+    _pipSubscription = PipService.pipEventStream.listen((event) {
+      if (!mounted) return;
+      final type  = event['type'] as String?;
+      final value = event['value'];
+
+      if (type == 'pip') {
+        final inPip = value as bool;
+        ref.read(isInPipProvider.notifier).set(inPip);
+        if (!inPip) {
+          // Returned from PiP to full app — restart camera
+          _resumeCameraStream();
+        }
+      }
+      // 'orientation' events are ignored — Flutter handles orientation natively
+    });
+}
+
+
 
   @override
   void dispose() {
@@ -167,25 +189,38 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _cameraController?.dispose();
     _audioPlayer.dispose();
     _alarmPlayer.dispose();
+    _pipSubscription?.cancel();
     super.dispose();
   }
 
   void _onReceiveTaskData(Object data) {
-    if (data is String && data == 'stop_recording') {
+  if (data is String && data == 'stop_recording') {
+    // Small delay to ensure widget is fully resumed before stopping
+    Future.delayed(const Duration(milliseconds: 200), () {
       if (mounted && ref.read(isRecordingProvider)) {
         _stopRecording();
       }
-    }
+    });
   }
+}
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) async {
     switch (state) {
       case AppLifecycleState.inactive:
+        await PipService.setRecording(ref.read(isRecordingProvider));
+        break;
       case AppLifecycleState.paused:
-        await _pauseCameraStream();
+        await Future.delayed(const Duration(milliseconds: 400));
+        if (!mounted) break;
+        final inPip = ref.read(isInPipProvider);
+        if (!inPip) await _pauseCameraStream();
         break;
       case AppLifecycleState.resumed:
+        // Clear PiP state first
+        if (mounted) ref.read(isInPipProvider.notifier).set(false);
+        await Future.delayed(const Duration(milliseconds: 300));
+        if (!mounted) break;
         await _resumeCameraStream();
         break;
       default:
@@ -205,26 +240,34 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   Future<void> _resumeCameraStream() async {
-    if (_cameraController == null || _camDisposing) return;
+    if (_camDisposing || _isResumingCamera) return;
     if (!ref.read(isRecordingProvider)) return;
+    _isResumingCamera = true;
     try {
-      if (!_cameraController!.value.isStreamingImages) {
-        await _cameraController!.startImageStream(_onCameraFrame);
+      if (_cameraController == null || !_cameraController!.value.isInitialized) {
+        await _initCamera();
+        return;
       }
-    } catch (e) {
-      debugPrint('[Camera] resumeStream error: $e');
+      try {
+        if (!_cameraController!.value.isStreamingImages) {
+          await _cameraController!.startImageStream(_onCameraFrame);
+        }
+      } catch (e) {
+        debugPrint('[Camera] resumeStream error: $e — reinitializing');
+        await _cameraController?.dispose();
+        _cameraController = null;
+        _cameraInitialized = false;
+        await _initCamera();
+      }
+      if (mounted) setState(() {});
+    } finally {
+      _isResumingCamera = false;
     }
-    if (mounted) setState(() {});
   }
 
   // ─── CAMERA ───────────────────────────────────────────────────────────────
 
   Future<void> _loadPreferencesAndInit() async {
-    // Must grant camera permission before foreground service can use type=camera
-    if (Platform.isAndroid) {
-      await Permission.camera.request();
-    }
-
     final prefs = PreferencesHelper.instance;
     _prefAlertSensitivity = await prefs.getAlertSensitivity();
     _prefAutoStart        = await prefs.getAutoStart();
@@ -286,6 +329,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
 
     ref.read(isRecordingProvider.notifier).set(true);
+    PipService.setRecording(true);
     ref.read(driverStateProvider.notifier).set('neutral');
     _startNotificationWithRetry();
 
@@ -345,6 +389,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     _addLogSync('Session Ended — Score: ${safetyScore.toInt()}%', 'INFO');
     BantayDriveService.stopService();
+    PipService.setRecording(false);
 
     ref.read(isRecordingProvider.notifier).set(false);
     ref.read(driverStateProvider.notifier).set('neutral');
@@ -514,35 +559,38 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // ═══════════════════════════════════════════════════════════════════════════
 
   @override
-  Widget build(BuildContext context) {
-    final isDesktop   = MediaQuery.of(context).size.width >= 1024;
-    final isLandscape =
-        MediaQuery.of(context).orientation == Orientation.landscape;
+    Widget build(BuildContext context) {
+      final isInPip   = ref.watch(isInPipProvider);
+      final isDesktop = MediaQuery.of(context).size.width >= 1024;
+      final isLandscape =
+          MediaQuery.of(context).orientation == Orientation.landscape;
+      final showAlert = ref.watch(showAlertBannerProvider);
+      final alertType = ref.watch(alertBannerTypeProvider);
+      final isLevel3  = _alertLevel == 3;
 
-    final showAlert = ref.watch(showAlertBannerProvider);
-    final alertType = ref.watch(alertBannerTypeProvider);
-    final isLevel3  = _alertLevel == 3;
+      // ── PiP mode: show only camera + state badge ──────────────────────────
+      if (isInPip) return _buildPipView();
 
-    return ColoredBox(
-      color: const Color(0xFF080E1A),
-      child: Stack(children: [
-        if (isDesktop)
-          SafeArea(child: _buildDesktopLayout())
-        else if (isLandscape)
-          _buildLandscapeLayout()
-        else
-          SafeArea(bottom: false, child: _buildPortraitLayout()),
+      return ColoredBox(
+        color: const Color(0xFF080E1A),
+        child: Stack(children: [
+          if (isDesktop)
+            SafeArea(child: _buildDesktopLayout())
+          else if (isLandscape)
+            _buildLandscapeLayout()
+          else
+            SafeArea(bottom: false, child: _buildPortraitLayout()),
 
-        if (showAlert && !isLevel3)
-          Positioned(top: 0, left: 0, right: 0,
-            child: SafeArea(bottom: false,
-                child: _buildAlertBanner(alertType))),
+          if (showAlert && !isLevel3)
+            Positioned(top: 0, left: 0, right: 0,
+              child: SafeArea(bottom: false,
+                  child: _buildAlertBanner(alertType))),
 
-        if (showAlert && isLevel3)
-          Positioned.fill(child: _buildWarningOverlay(alertType)),
-      ]),
-    );
-  }
+          if (showAlert && isLevel3)
+            Positioned.fill(child: _buildWarningOverlay(alertType)),
+        ]),
+      );
+    }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // LAYOUTS
@@ -1319,6 +1367,109 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             ),
         ],
       ),
+    );
+  }
+  Widget _buildPipView() {
+    final isRecording = ref.watch(isRecordingProvider);
+    final driverState = ref.watch(driverStateProvider);
+    final showAlert   = ref.watch(showAlertBannerProvider);
+    final alertType   = ref.watch(alertBannerTypeProvider);
+
+    final String stateLabel;
+    switch (driverState) {
+      case 'drowsy':
+        stateLabel = 'Drowsy';
+        break;
+      case 'distracted':
+        stateLabel = 'Distracted';
+        break;
+      default:
+        stateLabel = 'Alert';
+    }
+
+    return ColoredBox(
+      color: Colors.black,
+      child: Stack(fit: StackFit.expand, children: [
+        if (_cameraInitialized && !_camDisposing && _cameraController != null)
+          CameraPreview(_cameraController!),
+
+        Positioned(
+          bottom: 0, left: 0, right: 0,
+          child: Container(
+            height: 48,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: [
+                  Colors.black.withValues(alpha: 0.8),
+                  Colors.transparent,
+                ],
+              ),
+            ),
+          ),
+        ),
+
+        if (isRecording)
+          Positioned(
+            top: 6, left: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.85),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.circle, color: Colors.white, size: 6),
+                SizedBox(width: 4),
+                Text('REC',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1)),
+              ]),
+            ),
+          ),
+
+        Positioned(
+          bottom: 6, left: 4, right: 4,
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: showAlert
+                    ? (alertType == 'DROWSY'
+                        ? Colors.orange.withValues(alpha: 0.92)
+                        : Colors.red.withValues(alpha: 0.92))
+                    : Colors.black.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(
+                  showAlert
+                      ? Icons.warning_amber_rounded
+                      : Icons.check_circle_outline,
+                  color: Colors.white,
+                  size: 12,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  showAlert
+                      ? (alertType == 'DROWSY'
+                          ? 'Drowsy Detected'
+                          : 'Distracted')
+                      : stateLabel,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold),
+                ),
+              ]),
+            ),
+          ),
+        ),
+      ]),
     );
   }
 } // end _MonitorScreenState
