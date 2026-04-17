@@ -129,13 +129,13 @@ class _SplashScreenState extends State<SplashScreen>
         backgroundColor: const Color(0xFF080E1A),
         body: Stack(
           children: [
-            // ── Background grid ─────────────────────────────────────────────
+            // Background grid
             CustomPaint(
               painter: _GridPainter(),
               size:    MediaQuery.of(context).size,
             ),
 
-            // ── Radial ambient glow ─────────────────────────────────────────
+            // Radial ambient glow
             AnimatedBuilder(
               animation: _bgGlow,
               builder: (_, __) => Center(
@@ -146,8 +146,8 @@ class _SplashScreenState extends State<SplashScreen>
                     shape: BoxShape.circle,
                     gradient: RadialGradient(
                       colors: [
-                        const Color(0xFF00D4FF)
-                            .withOpacity(0.04 + _bgGlow.value * 0.04),
+                        Color(0xFF00D4FF)
+                            .withValues(alpha: 0.04 + _bgGlow.value * 0.04),
                         Colors.transparent,
                       ],
                     ),
@@ -156,15 +156,12 @@ class _SplashScreenState extends State<SplashScreen>
               ),
             ),
 
-            // ── Main content ────────────────────────────────────────────────
+            // Main content 
             Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // ── Logo (car icon without text) ────────────────────────
-                  // Asset path: update to match your project's asset location.
-                  // Declare in pubspec.yaml under: flutter > assets
-                  //   - assets/images/bantay_drive_icon.png   ← car only (Image 2)
+                  // Logo 
                   SlideTransition(
                     position: _logoSlide,
                     child: FadeTransition(
@@ -176,7 +173,6 @@ class _SplashScreenState extends State<SplashScreen>
                           width:  220,
                           height: 160,
                           fit:    BoxFit.contain,
-                          // Shows a fallback icon if the asset path isn't set yet
                           errorBuilder: (_, __, ___) => Container(
                             width:  220,
                             height: 160,
@@ -184,7 +180,7 @@ class _SplashScreenState extends State<SplashScreen>
                               color:         const Color(0xFF0D1627),
                               borderRadius:  BorderRadius.circular(16),
                               border: Border.all(
-                                color: const Color(0xFF00D4FF).withOpacity(0.2),
+                                color: const Color(0xFF00D4FF).withValues(alpha: 0.2), // Ln 187
                                 width: 1,
                               ),
                             ),
@@ -203,7 +199,7 @@ class _SplashScreenState extends State<SplashScreen>
 
                   const SizedBox(height: 20),
 
-                  // ── Wordmark ────────────────────────────────────────────
+                  // Wordmark
                   SlideTransition(
                     position: _wordmarkSlide,
                     child: FadeTransition(
@@ -242,7 +238,7 @@ class _SplashScreenState extends State<SplashScreen>
                             child: Text(
                               'DRIVE AWARE.  ARRIVE SAFE',
                               style: TextStyle(
-                                color:         Colors.white.withOpacity(0.38),
+                                color:         Colors.white.withValues(alpha: 0.38), 
                                 fontSize:      11,
                                 fontWeight:    FontWeight.w500,
                                 letterSpacing: 3.5,
@@ -256,7 +252,7 @@ class _SplashScreenState extends State<SplashScreen>
 
                   const SizedBox(height: 32),
 
-                  // ── Progress bar ────────────────────────────────────────
+                  // Progress bar
                   FadeTransition(
                     opacity: _taglineOpacity,
                     child: SizedBox(
@@ -270,7 +266,7 @@ class _SplashScreenState extends State<SplashScreen>
                               child: LinearProgressIndicator(
                                 value:           _progressValue.value,
                                 minHeight:       2,
-                                backgroundColor: Colors.white.withOpacity(0.08),
+                                backgroundColor: Colors.white.withValues(alpha: 0.08), 
                                 valueColor:
                                     const AlwaysStoppedAnimation<Color>(
                                         Color(0xFF00D4FF)),
@@ -281,7 +277,7 @@ class _SplashScreenState extends State<SplashScreen>
                           Text(
                             'Initializing systems...',
                             style: TextStyle(
-                              color:         Colors.white.withOpacity(0.22),
+                              color:         Colors.white.withValues(alpha: 0.22), // Ln 284
                               fontSize:      11,
                               letterSpacing: 0.5,
                             ),
@@ -294,7 +290,7 @@ class _SplashScreenState extends State<SplashScreen>
               ),
             ),
 
-            // ── Version stamp ────────────────────────────────────────────────
+            // Version stamp
             Positioned(
               bottom: 14,
               left:   0,
@@ -305,7 +301,7 @@ class _SplashScreenState extends State<SplashScreen>
                   'v1.0.0',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color:         Colors.white.withOpacity(0.12),
+                    color:         Colors.white.withValues(alpha: 0.12),
                     fontSize:      11,
                     letterSpacing: 1,
                   ),
@@ -319,12 +315,12 @@ class _SplashScreenState extends State<SplashScreen>
   }
 }
 
-// ── Subtle background grid ─────────────────────────────────────────────────────
+// Subtle background grid
 class _GridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color       = Colors.white.withOpacity(0.025)
+      ..color       = Colors.white.withValues(alpha: 0.025) 
       ..strokeWidth = 0.5;
     const spacing = 40.0;
     for (double x = 0; x < size.width; x += spacing) {
