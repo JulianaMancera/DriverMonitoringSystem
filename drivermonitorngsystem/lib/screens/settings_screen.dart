@@ -1,7 +1,3 @@
-// settings_screen.dart — fully responsive, no hardcoded px values
-// Every size uses context.sp() / context.rp() / context.rs()
-// so it scales correctly on compact (360dp) through xlarge (430dp+) phones.
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -200,9 +196,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _buildCard([
             _infoTile(icon: Icons.school_rounded,
                 title: 'Institution', value: 'New Era University'),
-            _dividerLine(),
-            _infoTile(icon: Icons.psychology_rounded,
-                title: 'Model', value: 'DMS-HybridNet v2.1'),
             _dividerLine(),
             _infoTile(icon: Icons.info_outline_rounded,
                 title: 'Version', value: _appVersion),

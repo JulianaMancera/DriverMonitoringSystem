@@ -727,9 +727,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               // AI/DEMO badge position:
               Positioned(
                 top: (!fullscreen && isLandscape)
-                    ? context.rs(44) + context.rs(6)
-                    : context.rs(10),
-                left: context.rp(10),
+                    ? context.rs(5) 
+                    : (isLandscape ? context.rs(46) : context.rs(10)), 
+                left: isLandscape ? context.rp(24) : context.rp(10), 
           child: Container(
             padding: EdgeInsets.symmetric(
                 // FIX: was horizontal:8, vertical:4
@@ -739,12 +739,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       ? const Color(0xFF10b981)
                       : const Color(0xFFfbbf24))
                   .withValues(alpha: 0.88),
-              // FIX: was hardcoded 12
               borderRadius: BorderRadius.circular(context.rp(10)),
             ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               Container(
-                // FIX: was width:6, height:6
                 width: context.ri(6), height: context.ri(6),
                 decoration: const BoxDecoration(
                     color: Colors.white, shape: BoxShape.circle)),
@@ -752,7 +750,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               Text(_modelLoaded ? 'AI ON' : 'DEMO',
                   style: TextStyle(
                       color:      Colors.white,
-                      // FIX: was hardcoded 9
                       fontSize:   context.sp(9),
                       fontWeight: FontWeight.bold,
                       letterSpacing: 0.8)),
@@ -885,14 +882,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       return Container(
         color: Colors.black,
         child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-          // FIX: was size:48
           Icon(Icons.videocam_off,
               color: const Color(0xFF64748b), size: context.ri(44)),
           SizedBox(height: context.rs(12)),
           Text(_cameraError!,
               style: TextStyle(
                   color:    const Color(0xFF64748b),
-                  // FIX: was hardcoded 13
                   fontSize: context.sp(12)),
               textAlign: TextAlign.center),
           SizedBox(height: context.rs(12)),
@@ -913,7 +908,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         Text('Initializing camera...',
             style: TextStyle(
                 color:    const Color(0xFF64748b),
-                // FIX: was hardcoded 13
                 fontSize: context.sp(12))),
       ])),
     );
@@ -935,12 +929,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   Widget _buildRecBadge({required bool isLandscape, required bool fullscreen}) => Positioned(
         top: (!fullscreen && isLandscape)
-            ? context.rs(44) + context.rs(6)
-            : context.rs(10),
-        right: context.rp(10),
+            ? context.rs(5) 
+            : (isLandscape ? context.rs(46) : context.rs(10)), // lowered more in fullscreen to avoid status bar
+        right: isLandscape ? context.rp(24) : context.rp(10), // safe horizontal clearance
         child: Container(
           padding: EdgeInsets.symmetric(
-              // FIX: was horizontal:10, vertical:4
               horizontal: context.rp(9), vertical: context.rs(4)),
           decoration: BoxDecoration(
               color:        Colors.red.withValues(alpha: 0.85),
@@ -1158,7 +1151,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                         blurRadius: 30, spreadRadius: 4)],
                   ),
                   child: Icon(Icons.warning_amber_rounded,
-                      // FIX: was hardcoded 48
                       size: context.ri(42),
                       color: Colors.red.shade300),
                 ),
