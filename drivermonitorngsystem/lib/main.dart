@@ -231,8 +231,7 @@ final deviceNameProvider = FutureProvider<String>((ref) async {
   return 'USER';
 });
 
-// ─── MAIN SHELL ───────────────────────────────────────────────────────────────
-
+// MAIN SHELL 
 class MainShell extends ConsumerWidget {
   const MainShell({super.key});
 
@@ -265,7 +264,6 @@ class MainShell extends ConsumerWidget {
     final currentIndex = ref.watch(navIndexProvider);
     final isRecording  = ref.watch(isRecordingProvider);
     final sidebarOpen  = ref.watch(sidebarOpenProvider);
-    final isInPip      = ref.watch(isInPipProvider);
     final lsFullscreen = ref.watch(landscapeFullscreenProvider);
     final isLandscape  =
         MediaQuery.of(context).orientation == Orientation.landscape;
@@ -283,9 +281,9 @@ class MainShell extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: const Color(0xFF080E1A),
-      extendBodyBehindAppBar: isFullscreen || isTransparent || isInPip,
+      extendBodyBehindAppBar: isFullscreen || isTransparent,
 
-      appBar: (isFullscreen || isInPip)
+      appBar: isFullscreen
           ? PreferredSize(
               preferredSize: Size.zero,
               child: const SizedBox.shrink(),
@@ -401,11 +399,11 @@ class MainShell extends ConsumerWidget {
                           color: Colors.white.withValues(alpha: 0.05),
                         ),
                       ),
-              ),
-            ),
+                    ),
+                  ),
 
       body: SafeArea(
-        top: !isFullscreen && !isTransparent && !isInPip,
+        top: !isFullscreen && !isTransparent,
         child: isLandscape
             ? _LandscapeSidebarLayout(
                 // Sidebar rules:
@@ -418,15 +416,13 @@ class MainShell extends ConsumerWidget {
                 screens: _screens,
                 onNavTap: (i) {
                   ref.read(navIndexProvider.notifier).set(i);
-                  // Exit fullscreen when navigating (so new screen shows with header)
-                  // but KEEP sidebar open — user may want to navigate further.
                   ref.read(landscapeFullscreenProvider.notifier).set(false);
                 },
               )
             : IndexedStack(index: currentIndex, children: _screens),
       ),
 
-      bottomNavigationBar: (isInPip || isFullscreen)
+      bottomNavigationBar: isFullscreen
           ? const SizedBox.shrink()
           : isLandscape
           ? null
@@ -654,7 +650,6 @@ class _BottomNav extends StatelessWidget {
             builder: (context, constraints) {
               final totalWidth = constraints.maxWidth;
               final itemWidth  = totalWidth / _items.length;
-              // FIX: pill sizes were hardcoded 48/40
               final pillWidth  = context.rp(46);
               final pillHeight = context.rs(38);
               final pillLeft   =

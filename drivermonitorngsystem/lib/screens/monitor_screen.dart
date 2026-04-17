@@ -79,8 +79,6 @@ final alertBannerTypeProvider = NotifierProvider<_StringNotifier, String>(
     () => _StringNotifier('DROWSY'));
 final clearGlassesProvider = NotifierProvider<_BoolNotifier, bool>(
     () => _BoolNotifier(false));
-final isInPipProvider = NotifierProvider<_BoolNotifier, bool>(
-    () => _BoolNotifier(false));
 final activeSubclassProvider =
     NotifierProvider<_NullableStringNotifier, String?>(
         _NullableStringNotifier.new);
