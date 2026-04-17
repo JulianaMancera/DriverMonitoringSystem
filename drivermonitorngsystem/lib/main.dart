@@ -45,8 +45,8 @@ void main() async {
       final info  = await DeviceInfoPlugin().androidInfo;
       final brand = info.brand.toLowerCase();
       if (brand.contains('samsung')) {
-        Responsive.setBrand(DeviceBrand.samsung); // 0.95× — One UI
-      } else if (brand.contains('xiaomi') ||
+  Responsive.setBrand(DeviceBrand.samsung); // change 0.95 → 0.92 in responsive.dart
+      }else if (brand.contains('xiaomi') ||
                  brand.contains('redmi') ||
                  brand.contains('poco')) {
         Responsive.setBrand(DeviceBrand.xiaomi);  // 0.97× — MIUI

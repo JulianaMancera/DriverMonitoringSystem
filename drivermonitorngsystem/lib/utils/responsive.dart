@@ -48,7 +48,7 @@ class Responsive {
   /// so layouts don't overflow on those devices.
   static double _brandFactor() {
     switch (_deviceBrand) {
-      case DeviceBrand.samsung: return 0.95;
+      case DeviceBrand.samsung: return 0.92;
       case DeviceBrand.xiaomi:  return 0.97;
       case DeviceBrand.oppo:    return 0.97;
       case DeviceBrand.vivo:    return 0.97;
