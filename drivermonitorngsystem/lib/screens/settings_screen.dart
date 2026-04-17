@@ -86,21 +86,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
     void _onAuthorsExpanded(bool expanded) {
-    if (!expanded) return;
-    final ctx = _authorsKey.currentContext;
-    if (ctx == null) return;
+      if (!expanded) return;
+      final ctx = _authorsKey.currentContext;
+      if (ctx == null) return;
 
-    Future.delayed(const Duration(milliseconds: 320), () {
-      if (!mounted) return;
-      Scrollable.ensureVisible(
-        ctx,
-        duration: const Duration(milliseconds: 400),
-        curve: Curves.easeInOut,
-        alignment: 0.0,
-        alignmentPolicy: ScrollPositionAlignmentPolicy.explicit,
-      );
-    });
-  }
+      final renderBox = ctx.findRenderObject() as RenderBox?;
+      if (renderBox == null) return;
+
+      Future.delayed(const Duration(milliseconds: 320), () {
+        if (!mounted) return;
+        final renderObj = _authorsKey.currentContext?.findRenderObject() as RenderBox?;
+        if (renderObj == null) return;
+        final offset = renderObj.localToGlobal(Offset.zero);
+        _scrollController.animateTo(
+          _scrollController.offset + offset.dy - 100,
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeInOut,
+        );
+      });
+    }
 
 
   @override
