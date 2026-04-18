@@ -19,7 +19,6 @@ class Sidebar extends StatelessWidget {
         : _buildDesktopSidebar(context);
   }
 
-  // MOBILE BOTTOM NAV — sliding pill indicator
   Widget _buildMobileNavBar(BuildContext context) {
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
@@ -28,7 +27,6 @@ class Sidebar extends StatelessWidget {
     final double iconSize  = isLandscape ? 18 : 22;
     final items = _getNavItems();
 
-    // Find index of active tab for sliding pill position
     final activeIndex = items.indexWhere((i) => i.id == activeTab);
 
     return Container(
@@ -50,7 +48,6 @@ class Sidebar extends StatelessWidget {
     );
   }
 
-  // DESKTOP SIDEBAR — sliding highlight
   Widget _buildDesktopSidebar(BuildContext context) {
     final items       = _getNavItems();
     final activeIndex = items.indexWhere((i) => i.id == activeTab);
@@ -88,8 +85,6 @@ class Sidebar extends StatelessWidget {
   }
 }
 
-// SLIDING MOBILE NAV BAR
-// Uses a Stack: sliding pill behind, icons on top
 class _SlidingNavBar extends StatefulWidget {
   final List<NavItem> items;
   final int activeIndex;
@@ -110,7 +105,6 @@ class _SlidingNavBar extends StatefulWidget {
 }
 
 class _SlidingNavBarState extends State<_SlidingNavBar> {
-  // Total items = nav items + user button
   int get _totalItems => widget.items.length + 1;
 
   @override
@@ -120,7 +114,6 @@ class _SlidingNavBarState extends State<_SlidingNavBar> {
         final totalWidth   = constraints.maxWidth;
         final itemWidth    = totalWidth / _totalItems;
         final pillWidth    = widget.btnSize;
-        // Center the pill within the item slot
         final pillOffset   = (itemWidth - pillWidth) / 2;
         final pillLeft     = widget.activeIndex * itemWidth + pillOffset;
 
@@ -128,7 +121,6 @@ class _SlidingNavBarState extends State<_SlidingNavBar> {
           alignment: Alignment.center,
           children: [
 
-            // SLIDING PILL 
             AnimatedPositioned(
               duration: const Duration(milliseconds: 280),
               curve: Curves.easeInOutCubic,
@@ -142,21 +134,19 @@ class _SlidingNavBarState extends State<_SlidingNavBar> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF0f172a),
                   borderRadius: BorderRadius.circular(14),
-                  // Inset shadow = pressed/sunken look for active
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF0b1120).withOpacity(0.9),
+                      color: const Color(0xFF0b1120).withValues(alpha: 0.9),
                       offset: const Offset(3, 3),
                       blurRadius: 6,
                     ),
                     BoxShadow(
-                      color: const Color(0xFF1e293b).withOpacity(0.9),
+                      color: const Color(0xFF1e293b).withValues(alpha: 0.9),
                       offset: const Offset(-3, -3),
                       blurRadius: 6,
                     ),
-                    // Cyan glow on active pill
                     BoxShadow(
-                      color: const Color(0xFF22d3ee).withOpacity(0.12),
+                      color: const Color(0xFF22d3ee).withValues(alpha: 0.12),
                       blurRadius: 12,
                       spreadRadius: 1,
                     ),
@@ -165,7 +155,6 @@ class _SlidingNavBarState extends State<_SlidingNavBar> {
               ),
             ),
 
-            //  NAV ICONS
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
@@ -203,7 +192,6 @@ class _SlidingNavBarState extends State<_SlidingNavBar> {
                   );
                 }),
 
-                // User button slot
                 SizedBox(
                   width: itemWidth,
                   height: widget.btnSize,
@@ -224,7 +212,6 @@ class _SlidingNavBarState extends State<_SlidingNavBar> {
   }
 }
 
-// SLIDING DESKTOP NAV
 class _SlidingDesktopNav extends StatefulWidget {
   final List<NavItem> items;
   final int activeIndex;
@@ -256,7 +243,6 @@ class _SlidingDesktopNavState extends State<_SlidingDesktopNav> {
         child: Stack(
           children: [
 
-            // SLIDING HIGHLIGHT
             AnimatedPositioned(
               duration: const Duration(milliseconds: 280),
               curve: Curves.easeInOutCubic,
@@ -271,17 +257,17 @@ class _SlidingDesktopNavState extends State<_SlidingDesktopNav> {
                   borderRadius: BorderRadius.circular(14),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF0b1120).withOpacity(0.9),
+                      color: const Color(0xFF0b1120).withValues(alpha: 0.9),  // Ln 274
                       offset: const Offset(3, 3),
                       blurRadius: 6,
                     ),
                     BoxShadow(
-                      color: const Color(0xFF1e293b).withOpacity(0.9),
+                      color: const Color(0xFF1e293b).withValues(alpha: 0.9),  // Ln 279
                       offset: const Offset(-3, -3),
                       blurRadius: 6,
                     ),
                     BoxShadow(
-                      color: const Color(0xFF22d3ee).withOpacity(0.12),
+                      color: const Color(0xFF22d3ee).withValues(alpha: 0.12), // Ln 284
                       blurRadius: 14,
                       spreadRadius: 1,
                     ),
@@ -290,7 +276,6 @@ class _SlidingDesktopNavState extends State<_SlidingDesktopNav> {
               ),
             ),
 
-            // ICONS 
             Column(
               children: widget.items.asMap().entries.map((entry) {
                 final i      = entry.key;
@@ -333,7 +318,6 @@ class _SlidingDesktopNavState extends State<_SlidingDesktopNav> {
   }
 }
 
-// SHARED WIDGETS
 class NavItem {
   final String id;
   final IconData icon;

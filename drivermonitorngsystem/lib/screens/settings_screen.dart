@@ -1,7 +1,3 @@
-// settings_screen.dart — fully responsive, no hardcoded px values
-// Every size uses context.sp() / context.rp() / context.rs()
-// so it scales correctly on compact (360dp) through xlarge (430dp+) phones.
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -90,21 +86,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
     void _onAuthorsExpanded(bool expanded) {
-    if (!expanded) return;
-    final ctx = _authorsKey.currentContext;
-    if (ctx == null) return;
+      if (!expanded) return;
+      final ctx = _authorsKey.currentContext;
+      if (ctx == null) return;
 
-    Future.delayed(const Duration(milliseconds: 320), () {
-      if (!mounted) return;
-      Scrollable.ensureVisible(
-        ctx,
-        duration: const Duration(milliseconds: 400),
-        curve: Curves.easeInOut,
-        alignment: 0.0,
-        alignmentPolicy: ScrollPositionAlignmentPolicy.explicit,
-      );
-    });
-  }
+      final renderBox = ctx.findRenderObject() as RenderBox?;
+      if (renderBox == null) return;
+
+      Future.delayed(const Duration(milliseconds: 320), () {
+        if (!mounted) return;
+        final renderObj = _authorsKey.currentContext?.findRenderObject() as RenderBox?;
+        if (renderObj == null) return;
+        final offset = renderObj.localToGlobal(Offset.zero);
+        _scrollController.animateTo(
+          _scrollController.offset + offset.dy - 100,
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeInOut,
+        );
+      });
+    }
 
 
   @override
@@ -200,9 +200,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _buildCard([
             _infoTile(icon: Icons.school_rounded,
                 title: 'Institution', value: 'New Era University'),
-            _dividerLine(),
-            _infoTile(icon: Icons.psychology_rounded,
-                title: 'Model', value: 'DMS-HybridNet v2.1'),
             _dividerLine(),
             _infoTile(icon: Icons.info_outline_rounded,
                 title: 'Version', value: _appVersion),

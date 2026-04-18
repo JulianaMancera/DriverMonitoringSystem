@@ -4,11 +4,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'core/database/database_helper.dart';
 import 'core/services/notifications.dart';
+import 'screens/dashboard_screen.dart';
 import 'screens/monitor_screen.dart';
-import 'screens/dashboard_screen.dart' show DashboardScreen;
 import 'screens/analytics_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/history_screen.dart';
@@ -16,6 +15,7 @@ import 'utils/responsive.dart';
 import 'constants/layout_constants.dart';
 import 'screens/splash_screen.dart';
 import 'screens/onboarding_screen.dart';
+import 'core/services/pip_service.dart';
 import 'widgets/exit.dart';
 
 void main() async {
@@ -35,33 +35,44 @@ void main() async {
     ),
   );
 
-  await DatabaseHelper.instance.database;
-
-  // ── Brand detection — set once so Responsive uses the right scale factor ──
+  // ── Brand detection — runs BEFORE runApp so scaleFactor is ready ──────────
+  // Samsung One UI, MIUI, ColorOS, OriginOS all inflate default text scale
+  // and UI chrome — layouts overflow on phones that report "normal" size.
+  // Responsive.setBrand() applies a per-brand multiplier to every
+  // sp() / rp() / rs() / ri() call in every screen.
   if (Platform.isAndroid) {
     try {
-      final mfr =
-          (await DeviceInfoPlugin().androidInfo).manufacturer.toLowerCase();
-      if (mfr.contains('samsung')) {
-        Responsive.setBrand(DeviceBrand.samsung);
-      } else if (mfr.contains('xiaomi') || mfr.contains('redmi')) {
-        Responsive.setBrand(DeviceBrand.xiaomi);
-      } else if (mfr.contains('oppo') || mfr.contains('realme')) {
-        Responsive.setBrand(DeviceBrand.oppo);
-      } else if (mfr.contains('vivo')) {
-        Responsive.setBrand(DeviceBrand.vivo);
-      } else if (mfr.contains('google')) {
-        Responsive.setBrand(DeviceBrand.pixel);
+      final info  = await DeviceInfoPlugin().androidInfo;
+      final brand = info.brand.toLowerCase();
+      if (brand.contains('samsung')) {
+  Responsive.setBrand(DeviceBrand.samsung); // change 0.95 → 0.92 in responsive.dart
+      }else if (brand.contains('xiaomi') ||
+                 brand.contains('redmi') ||
+                 brand.contains('poco')) {
+        Responsive.setBrand(DeviceBrand.xiaomi);  // 0.97× — MIUI
+      } else if (brand.contains('oppo') ||
+                 brand.contains('realme') ||
+                 brand.contains('oneplus')) {
+        Responsive.setBrand(DeviceBrand.oppo);    // 0.97× — ColorOS
+      } else if (brand.contains('vivo') ||
+                 brand.contains('iqoo')) {
+        Responsive.setBrand(DeviceBrand.vivo);    // 0.97× — OriginOS
+      } else if (brand.contains('google') ||
+                 brand.contains('pixel')) {
+        Responsive.setBrand(DeviceBrand.pixel);   // 1.00× — stock Android
+      } else {
+        Responsive.setBrand(DeviceBrand.other);   // 1.00× — unknown OEM
       }
-    } catch (_) {}
+    } catch (_) {
+      Responsive.setBrand(DeviceBrand.other);
+    }
   }
 
-  if (Platform.isAndroid) {
-    final plugin = FlutterLocalNotificationsPlugin()
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>();
-    await plugin?.requestNotificationsPermission();
-  }
+  await DatabaseHelper.instance.database;
+
+  // FIX: Notification permission popup removed — foreground service only.
+  // The system dialog was appearing unexpectedly on first launch.
+  // BantayDriveService handles the notification channel internally.
 
   await BantayDriveService.initialize();
 
@@ -90,20 +101,6 @@ class BantayDriveApp extends StatelessWidget {
           ),
           useMaterial3: true,
         ),
-        builder: (context, child) {
-          final mq = MediaQuery.of(context);
-          final maxScale =
-              Responsive.deviceBrand == DeviceBrand.samsung ? 1.05 : 1.10;
-          return MediaQuery(
-            data: mq.copyWith(
-              textScaler: mq.textScaler.clamp(
-                minScaleFactor: 0.85,
-                maxScaleFactor: maxScale,
-              ),
-            ),
-            child: child!,
-          );
-        },
         home: const EntryPoint(),
       ),
     );
@@ -122,6 +119,7 @@ class EntryPoint extends StatefulWidget {
 }
 
 class _EntryPointState extends State<EntryPoint> {
+  // DEV TOGGLE — set true temporarily to preview onboarding UI
   static const bool _forceOnboarding = false;
 
   _AppState _state = _AppState.splash;
@@ -162,20 +160,49 @@ class _EntryPointState extends State<EntryPoint> {
           FadeTransition(opacity: animation, child: child),
       child: switch (_state) {
         _AppState.splash => SplashScreen(
-            key: const ValueKey('splash'),
-            onComplete: _onSplashComplete,
-          ),
+          key: const ValueKey('splash'),
+          onComplete: _onSplashComplete,
+        ),
         _AppState.onboarding => OnboardingScreen(
-            key: const ValueKey('onboarding'),
-            onComplete: _onOnboardingComplete,
-          ),
-        _AppState.main => const MainShell(key: ValueKey('main')),
+          key: const ValueKey('onboarding'),
+          onComplete: _onOnboardingComplete,
+        ),
+        _AppState.main => _ExitWrapper(key: const ValueKey('main')),
       },
     );
   }
 }
 
+class _ExitWrapper extends ConsumerWidget {
+  const _ExitWrapper({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        // Don't show exit dialog if in PiP — back is handled natively
+        if (ref.read(isInPipProvider)) return;
+        final shouldExit = await showExitDialog(context);
+        if (shouldExit && context.mounted) {
+          // Stop service if recording before exit
+          if (ref.read(isRecordingProvider)) {
+            await BantayDriveService.stopService();
+            PipService.setRecording(false);
+          }
+          SystemNavigator.pop();
+        }
+      },
+      child: const MainShell(),
+    );
+  }
+}
+
 // ─── PROVIDERS ────────────────────────────────────────────────────────────────
+
+// FIX: Riverpod 3.x — StateProvider is replaced by NotifierProvider.
+// All providers that held simple state (int, bool) now use Notifier classes.
 
 class _NavIndexNotifier extends Notifier<int> {
   @override
@@ -198,6 +225,21 @@ final sidebarOpenProvider = NotifierProvider<_SidebarNotifier, bool>(
   _SidebarNotifier.new,
 );
 
+// Landscape fullscreen provider
+// false = AppBar/sidebar visible (default when entering Monitor)
+// true  = AppBar hidden, camera fills screen (after user closes sidebar)
+class _LandscapeFullscreenNotifier extends Notifier<bool> {
+  @override
+  bool build() => false; // start with nav visible
+  void set(bool v) => state = v;
+  void toggle() => state = !state;
+}
+
+final landscapeFullscreenProvider =
+    NotifierProvider<_LandscapeFullscreenNotifier, bool>(
+        _LandscapeFullscreenNotifier.new);
+
+// FIX: FutureProvider is unchanged in Riverpod 3.x — no changes needed here.
 final deviceNameProvider = FutureProvider<String>((ref) async {
   try {
     if (Platform.isAndroid) {
@@ -217,8 +259,7 @@ final deviceNameProvider = FutureProvider<String>((ref) async {
   return 'USER';
 });
 
-// ─── MAIN SHELL ───────────────────────────────────────────────────────────────
-
+// MAIN SHELL 
 class MainShell extends ConsumerWidget {
   const MainShell({super.key});
 
@@ -249,150 +290,185 @@ class MainShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final currentIndex = ref.watch(navIndexProvider);
-    final isRecording = ref.watch(isRecordingProvider);
-    final sidebarOpen = ref.watch(sidebarOpenProvider);
-    final isLandscape =
+    final isRecording  = ref.watch(isRecordingProvider);
+    final sidebarOpen  = ref.watch(sidebarOpenProvider);
+    final isInPip = ref.watch(isInPipProvider);
+    final lsFullscreen = ref.watch(landscapeFullscreenProvider);
+    final isLandscape  =
         MediaQuery.of(context).orientation == Orientation.landscape;
 
     final deviceName = ref.watch(deviceNameProvider).when(
-          data: (name) => name,
-          loading: () => 'USER',
-          error: (err, stack) => 'USER',
-        );
+      data: (name) => name,
+      loading: () => 'USER',
+      error: (err, stack) => 'USER',
+    );
 
     final isMonitor = currentIndex == 1;
-    final isTransparent = isLandscape && isMonitor;
+    // Fullscreen: landscape + Monitor + user hasn't tapped to reveal nav
+    final isFullscreen  = isLandscape && isMonitor && lsFullscreen;
+    final isTransparent = isLandscape && isMonitor && !lsFullscreen;
 
-    // ─── EXIT INTERCEPT ───────────────────────────────────────────────────────
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, result) async {
-        if (didPop) return;
-        await showExitDialog(context);
-      },
-      // ─── SCAFFOLD ─────────────────────────────────────────────────────────
-      child: Scaffold(
-        backgroundColor: const Color(0xFF080E1A),
-        extendBodyBehindAppBar: isTransparent,
-        appBar: PreferredSize(
-          preferredSize: Size.fromHeight(isLandscape ? 46 : 60),
-          child: AppBar(
-            backgroundColor: isTransparent
-                ? const Color(0xFF0D1627).withValues(alpha: 0.55)
-                : const Color(0xFF0D1627),
-            elevation: 0,
-            centerTitle: false,
-            leading: isLandscape
-                ? IconButton(
-                    icon: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 250),
-                      transitionBuilder: (child, anim) => RotationTransition(
-                        turns: Tween(begin: 0.875, end: 1.0).animate(anim),
-                        child: FadeTransition(opacity: anim, child: child),
-                      ),
-                      child: Icon(
-                        sidebarOpen ? Icons.close_rounded : Icons.menu_rounded,
-                        key: ValueKey(sidebarOpen),
+    if (isInPip) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(
+          top: false, bottom: false,
+          child: _screens[1],
+        ),
+      );
+    }
+    
+    return Scaffold(
+      backgroundColor: const Color(0xFF080E1A),
+      extendBodyBehindAppBar: isFullscreen || isTransparent,
+
+      appBar: isFullscreen
+          ? PreferredSize(
+              preferredSize: Size.zero,
+              child: const SizedBox.shrink(),
+            )
+          : PreferredSize(
+              preferredSize: Size.fromHeight(
+                  isLandscape ? context.rs(44) : context.rs(58)),
+              child: AppBar(
+                backgroundColor: isTransparent
+                    ? const Color(0xFF0D1627).withValues(alpha: 0.55)
+                    : const Color(0xFF0D1627),
+                elevation: 0,
+                centerTitle: false,
+
+                leading: isLandscape
+                    ? IconButton(
+                        icon: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 250),
+                          transitionBuilder: (child, anim) =>
+                              RotationTransition(
+                                turns: Tween(begin: 0.875, end: 1.0)
+                                    .animate(anim),
+                                child: FadeTransition(
+                                    opacity: anim, child: child),
+                              ),
+                          child: Icon(
+                            sidebarOpen
+                                ? Icons.close_rounded
+                                : Icons.menu_rounded,
+                            key: ValueKey(sidebarOpen),
+                            color: Colors.white,
+                            size: context.ri(24),
+                          ),
+                        ),
+                        onPressed: () =>
+                            ref.read(sidebarOpenProvider.notifier).toggle(),
+                      )
+                    : null,
+
+                title: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      _titles[currentIndex],
+                      style: TextStyle(
                         color: Colors.white,
-                        size: 26,
+                        // FIX: was hardcoded 18/26
+                        fontSize: isLandscape
+                            ? context.sp(16)
+                            : context.sp(24),
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.5,
                       ),
                     ),
-                    onPressed: () =>
-                        ref.read(sidebarOpenProvider.notifier).toggle(),
-                  )
-                : null,
-            title: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  _titles[currentIndex],
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: isLandscape ? 18 : 26,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.5,
-                  ),
-                ),
-                RichText(
-                  text: TextSpan(
-                    text: 'Connected: ',
-                    style: TextStyle(
-                      color: Colors.white54,
-                      fontSize: isLandscape ? 10 : 13,
+                    RichText(
+                      text: TextSpan(
+                        text: 'Connected: ',
+                        style: TextStyle(
+                          color: Colors.white54,
+                          // FIX: was hardcoded 10/13
+                          fontSize: isLandscape
+                              ? context.sp(9)
+                              : context.sp(12),
+                        ),
+                        children: [
+                          TextSpan(
+                            text: deviceName,
+                            style: const TextStyle(
+                              color: Color(0xFF00D4FF),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    children: [
-                      TextSpan(
-                        text: deviceName,
-                        style: const TextStyle(
-                          color: Color(0xFF00D4FF),
-                          fontWeight: FontWeight.w600,
+                  ],
+                ),
+
+                actions: [
+                  Padding(
+                    padding: EdgeInsets.only(right: context.rp(20)),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 400),
+                      curve: Curves.easeInOut,
+                      // FIX: was hardcoded 10/10
+                      width: context.ri(10), height: context.ri(10),
+                      decoration: BoxDecoration(
+                        color: isRecording
+                            ? const Color(0xFF00FF88)
+                            : const Color(0xFF3A4A5C),
+                        shape: BoxShape.circle,
+                        boxShadow: isRecording
+                            ? [
+                                BoxShadow(
+                                  color: const Color(0xFF00FF88)
+                                      .withValues(alpha: 0.6),
+                                  blurRadius: 8, spreadRadius: 1,
+                                ),
+                              ]
+                            : [],
+                      ),
+                    ),
+                  ),
+                ],
+
+                bottom: isTransparent
+                    ? null
+                    : PreferredSize(
+                        preferredSize: const Size.fromHeight(1),
+                        child: Container(
+                          height: 1,
+                          color: Colors.white.withValues(alpha: 0.05),
                         ),
                       ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              Padding(
-                padding: EdgeInsets.only(right: context.rp(20)),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 400),
-                  curve: Curves.easeInOut,
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    color: isRecording
-                        ? const Color(0xFF00FF88)
-                        : const Color(0xFF3A4A5C),
-                    shape: BoxShape.circle,
-                    boxShadow: isRecording
-                        ? [
-                            BoxShadow(
-                              color: const Color(0xFF00FF88)
-                                  .withValues(alpha: 0.6),
-                              blurRadius: 8,
-                              spreadRadius: 1,
-                            ),
-                          ]
-                        : [],
-                  ),
-                ),
-              ),
-            ],
-            bottom: isTransparent
-                ? null
-                : PreferredSize(
-                    preferredSize: const Size.fromHeight(1),
-                    child: Container(
-                      height: 1,
-                      color: Colors.white.withValues(alpha: 0.05),
                     ),
                   ),
-          ),
-        ),
-        body: SafeArea(
-          top: !isTransparent,
-          child: isLandscape
-              ? _LandscapeSidebarLayout(
-                  sidebarOpen: sidebarOpen,
-                  currentIndex: currentIndex,
-                  navItems: _navItems,
-                  screens: _screens,
-                  onNavTap: (i) {
-                    ref.read(navIndexProvider.notifier).set(i);
-                  },
-                )
-              : IndexedStack(index: currentIndex, children: _screens),
-        ),
-        bottomNavigationBar: isLandscape
-            ? null
-            : _BottomNav(
+
+      body: SafeArea(
+        top: !isFullscreen && !isTransparent,
+        child: isLandscape
+            ? _LandscapeSidebarLayout(
+                // Sidebar rules:
+                //   fullscreen → always closed (camera must fill screen)
+                //   Monitor not fullscreen → closed (sidebar overlaps camera)
+                //   other screens → respects sidebarOpen
+                sidebarOpen: sidebarOpen && !isFullscreen,
                 currentIndex: currentIndex,
-                onTap: (i) => ref.read(navIndexProvider.notifier).set(i),
-              ),
+                navItems: _navItems,
+                screens: _screens,
+                onNavTap: (i) {
+                  ref.read(navIndexProvider.notifier).set(i);
+                  ref.read(landscapeFullscreenProvider.notifier).set(false);
+                },
+              )
+            : IndexedStack(index: currentIndex, children: _screens),
       ),
+
+      bottomNavigationBar: isFullscreen
+          ? const SizedBox.shrink()
+          : isLandscape
+          ? null
+          : _BottomNav(
+              currentIndex: currentIndex,
+              onTap: (i) => ref.read(navIndexProvider.notifier).set(i),
+            ),
     );
   }
 }
@@ -474,7 +550,7 @@ class _LandscapeSidebar extends StatelessWidget {
 
     return Container(
       color: const Color(0xFF0D1627),
-      padding: EdgeInsets.only(top: appBarH, bottom: 16, left: 12, right: 12),
+      padding: EdgeInsets.only(top: appBarH, bottom: context.rs(14), left: context.rp(10), right: context.rp(10)),
       child: SingleChildScrollView(
         physics: needsScroll
             ? const ClampingScrollPhysics()
@@ -517,7 +593,7 @@ class _LandscapeSidebar extends StatelessWidget {
                       color: active
                           ? const Color(0xFF00D4FF).withValues(alpha: 0.12)
                           : Colors.transparent,
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(context.rp(12)),
                       border: Border.all(
                         color: active
                             ? const Color(0xFF00D4FF).withValues(alpha: 0.25)
@@ -529,9 +605,10 @@ class _LandscapeSidebar extends StatelessWidget {
                       children: [
                         Icon(
                           item.icon,
-                          size: 20,
-                          color:
-                              active ? const Color(0xFF00D4FF) : Colors.white38,
+                          size: context.ri(20),
+                          color: active
+                              ? const Color(0xFF00D4FF)
+                              : Colors.white38,
                         ),
                         SizedBox(width: context.rp(12)),
                         Expanded(
@@ -542,8 +619,9 @@ class _LandscapeSidebar extends StatelessWidget {
                                   ? const Color(0xFF00D4FF)
                                   : Colors.white54,
                               fontSize: context.sp(14),
-                              fontWeight:
-                                  active ? FontWeight.w600 : FontWeight.w400,
+                              fontWeight: active
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
                             ),
                           ),
                         ),
@@ -606,14 +684,14 @@ class _BottomNav extends StatelessWidget {
       ),
       child: SafeArea(
         child: SizedBox(
-          height: 56,
+          height: context.rs(54),
           child: LayoutBuilder(
             builder: (context, constraints) {
               final totalWidth = constraints.maxWidth;
-              final itemWidth = totalWidth / _items.length;
-              const pillWidth = 48.0;
-              const pillHeight = 40.0;
-              final pillLeft =
+              final itemWidth  = totalWidth / _items.length;
+              final pillWidth  = context.rp(46);
+              final pillHeight = context.rs(38);
+              final pillLeft   =
                   currentIndex * itemWidth + (itemWidth - pillWidth) / 2;
 
               return Stack(
@@ -623,17 +701,18 @@ class _BottomNav extends StatelessWidget {
                     duration: const Duration(milliseconds: 280),
                     curve: Curves.easeInOutCubic,
                     left: pillLeft,
-                    top: (56 - pillHeight) / 2,
+                    top: (context.rs(54) - pillHeight) / 2,
                     child: Container(
                       width: pillWidth,
                       height: pillHeight,
                       decoration: BoxDecoration(
                         color: const Color(0xFF00D4FF).withValues(alpha: 0.13),
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(context.rp(12)),
                         boxShadow: [
                           BoxShadow(
-                            color:
-                                const Color(0xFF00D4FF).withValues(alpha: 0.15),
+                            color: const Color(
+                              0xFF00D4FF,
+                            ).withValues(alpha: 0.15),
                             blurRadius: 10,
                             spreadRadius: 1,
                           ),
@@ -651,7 +730,7 @@ class _BottomNav extends StatelessWidget {
                         behavior: HitTestBehavior.opaque,
                         child: SizedBox(
                           width: itemWidth,
-                          height: 56,
+                          height: context.rs(54),
                           child: Center(
                             child: AnimatedSwitcher(
                               duration: const Duration(milliseconds: 200),
@@ -660,7 +739,7 @@ class _BottomNav extends StatelessWidget {
                               child: Icon(
                                 item.icon,
                                 key: ValueKey('nav_${i}_$active'),
-                                size: active ? 25 : 23,
+                                size: active ? context.ri(24) : context.ri(22),
                                 color: active
                                     ? const Color(0xFF00D4FF)
                                     : Colors.white38,

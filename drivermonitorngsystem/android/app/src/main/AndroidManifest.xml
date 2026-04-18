@@ -4,34 +4,21 @@
     <!-- ── Permissions ─────────────────────────────────────────────────────── -->
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-
-    <!-- Storage — legacy (≤ API 29 / ≤ API 32) -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29"
         tools:replace="android:maxSdkVersion"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32"/>
-
-    <!-- Media (API 33+) -->
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
-
-    <!-- Notifications & foreground service -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA"/>
-
-    <!-- Wake + battery -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
-
-    <!-- FIX: USE_EXACT_ALARM is the correct permission for API 33+.
-         SCHEDULE_EXACT_ALARM still works but shows a user-revocable warning on
-         some OEMs. Keep both for maximum compatibility. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
     <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
 
-    <!-- Hardware features — not required so app works on devices without them -->
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <uses-feature android:name="android.hardware.camera.front" android:required="false"/>
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
@@ -54,10 +41,10 @@
             android:hardwareAccelerated="true"
             android:enableOnBackInvokedCallback="true"
             android:windowSoftInputMode="adjustResize"
-            android:supportsPictureInPicture="true"
-            android:resizeableActivity="true"
             android:showWhenLocked="true"
-            android:turnScreenOn="true">
+            android:turnScreenOn="true"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true">
 
             <meta-data
                 android:name="io.flutter.embedding.android.NormalTheme"
@@ -69,13 +56,11 @@
             </intent-filter>
         </activity>
 
-        <!-- flutter_foreground_task — camera foreground service -->
-        <!-- FIX: Added microphone type alongside camera so the service doesn't
-             crash on devices that link audio to the camera pipeline. -->
         <service
-            android:name="com.pravera.flutter_foreground_task.service.ForegroundTaskService"
-            android:foregroundServiceType="camera|microphone"
-            android:exported="false"/>
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="camera"
+            android:exported="false"
+            android:stopWithTask="false"/>
 
         <meta-data
             android:name="flutterEmbedding"
