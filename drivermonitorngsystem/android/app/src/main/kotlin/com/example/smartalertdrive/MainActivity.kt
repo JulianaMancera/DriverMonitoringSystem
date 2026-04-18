@@ -15,8 +15,16 @@ class MainActivity : FlutterActivity() {
     private val METHOD_CHANNEL = "com.bantaydrive/pip"
     private val EVENT_CHANNEL  = "com.bantaydrive/pip_events"
 
-    private var isRecording = false
-    private var isInPip     = false
+    private var isRecording  = false
+    private var isInPip      = false
+
+    // FIX B: isStopping prevents onUserLeaveHint from re-entering PiP
+    // in the window between the notification stop tap and the moment Flutter
+    // confirms isRecording=false via the setRecording channel call.
+    // Without this flag, tapping stop in the notification on some devices
+    // triggers: stop → home gesture detected → PiP re-entered → stuck again.
+    private var isStopping   = false
+
     private var pipEventSink: EventChannel.EventSink? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -28,6 +36,9 @@ class MainActivity : FlutterActivity() {
 
                     "setRecording" -> {
                         isRecording = call.argument<Boolean>("isRecording") ?: false
+                        // Clear isStopping once Flutter confirms recording has stopped.
+                        // This re-arms the PiP trigger for the next session.
+                        if (!isRecording) isStopping = false
                         result.success(null)
                     }
 
@@ -37,20 +48,42 @@ class MainActivity : FlutterActivity() {
                         result.success(success)
                     }
 
-                    // ── NEW: called by Flutter after stop_recording to close PiP ──
-                    // On all Android devices, the only reliable way to exit PiP
-                    // programmatically is to move the task to back then relaunch,
-                    // or use the moveTaskToBack approach. The simplest cross-device
-                    // method is to call moveTaskToBack(false) which minimises the
-                    // PiP window without killing the app.
+                    // FIX A: exitPip now correctly closes the PiP window on all
+                    // Android versions.
+                    //
+                    // Previous implementation used moveTaskToBack(false) alone.
+                    // On Android 8–11 this collapses the PiP window correctly.
+                    // On Android 12+ (API 31+) the activity stays in PiP mode
+                    // even after moveTaskToBack — the window persists because
+                    // onPictureInPictureModeChanged never fires false.
+                    //
+                    // Fix for Android 12+:
+                    //   1. Set autoEnterEnabled=false so the system won't re-enter
+                    //      PiP when we move to background.
+                    //   2. Post moveTaskToBack with a short delay so the params
+                    //      update propagates before the activity moves back.
+                    //   The system then collapses the PiP window cleanly.
                     "exitPip" -> {
                         if (isInPip) {
-                            // Setting isRecording false first prevents re-entering PiP
-                            // in onUserLeaveHint if the system briefly re-focuses us
+                            isStopping  = true
                             isRecording = false
-                            // Move app to back — Android automatically collapses the
-                            // PiP window when the backing activity is no longer active
-                            moveTaskToBack(false)
+
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                // Android 12+
+                                try {
+                                    val params = PictureInPictureParams.Builder()
+                                        .setAutoEnterEnabled(false)
+                                        .build()
+                                    setPictureInPictureParams(params)
+                                } catch (_: Exception) { }
+                                // Small delay lets params propagate before task moves back
+                                window.decorView.postDelayed({
+                                    moveTaskToBack(false)
+                                }, 80)
+                            } else {
+                                // Android 8–11: moveTaskToBack is sufficient
+                                moveTaskToBack(false)
+                            }
                         }
                         result.success(null)
                     }
@@ -63,7 +96,9 @@ class MainActivity : FlutterActivity() {
             .setStreamHandler(object : EventChannel.StreamHandler {
                 override fun onListen(arguments: Any?, sink: EventChannel.EventSink?) {
                     pipEventSink = sink
-                    // Send current PiP state immediately when Flutter reconnects
+                    // Send current PiP state immediately when Flutter (re)connects.
+                    // This handles the case where pip_service.dart cached stream
+                    // reconnects after a hot reload or widget rebuild.
                     sink?.success(mapOf("type" to "pip", "value" to isInPip))
                 }
                 override fun onCancel(arguments: Any?) {
@@ -72,25 +107,25 @@ class MainActivity : FlutterActivity() {
             })
     }
 
-    // ── Home button / recents pressed ─────────────────────────────────────────
+    // FIX B: guard with isStopping so a race between the notification stop
+    // and a home-button gesture doesn't re-enter PiP with a dead session.
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (isRecording && !isInPip) {
+        if (isRecording && !isInPip && !isStopping) {
             val isLandscape = resources.configuration.orientation ==
                 Configuration.ORIENTATION_LANDSCAPE
             enterPipMode(isLandscape)
         }
     }
 
-    // ── Back pressed ──────────────────────────────────────────────────────────
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if (isInPip) {
-            // Already in PiP — let system handle back (exits PiP)
             super.onBackPressed()
             return
         }
-        if (isRecording && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        if (isRecording && !isStopping &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val isLandscape = resources.configuration.orientation ==
                 Configuration.ORIENTATION_LANDSCAPE
             val entered = enterPipMode(isLandscape)
@@ -99,7 +134,25 @@ class MainActivity : FlutterActivity() {
         super.onBackPressed()
     }
 
-    // ── PiP state changed ─────────────────────────────────────────────────────
+    // FIX C: removed the runOnUiThread wrapper.
+    //
+    // onPictureInPictureModeChanged is already called on the main/UI thread
+    // by the Android framework. Wrapping with runOnUiThread posted the event
+    // to the end of the message queue — after the activity's resumed() event
+    // had already fired on fast devices (Pixel, stock Android).
+    //
+    // Consequence of the old code on Pixel/stock Android:
+    //   resumed() → Flutter clears isInPipProvider=false
+    //   [runOnUiThread post fires AFTER resumed]
+    //   onPictureInPictureModeChanged(false) → pipEventSink sends pip=false
+    //   → pip_service stream emits pip=false AGAIN after monitor_screen already
+    //     cleared it — no harm, but adds unnecessary rebuilds.
+    //   onPictureInPictureModeChanged(true) on PiP entry → same delay caused
+    //   the pip=true event to arrive AFTER resumed on some devices, making
+    //   the pip flag briefly flicker false→true→false.
+    //
+    // Fix: send synchronously on the current (main) thread. Events now arrive
+    // in the correct order relative to lifecycle callbacks.
     override fun onPictureInPictureModeChanged(
         isInPictureInPictureMode: Boolean,
         newConfig: Configuration
@@ -107,21 +160,17 @@ class MainActivity : FlutterActivity() {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         isInPip = isInPictureInPictureMode
 
-        runOnUiThread {
-            // Send PiP state change to Flutter
-            pipEventSink?.success(
-                mapOf("type" to "pip", "value" to isInPictureInPictureMode)
-            )
-            // Send orientation so camera preview adjusts dimensions
-            val ori = if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE)
-                "landscape" else "portrait"
-            pipEventSink?.success(
-                mapOf("type" to "orientation", "value" to ori)
-            )
-        }
+        // Send synchronously — no runOnUiThread wrapper needed or wanted
+        pipEventSink?.success(
+            mapOf("type" to "pip", "value" to isInPictureInPictureMode)
+        )
+        val ori = if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE)
+            "landscape" else "portrait"
+        pipEventSink?.success(
+            mapOf("type" to "orientation", "value" to ori)
+        )
     }
 
-    // ── Device rotates ────────────────────────────────────────────────────────
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -137,20 +186,17 @@ class MainActivity : FlutterActivity() {
                     )
                 }
                 if (isInPip) {
-                    runOnUiThread {
-                        pipEventSink?.success(
-                            mapOf(
-                                "type"  to "orientation",
-                                "value" to if (isLandscape) "landscape" else "portrait"
-                            )
+                    pipEventSink?.success(
+                        mapOf(
+                            "type"  to "orientation",
+                            "value" to if (isLandscape) "landscape" else "portrait"
                         )
-                    }
+                    )
                 }
             } catch (_: Exception) { }
         }
     }
 
-    // ── Enter PiP ─────────────────────────────────────────────────────────────
     private fun enterPipMode(isLandscape: Boolean = false): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
         return try {

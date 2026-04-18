@@ -59,7 +59,8 @@
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
             android:foregroundServiceType="camera"
-            android:exported="false"/>
+            android:exported="false"
+            android:stopWithTask="false"/>
 
         <meta-data
             android:name="flutterEmbedding"

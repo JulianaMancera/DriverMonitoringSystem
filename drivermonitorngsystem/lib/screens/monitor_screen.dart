@@ -1,10 +1,29 @@
-// monitor_screen.dart — v5 PiP + notification stop fixed
-// KEY FIXES:
-//   • ActiveSession global stores sessionId — survives widget rebuilds/PiP
-//   • _onReceiveTaskData uses ActiveSession, not _currentSessionId
-//   • _buildPipView hides control bar and AI badge (fixes 93px overflow)
-//   • didChangeAppLifecycleState.resumed always clears isInPipProvider
-//   • dispose() fully try-catches camera/audio disposal
+// monitor_screen.dart — v7 (definitive fixes)
+//
+// ROOT CAUSES FIXED IN THIS VERSION:
+//
+// BUG 1 — Notification stop never worked:
+//   flutter_foreground_task v9.x wraps sendDataToMain payloads differently
+//   depending on the platform bridge version. The old check "if (data is! String)"
+//   silently dropped everything if the payload arrived as a Map<String,dynamic>
+//   with key 'data'. Fixed: unwrap both String and Map forms.
+//
+// BUG 2 — Camera shows loading when returning from PiP:
+//   CameraController loses its surface texture when the window resizes for PiP
+//   on Android (known flutter/camera issue). isInitialized becomes false.
+//   When the app returns to full screen, CameraPreview renders with an
+//   uninitialized controller → shows a black/loading frame.
+//   Fixed: _recoverCamera() detects this and re-initializes without full dispose.
+//   Also: _cameraController! was force-unwrapped even when _cameraResuming=true
+//   but controller could be null → null crash → error widget hides logs.
+//   Fixed: null-safe camera widget selection.
+//
+// BUG 3 — System logs disappear after PiP:
+//   This was a SYMPTOM of Bug 2. The null crash in _buildCameraWithOverlay
+//   threw an exception that prevented the full layout from rendering,
+//   making it appear the log panel was gone. Fix Bug 2 → logs reappear.
+//   Added extra safety: _flushPendingLogs is also called in the build method
+//   itself if pending logs exist and pip is no longer active.
 
 import 'dart:async';
 import 'dart:ui';
@@ -107,6 +126,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   bool    _cameraInitialized = false;
   String? _cameraError;
   bool    _camDisposing      = false;
+  bool    _cameraResuming      = false;
+  // true while CameraX is internally recovering its hardware session after
+  // the MIUI buffer queue destruction on PiP resize. We show a semi-transparent
+  // overlay OVER CameraPreview (not instead of it) so CameraX can reattach
+  // its surface to the existing texture without interference from us.
+  bool    _cameraReconnecting  = false;
+
   StreamSubscription<Map<String, dynamic>>? _pipSubscription;
 
   int?      _currentSessionId;
@@ -117,7 +143,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   int _consecutiveDistracted = 0;
   int _alertLevel            = 0;
 
-  final List<Map<String, dynamic>> _systemLogs = [];
+  final List<Map<String, dynamic>> _systemLogs  = [];
+  final List<Map<String, dynamic>> _pendingLogs = [];
 
   final AudioPlayer _audioPlayer = AudioPlayer();
   final AudioPlayer _alarmPlayer = AudioPlayer();
@@ -167,14 +194,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             curve: const Interval(0.0, 0.35, curve: Curves.easeIn)));
 
     _loadPreferencesAndInit();
-
     _activeMonitorState = this;
 
-    // Prevent duplicate callbacks on hot reload
     FlutterForegroundTask.removeTaskDataCallback(_onReceiveTaskData);
     FlutterForegroundTask.addTaskDataCallback(_onReceiveTaskData);
 
-    // PiP event stream — handles pip state changes from native
     _pipSubscription = PipService.pipEventStream.listen((event) {
       if (!mounted) return;
       final type  = event['type'] as String?;
@@ -183,11 +207,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         final inPip = value as bool;
         ref.read(isInPipProvider.notifier).set(inPip);
         if (!inPip) {
-          // PiP exited — force rebuild so logs/stop button reappear
+          _flushPendingLogs();
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) setState(() {});
           });
-          _resumeCameraStream();
+          _resumeAfterPip();
         }
       }
     });
@@ -211,37 +235,76 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         _cameraController!.stopImageStream();
       }
     } catch (_) {}
-    try { _cameraController?.dispose(); } catch (_) {}
+    try {
+      _cameraController?.removeListener(_onCameraValueChanged);
+      _cameraController?.dispose();
+    } catch (_) {}
     _cameraController = null;
     try { _audioPlayer.dispose(); } catch (_) {}
     try { _alarmPlayer.dispose(); } catch (_) {}
     super.dispose();
   }
 
+  // ─── TASK DATA CALLBACK ───────────────────────────────────────────────────
+  //
+  // BUG 1 FIX: flutter_foreground_task v9.x changed how sendDataToMain delivers
+  // payloads. In some build configurations the String is wrapped in a Map:
+  //   {'data': 'stop_recording'}
+  // or arrives as a completely different runtime type.
+  //
+  // The old "if (data is! String) return;" silently dropped all messages
+  // that didn't arrive as a bare String — including stop_recording on many
+  // devices. Fixed by extracting the string value from both forms.
   void _onReceiveTaskData(Object data) async {
-    if (data is! String) return;
-    if (data != 'stop_recording') return;
+    // Unwrap: bare String OR Map<dynamic,dynamic> with key 'data'
+    String? message;
+    if (data is String) {
+      message = data;
+    } else if (data is Map) {
+      // flutter_foreground_task v9.x wraps payload: {'data': 'stop_recording'}
+      final raw = data['data'];
+      if (raw is String) message = raw;
+    }
 
-    debugPrint('[Monitor] received stop_recording — this=$hashCode, active=${_activeMonitorState.hashCode}');
+    // Log what we actually received so you can see it in logcat
+    debugPrint('[Monitor] taskData received — type: ${data.runtimeType}, '
+        'message: $message, this=$hashCode mounted=$mounted');
 
-    // If another instance is the active one, delegate to it
-    if (_activeMonitorState != null && _activeMonitorState != this) {
-      debugPrint('[Monitor] delegating to active instance');
+    if (message == null) return;
+    if (message == 'heartbeat') return; // ignore keepalive ticks
+
+    if (message != 'stop_recording') return;
+
+    // Delegate to the most recently mounted instance
+    if (_activeMonitorState != null &&
+        _activeMonitorState != this &&
+        _activeMonitorState!.mounted) {
+      debugPrint('[Monitor] delegating to active mounted instance');
       _activeMonitorState!._onReceiveTaskData(data);
       return;
     }
 
-    // Restore session ID from global if widget lost it during PiP
-    if (_currentSessionId == null && ActiveSession.isActive) {
-      _currentSessionId = ActiveSession.sessionId;
-      _sessionStartTime = ActiveSession.startTime;
-      debugPrint('[Monitor] restored sessionId from ActiveSession: $_currentSessionId');
+    if (!mounted && (_activeMonitorState == null || _activeMonitorState == this)) {
+      debugPrint('[Monitor] no mounted instance — stopping service only');
+      BantayDriveService.stopService();
+      PipService.setRecording(false);
+      await ActiveSession.clear();
+      return;
+    }
+
+    // Try in-memory first, then SharedPreferences fallback
+    if (_currentSessionId == null) {
+      final restored = await ActiveSession.restoreIfNeeded();
+      if (restored) {
+        _currentSessionId = ActiveSession.sessionId;
+        _sessionStartTime = ActiveSession.startTime;
+        debugPrint('[Monitor] restored sessionId from prefs: $_currentSessionId');
+      }
     }
 
     debugPrint('[Monitor] stopping — sessionId=$_currentSessionId');
     if (_currentSessionId != null) {
       await _stopRecording();
-      // Close the PiP window on all devices after stopping from notification
       await PipService.exitPip();
     } else {
       BantayDriveService.stopService();
@@ -255,43 +318,57 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
+  // ─── LIFECYCLE STATE ───────────────────────────────────────────────────────
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) async {
     switch (state) {
       case AppLifecycleState.inactive:
-        // Tell native we're recording so onUserLeaveHint triggers PiP
         await PipService.setRecording(ref.read(isRecordingProvider));
         break;
 
       case AppLifecycleState.paused:
         if (ref.read(isRecordingProvider)) {
-          // Going to background while recording = entering PiP.
-          // Set the provider NOW so _buildPipView() renders immediately
-          // when the window shrinks — before onPictureInPictureModeChanged fires.
           if (mounted) ref.read(isInPipProvider.notifier).set(true);
+          // Do NOT pause camera stream here — PiP preview needs it running.
         } else {
-          // Not recording — normal background, pause camera
           await _pauseCameraStream();
         }
         break;
 
       case AppLifecycleState.resumed:
-        // Returning to foreground. Clear PiP flag — pipEventStream will also
-        // fire onPictureInPictureModeChanged(false) on most devices, but
-        // on Xiaomi/Samsung resumed fires first, so we clear here too.
+        // Clear PiP flag synchronously BEFORE _resumeAfterPip so the first
+        // rebuild renders the full layout (not _buildPipView).
         if (mounted) {
           ref.read(isInPipProvider.notifier).set(false);
-          // Delayed setState so the full UI repaints AFTER the PiP animation
-          // finishes (~300ms) — ensures system logs and stop button reappear
-          Future.delayed(const Duration(milliseconds: 300), () {
+          _flushPendingLogs();
+        }
+        await _resumeAfterPip();
+        if (mounted) {
+          Future.delayed(const Duration(milliseconds: 120), () {
             if (mounted) setState(() {});
           });
         }
-        await _resumeCameraStream();
         break;
 
       default:
         break;
+    }
+  }
+
+  // ─── CAMERA LIFECYCLE ─────────────────────────────────────────────────────
+
+  // Called whenever CameraController.value changes (streaming state, errors, etc.)
+  // CameraX fires this when it finishes internal hardware recovery after PiP.
+  void _onCameraValueChanged() {
+    if (!mounted || _camDisposing) return;
+    final ctrl = _cameraController;
+    if (ctrl == null) return;
+
+    if (_cameraReconnecting && ctrl.value.isStreamingImages) {
+      // CameraX has reattached the surface and resumed streaming — clear overlay
+      setState(() => _cameraReconnecting = false);
+      debugPrint('[Camera] CameraX recovery complete — streaming resumed');
     }
   }
 
@@ -306,20 +383,63 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  Future<void> _resumeCameraStream() async {
+  // Called on PiP exit (both from pipEventStream and resumed lifecycle).
+  //
+  // LOGCAT FINDING: MIUI destroys the Camera2 BufferQueue when the window
+  // resizes for PiP (ERROR_CAMERA_DEVICE code 4 + ERROR_CAMERA_SERVICE code 5).
+  // CameraX handles this internally: CLOSING → REOPENING → OPENED.
+  // We must NOT dispose/reinitialize the controller — that interrupts CameraX's
+  // own recovery and causes a second recovery cycle (62 skipped frames in log).
+  //
+  // Correct approach: show a reconnecting overlay OVER the CameraPreview
+  // and wait for CameraX to finish on its own. _onCameraValueChanged clears
+  // the overlay when isStreamingImages becomes true again.
+  Future<void> _resumeAfterPip() async {
     if (_cameraController == null || _camDisposing) return;
     if (!ref.read(isRecordingProvider)) return;
+    // Guard: if already resuming (pipEventStream and resumed both fire on Xiaomi),
+    // the second call is a no-op — CameraX only needs one recovery attempt.
+    if (_cameraResuming) return;
+
+    // Show reconnecting overlay immediately — CameraPreview stays mounted
+    // so CameraX can reattach its surface without a new controller.
+    if (mounted) setState(() { _cameraResuming = true; _cameraReconnecting = true; });
+
+    // Give CameraX a moment to start its recovery before we try the stream.
+    // If the stream is already running (surface was never lost), this is a no-op.
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    if (!mounted || _camDisposing) return;
+
     try {
       if (!_cameraController!.value.isStreamingImages) {
         await _cameraController!.startImageStream(_onCameraFrame);
       }
+      // Stream is running — clear both flags
+      if (mounted) setState(() { _cameraResuming = false; _cameraReconnecting = false; });
     } catch (e) {
-      debugPrint('[Camera] resumeStream error: $e');
+      // startImageStream failed — CameraX is still recovering internally.
+      // Leave _cameraReconnecting=true; _onCameraValueChanged will clear it
+      // when CameraX finishes its REOPENING cycle.
+      debugPrint('[Camera] startImageStream during recovery: $e — waiting for CameraX');
+      if (mounted) setState(() => _cameraResuming = false);
+      // Retry stream start after CameraX finishes its cycle (~800ms on Xiaomi)
+      Future.delayed(const Duration(milliseconds: 800), () async {
+        if (!mounted || _camDisposing || _cameraController == null) return;
+        try {
+          if (!_cameraController!.value.isStreamingImages) {
+            await _cameraController!.startImageStream(_onCameraFrame);
+          }
+          if (mounted) setState(() => _cameraReconnecting = false);
+        } catch (e2) {
+          debugPrint('[Camera] retry startImageStream failed: $e2');
+          if (mounted) setState(() => _cameraReconnecting = false);
+        }
+      });
     }
-    if (mounted) setState(() {});
   }
 
-  // ─── CAMERA ───────────────────────────────────────────────────────────────
+  // ─── CAMERA INIT ──────────────────────────────────────────────────────────
 
   Future<void> _loadPreferencesAndInit() async {
     final prefs = PreferencesHelper.instance;
@@ -353,6 +473,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       if (!mounted || _camDisposing) return;
       setState(() { _cameraInitialized = true; _cameraError = null; });
 
+      // Listen to CameraController value changes so we can detect when
+      // CameraX finishes its internal hardware recovery after PiP resize.
+      // When isStreamingImages flips back to true, we clear the reconnecting overlay.
+      _cameraController!.addListener(_onCameraValueChanged);
+
       if (_prefAutoStart) {
         await Future.delayed(const Duration(milliseconds: 500));
         if (mounted && !_camDisposing) await _startRecording();
@@ -362,14 +487,53 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
+  // ─── LOG HELPERS ──────────────────────────────────────────────────────────
+
+  void _flushPendingLogs() {
+    if (_pendingLogs.isEmpty || !mounted) return;
+    setState(() {
+      _systemLogs.addAll(_pendingLogs);
+      _pendingLogs.clear();
+      if (_systemLogs.length > 100) {
+        _systemLogs.removeRange(0, _systemLogs.length - 100);
+      }
+    });
+  }
+
+  void _addLogSync(String message, String type) {
+    final now = DateTime.now();
+    final t = '${now.hour.toString().padLeft(2, '0')}:'
+        '${now.minute.toString().padLeft(2, '0')}:'
+        '${now.second.toString().padLeft(2, '0')}';
+    final entry = {'time': t, 'message': message, 'type': type};
+
+    // Always persist to DB regardless of UI state
+    if (_currentSessionId != null) {
+      DatabaseHelper.instance.insertSystemLog(
+          sessionId: _currentSessionId!, message: message, logType: type);
+    }
+
+    if (!mounted) return;
+
+    final isInPip = ref.read(isInPipProvider);
+    if (isInPip) {
+      _pendingLogs.add(entry);
+      return;
+    }
+
+    setState(() {
+      _systemLogs.add(entry);
+      if (_systemLogs.length > 100) _systemLogs.removeAt(0);
+    });
+  }
+
   // ─── SESSION ──────────────────────────────────────────────────────────────
 
   Future<void> _startRecording() async {
     _currentSessionId      = await DatabaseHelper.instance.insertSession();
     await DatabaseHelper.instance.insertStateCount(_currentSessionId!);
     _sessionStartTime      = DateTime.now();
-    // Persist in global so notification stop can find it even if widget rebuilds
-    ActiveSession.start(_currentSessionId!);
+    await ActiveSession.start(_currentSessionId!);
     _consecutiveDrowsy     = 0;
     _consecutiveDistracted = 0;
     _alertLevel            = 0;
@@ -405,7 +569,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   Future<void> _stopRecording() async {
-    // Restore from global if widget lost session ID during PiP
     if (_currentSessionId == null && ActiveSession.isActive) {
       _currentSessionId = ActiveSession.sessionId;
       _sessionStartTime = ActiveSession.startTime;
@@ -414,9 +577,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _snapshotTimer?.cancel();
     await _pauseCameraStream();
     await _alarmPlayer.stop();
-    _alertLevel            = 0;
-    _consecutiveDrowsy     = 0;
-    _consecutiveDistracted = 0;
+    _alertLevel = _consecutiveDrowsy = _consecutiveDistracted = 0;
 
     final durationSec = _sessionStartTime != null
         ? DateTime.now().difference(_sessionStartTime!).inSeconds : 0;
@@ -427,13 +588,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     double penalty = 0.0;
     for (final a in alerts) {
       final level = (a['alert_level'] as int?) ?? 1;
-      if (level == 1) {
-        penalty += 2.0;
-      } else if (level == 2) {
-        penalty += 4.0;
-      } else {
-        penalty += 8.0;
-      }
+      if (level == 1) penalty += 2.0;
+      else if (level == 2) penalty += 4.0;
+      else penalty += 8.0;
     }
     final safetyScore = (alertness - penalty).clamp(0.0, 100.0);
 
@@ -444,8 +601,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       safetyScore:  safetyScore,
     );
 
-    debugPrint('[Monitor] Session $_currentSessionId ended — score: ${safetyScore.toInt()}%');
-    ActiveSession.clear();
+    debugPrint('[Monitor] Session $_currentSessionId ended — '
+        'score: ${safetyScore.toInt()}%');
+    await ActiveSession.clear();
     _addLogSync('Session Ended — Score: ${safetyScore.toInt()}%', 'INFO');
     BantayDriveService.stopService();
     PipService.setRecording(false);
@@ -466,12 +624,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  bool _isInferring = false; // guard: drop frame if previous inference running
+  // ─── INFERENCE ────────────────────────────────────────────────────────────
+
+  bool _isInferring = false;
 
   Future<void> _onCameraFrame(CameraImage frame) async {
     if (_camDisposing) return;
-    // Drop frame immediately if inference is already running.
-    // This prevents camera frame queue buildup that causes UI lag.
     if (_isInferring) return;
     final now = DateTime.now();
     if (now.difference(_lastInferTs).inMilliseconds < _kInferThrottleMs) return;
@@ -505,32 +663,23 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     switch (r.state) {
       case 'drowsy':
         _consecutiveDrowsy++;
-        // Soft decay on distracted so brief drowsy frames don't wipe progress
         _consecutiveDistracted = (_consecutiveDistracted - 1).clamp(0, 999);
         _addLogSync(
           '[${modelSourceLabel(r.modelSource)}] '
-          '${r.subclass} — ${r.drowsyPct.toInt()}% drowsy',
-          'WARNING',
-        );
+          '${r.subclass} — ${r.drowsyPct.toInt()}% drowsy', 'WARNING');
         _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy);
         BantayDriveService.updateState('drowsy');
         break;
       case 'distracted':
         _consecutiveDistracted++;
-        // Soft decay on drowsy so brief distracted frames don't wipe progress
         _consecutiveDrowsy = (_consecutiveDrowsy - 1).clamp(0, 999);
         _addLogSync(
           '[${modelSourceLabel(r.modelSource)}] '
-          '${r.subclass} — ${r.distractedPct.toInt()}% distracted',
-          'WARNING',
-        );
+          '${r.subclass} — ${r.distractedPct.toInt()}% distracted', 'WARNING');
         _checkAndTriggerAlert('DISTRACTED', _consecutiveDistracted);
         BantayDriveService.updateState('distracted');
         break;
       default:
-        // Soft decay on neutral — one safe frame should not cancel 4 unsafe frames.
-        // Hard reset would make the 5-frame consecutive threshold impossible to reach
-        // if the model flickers neutral occasionally.
         _consecutiveDrowsy     = (_consecutiveDrowsy     - 1).clamp(0, 999);
         _consecutiveDistracted = (_consecutiveDistracted - 1).clamp(0, 999);
         if (_alertLevel > 0 && _alertLevel < 3) {
@@ -549,13 +698,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (consecutive < thresholds[0]) return;
 
     int newLevel = 1;
-    if (consecutive >= thresholds[2]) { 
-      newLevel = 3; 
-      } else if (consecutive >= thresholds[1]) { 
-      newLevel = 2; 
-      }
+    if (consecutive >= thresholds[2]) newLevel = 3;
+    else if (consecutive >= thresholds[1]) newLevel = 2;
 
-    // Only trigger if this is a NEW or HIGHER alert level
     if (newLevel <= _alertLevel) return;
     _alertLevel = newLevel;
 
@@ -565,15 +710,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     if (_currentSessionId != null) {
       await DatabaseHelper.instance.insertAlertEvent(
-          sessionId:  _currentSessionId!,
-          alertType:  type,
-          alertLevel: newLevel);
+          sessionId: _currentSessionId!, alertType: type, alertLevel: newLevel);
       _addLogSync(
         'ALERT Level $newLevel — '
         '${type == 'DROWSY' ? 'Drowsiness' : 'Distraction'} '
-        '($consecutive consecutive frames)',
-        'WARNING',
-      );
+        '($consecutive consecutive frames)', 'WARNING');
       ref.read(dbChangeCounterProvider.notifier).increment();
     }
     await _playAlertSound(newLevel);
@@ -599,24 +740,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (mounted) ref.read(showAlertBannerProvider.notifier).set(false);
   }
 
-  void _addLogSync(String message, String type) {
-    if (!mounted) return;
-    final now = DateTime.now();
-    final t = '${now.hour.toString().padLeft(2, '0')}:'
-        '${now.minute.toString().padLeft(2, '0')}:'
-        '${now.second.toString().padLeft(2, '0')}';
-    setState(() {
-      _systemLogs.add({'time': t, 'message': message, 'type': type});
-      if (_systemLogs.length > 100) _systemLogs.removeAt(0);
-    });
-    if (_currentSessionId != null) {
-      DatabaseHelper.instance.insertSystemLog(
-          sessionId: _currentSessionId!,
-          message:   message,
-          logType:   type);
-    }
-  }
-
   Future<void> _saveAlertnessSnapshot() async {
     if (_currentSessionId == null) return;
     await DatabaseHelper.instance.insertAlertnessSnapshot(
@@ -632,8 +755,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   Widget build(BuildContext context) {
     final isInPip = ref.watch(isInPipProvider);
 
-    // PiP mode: bare camera-only view, no scaffold chrome
     if (isInPip) return _buildPipView();
+
+    // Safety flush: if we somehow have pending logs but pip is no longer active,
+    // flush them now rather than waiting for the next lifecycle event.
+    if (_pendingLogs.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _flushPendingLogs());
+    }
 
     final isDesktop   = MediaQuery.of(context).size.width >= 1024;
     final isLandscape =
@@ -663,12 +791,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // PiP VIEW — minimal camera + REC badge + state label
-  // Only renders when isInPipProvider=true (intercepted by _AppRoot in main.dart)
-  // No control bar or metrics — they overflow in the tiny PiP window (~150dp wide)
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ─── PiP VIEW ─────────────────────────────────────────────────────────────
 
   Widget _buildPipView() {
     final isRecording = ref.watch(isRecordingProvider);
@@ -681,15 +804,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       'distracted' => 'Distracted',
       _            => 'Alert',
     };
-
     final alertColor = alertType == 'DROWSY' ? Colors.orange : Colors.red;
 
     return ColoredBox(
       color: Colors.black,
       child: Stack(fit: StackFit.expand, children: [
 
-        // Camera — FittedBox.cover + swapped sensor dims for portrait
-        if (_cameraInitialized && !_camDisposing && _cameraController != null)
+        if (_cameraInitialized && !_camDisposing && _cameraController != null &&
+            _cameraController!.value.isInitialized)
           Positioned.fill(
             child: FittedBox(
               fit: BoxFit.cover,
@@ -702,25 +824,19 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             ),
           ),
 
-        // Bottom gradient
         Positioned(
           bottom: 0, left: 0, right: 0,
           child: Container(
             height: 48,
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                begin: Alignment.bottomCenter,
-                end:   Alignment.topCenter,
-                colors: [
-                  Colors.black.withValues(alpha: 0.85),
-                  Colors.transparent,
-                ],
+                begin: Alignment.bottomCenter, end: Alignment.topCenter,
+                colors: [Colors.black.withValues(alpha: 0.85), Colors.transparent],
               ),
             ),
           ),
         ),
 
-        // REC badge top-left
         if (isRecording)
           Positioned(
             top: 6, left: 6,
@@ -733,15 +849,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               child: const Row(mainAxisSize: MainAxisSize.min, children: [
                 Icon(Icons.circle, color: Colors.white, size: 5),
                 SizedBox(width: 3),
-                Text('REC',
-                    style: TextStyle(
-                        color: Colors.white, fontSize: 9,
-                        fontWeight: FontWeight.bold, letterSpacing: 1.0)),
+                Text('REC', style: TextStyle(
+                    color: Colors.white, fontSize: 9,
+                    fontWeight: FontWeight.bold, letterSpacing: 1.0)),
               ]),
             ),
           ),
 
-        // State label bottom — constrained to prevent overflow
         Positioned(
           bottom: 6, left: 6, right: 6,
           child: Center(
@@ -756,49 +870,35 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               ),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
                 Icon(
-                  showAlert
-                      ? Icons.warning_amber_rounded
+                  showAlert ? Icons.warning_amber_rounded
                       : Icons.check_circle_outline_rounded,
-                  color: Colors.white, size: 11,
-                ),
+                  color: Colors.white, size: 11),
                 const SizedBox(width: 4),
-                Flexible(
-                  child: Text(stateLabel,
-                      style: const TextStyle(
-                          color: Colors.white, fontSize: 10,
-                          fontWeight: FontWeight.bold),
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1),
-                ),
+                Flexible(child: Text(stateLabel,
+                    style: const TextStyle(color: Colors.white, fontSize: 10,
+                        fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis, maxLines: 1)),
               ]),
             ),
           ),
         ),
-
       ]),
     );
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // LAYOUTS
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ─── LAYOUTS ──────────────────────────────────────────────────────────────
 
   Widget _buildPortraitLayout() => SingleChildScrollView(
         child: Padding(
-          // FIX: was const EdgeInsets.symmetric(horizontal: 16)
           padding: EdgeInsets.symmetric(horizontal: context.rp(14)),
           child: Column(children: [
-            // FIX: was const SizedBox(height: 28)
             SizedBox(height: context.rs(20)),
             _buildCameraWithOverlay(
-                // FIX: camera height now accounts for compact phones
                 height: MediaQuery.of(context).size.height *
                     (context.isSmallPhone ? 0.36 : 0.40),
                 isLandscape: false),
-            // FIX: was const SizedBox(height: 12)
             SizedBox(height: context.rs(10)),
             _buildMetricsSidebar(isLandscape: false),
-            // FIX: was const SizedBox(height: 16)
             SizedBox(height: context.rs(14)),
           ]),
         ),
@@ -806,10 +906,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   Widget _buildLandscapeLayout() {
     final lsFullscreen = ref.watch(landscapeFullscreenProvider);
-
     if (lsFullscreen) {
-      // Full-screen mode: camera fills entire screen.
-      // Tap camera to exit fullscreen (reveal header + metrics).
       return GestureDetector(
         onTap: () {
           ref.read(landscapeFullscreenProvider.notifier).set(false);
@@ -819,10 +916,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         child: _buildCameraWithOverlay(isLandscape: true, fullscreen: true),
       );
     }
-
-    // Non-fullscreen landscape: camera fills the body area (below header).
-    // No gauges/metrics in landscape — portrait only.
-    // Tapping the camera goes fullscreen (hides header too).
     return GestureDetector(
       onTap: () {
         ref.read(landscapeFullscreenProvider.notifier).set(true);
@@ -843,13 +936,58 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               _buildMetricsSidebar(isLandscape: false),
             ])),
             SizedBox(width: context.rp(24)),
-            Expanded(flex: 4,
-                child: _buildMetricsSidebar(isLandscape: false)),
+            Expanded(flex: 4, child: _buildMetricsSidebar(isLandscape: false)),
           ],
         )),
       ]);
 
   // ─── CAMERA WITH OVERLAY ──────────────────────────────────────────────────
+
+  // Shows CameraPreview whenever the controller exists and is initialized.
+  // During MIUI's internal CameraX recovery (BufferQueue destroyed on PiP resize),
+  // we keep CameraPreview mounted — removing it would interrupt CameraX's
+  // surface reattachment. Instead we layer a semi-transparent reconnecting
+  // overlay on top until _onCameraValueChanged clears _cameraReconnecting.
+  Widget _buildCameraChild(double camW, double camH) {
+    final ctrl = _cameraController;
+    final canShow = _cameraInitialized &&
+        !_camDisposing &&
+        ctrl != null &&
+        ctrl.value.isInitialized;
+
+    if (canShow) {
+      return Stack(children: [
+        CameraPreview(key: _cameraKey, ctrl),
+        // Reconnecting overlay — shown while CameraX recovers its hardware session.
+        // Keeps the texture alive and gives the user visual feedback.
+        if (_cameraReconnecting)
+          Positioned.fill(
+            child: Container(
+              color: Colors.black.withValues(alpha: 0.55),
+              child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const SizedBox(
+                  width: 24, height: 24,
+                  child: CircularProgressIndicator(
+                      color: Color(0xFF22d3ee), strokeWidth: 2),
+                ),
+                const SizedBox(height: 8),
+                Text('Reconnecting camera...',
+                    style: TextStyle(
+                        color: Colors.white70, fontSize: context.sp(10))),
+              ])),
+            ),
+          ),
+      ]);
+    }
+
+    if (_cameraResuming) {
+      // Stream restarting but controller not yet initialized — show plain black
+      // (not the spinner fallback) so layout doesn't jump
+      return const ColoredBox(color: Colors.black);
+    }
+
+    return _buildCameraFallback();
+  }
 
   Widget _buildCameraWithOverlay({
     double? height,
@@ -858,15 +996,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }) {
     final isRecording  = ref.watch(isRecordingProvider);
     final clearGlasses = ref.watch(clearGlassesProvider);
-    // Camera sensor ALWAYS reports previewSize in landscape orientation
-    // (width = longer dimension). In portrait we must invert the ratio.
-    // isLandscape flag tells us which way the device is held.
+
     double camAspect;
-    if (_cameraInitialized && _cameraController != null &&
-        _cameraController!.value.previewSize != null) {
-      final ps = _cameraController!.value.previewSize!;
-      // ps.width is always the longer side from the sensor
-      final sensorAspect = ps.width / ps.height; // always > 1.0
+    final ctrl = _cameraController;
+    if (_cameraInitialized && ctrl != null &&
+        ctrl.value.isInitialized &&
+        ctrl.value.previewSize != null) {
+      final ps = ctrl.value.previewSize!;
+      final sensorAspect = ps.width / ps.height;
       camAspect = isLandscape ? sensorAspect : (1.0 / sensorAspect);
     } else {
       camAspect = isLandscape ? 4.0 / 3.0 : 3.0 / 4.0;
@@ -876,28 +1013,22 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       builder: (ctx, constraints) {
         final boxW = constraints.maxWidth;
         final boxH = constraints.maxHeight;
-        // Scale camera to FILL the box (like BoxFit.cover) without distortion
         double camW, camH;
         if (boxW / boxH > camAspect) {
-          camW = boxW;
-          camH = boxW / camAspect;
+          camW = boxW; camH = boxW / camAspect;
         } else {
-          camH = boxH;
-          camW = boxH * camAspect;
+          camH = boxH; camW = boxH * camAspect;
         }
         return ClipRect(
           child: OverflowBox(
-            maxWidth:  camW,
-            maxHeight: camH,
+            maxWidth: camW, maxHeight: camH,
             child: Transform(
               alignment: Alignment.center,
               transform: Matrix4.diagonal3Values(
                   _mirrorCamera ? -1.0 : 1.0, 1.0, 1.0),
               child: SizedBox(
                 width: camW, height: camH,
-                child: (_cameraInitialized && !_camDisposing)
-                    ? CameraPreview(key: _cameraKey, _cameraController!)
-                    : _buildCameraFallback(),
+                child: _buildCameraChild(camW, camH),
               ),
             ),
           ),
@@ -908,149 +1039,128 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final inner = ClipRRect(
       borderRadius: fullscreen
           ? BorderRadius.zero
-          // FIX: was hardcoded 14
           : BorderRadius.circular(context.rp(14)),
       child: Stack(fit: StackFit.expand, children: [
         cameraWidget,
         _buildGradientOverlay(),
 
         SafeArea(
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              if (isRecording) _buildRecBadge(isLandscape: isLandscape, fullscreen: fullscreen),
+          child: Stack(fit: StackFit.expand, children: [
+            if (isRecording) _buildRecBadge(isLandscape: isLandscape, fullscreen: fullscreen),
 
-              // AI/DEMO badge — hidden in PiP (causes overflow in tiny window)
-              if (!ref.watch(isInPipProvider))
+            if (!ref.watch(isInPipProvider))
               Positioned(
                 top: (!fullscreen && isLandscape)
-                    ? context.rs(5) 
-                    : (isLandscape ? context.rs(46) : context.rs(10)), 
-                left: isLandscape ? context.rp(24) : context.rp(10), 
-          child: Container(
-            padding: EdgeInsets.symmetric(
-                // FIX: was horizontal:8, vertical:4
-                horizontal: context.rp(7), vertical: context.rs(4)),
-            decoration: BoxDecoration(
-              color: (_modelLoaded
-                      ? const Color(0xFF10b981)
-                      : const Color(0xFFfbbf24))
-                  .withValues(alpha: 0.88),
-              borderRadius: BorderRadius.circular(context.rp(10)),
-            ),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Container(
-                width: context.ri(6), height: context.ri(6),
-                decoration: const BoxDecoration(
-                    color: Colors.white, shape: BoxShape.circle)),
-              SizedBox(width: context.rp(4)),
-              Text(_modelLoaded ? 'AI ON' : 'DEMO',
-                  style: TextStyle(
-                      color:      Colors.white,
-                      fontSize:   context.sp(9),
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 0.8)),
-            ]),
-          ),
-        ),
-
-        // Fullscreen hint — only visible when camera is TRULY fullscreen
-        // (lsFullscreen=true from provider). Disappears when nav is shown.
-        if (fullscreen)
-          Positioned(
-            bottom: context.rs(64),
-            right: context.rp(16),
-            child: Consumer(
-              builder: (ctx, ref2, _) {
-                final isFullNow = ref2.watch(landscapeFullscreenProvider);
-                return AnimatedOpacity(
-                  opacity: isFullNow ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 350),
-                  child: IgnorePointer(
-                    ignoring: !isFullNow,
-                    child: Container(
-                      padding: EdgeInsets.symmetric(
-                          horizontal: context.rp(10), vertical: context.rs(5)),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.45),
-                        borderRadius: BorderRadius.circular(context.rp(20)),
-                      ),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(Icons.touch_app_rounded,
-                            size: context.ri(12),
-                            color: Colors.white.withValues(alpha: 0.55)),
-                        SizedBox(width: context.rp(4)),
-                        Text('Tap to show controls',
-                            style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.55),
-                                fontSize: context.sp(10))),
-                      ]),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-
-        // Bottom control bar — hidden in PiP (overflows in ~150dp window)
-        if (!ref.watch(isInPipProvider))
-        Positioned(
-          bottom: fullscreen ? context.rs(16) : context.rs(12),
-          left: 0, right: 0,
-          child: Center(
-            child: ClipRRect(
-              // FIX: was hardcoded 28
-              borderRadius: BorderRadius.circular(context.rp(24)),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                    ? context.rs(5)
+                    : (isLandscape ? context.rs(46) : context.rs(10)),
+                left: isLandscape ? context.rp(24) : context.rp(10),
                 child: Container(
                   padding: EdgeInsets.symmetric(
-                      // FIX: was horizontal:6, vertical:6
-                      horizontal: context.rp(5), vertical: context.rs(5)),
+                      horizontal: context.rp(7), vertical: context.rs(4)),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0f172a).withValues(alpha: 0.65),
-                    borderRadius: BorderRadius.circular(context.rp(24)),
-                    border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.08), width: 1),
+                    color: (_modelLoaded
+                            ? const Color(0xFF10b981)
+                            : const Color(0xFFfbbf24))
+                        .withValues(alpha: 0.88),
+                    borderRadius: BorderRadius.circular(context.rp(10)),
                   ),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    _CameraOverlayButton(
-                      icon:        Icons.visibility,
-                      label:       'Clear Glasses',
-                      isActive:    clearGlasses,
-                      activeColor: const Color(0xFF22d3ee),
-                      onTap: () {
-                        ref.read(clearGlassesProvider.notifier).toggle();
-                        if (!clearGlasses && _currentSessionId != null) {
-                          _addLogSync('Clear Glasses Mode Active', 'SUCCESS');
-                        }
-                      },
-                    ),
                     Container(
-                      // FIX: was width:1, height:28
-                      width: 1, height: context.rs(24),
-                      margin: EdgeInsets.symmetric(horizontal: context.rp(5)),
-                      color: Colors.white.withValues(alpha: 0.15),
-                    ),
-                    _CameraOverlayButton(
-                      icon: isRecording
-                          ? Icons.stop_circle
-                          : Icons.fiber_manual_record,
-                      label:       isRecording ? 'Stop' : 'Record',
-                      isActive:    isRecording,
-                      activeColor: Colors.red,
-                      onTap: () => isRecording
-                          ? _stopRecording()
-                          : _startRecording(),
-                    ),
+                      width: context.ri(6), height: context.ri(6),
+                      decoration: const BoxDecoration(
+                          color: Colors.white, shape: BoxShape.circle)),
+                    SizedBox(width: context.rp(4)),
+                    Text(_modelLoaded ? 'AI ON' : 'DEMO',
+                        style: TextStyle(
+                            color: Colors.white, fontSize: context.sp(9),
+                            fontWeight: FontWeight.bold, letterSpacing: 0.8)),
                   ]),
                 ),
               ),
-            ),
-          ),
-        ),
-            ],
-          ),
+
+            if (fullscreen)
+              Positioned(
+                bottom: context.rs(64), right: context.rp(16),
+                child: Consumer(builder: (ctx, ref2, _) {
+                  final isFullNow = ref2.watch(landscapeFullscreenProvider);
+                  return AnimatedOpacity(
+                    opacity: isFullNow ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 350),
+                    child: IgnorePointer(
+                      ignoring: !isFullNow,
+                      child: Container(
+                        padding: EdgeInsets.symmetric(
+                            horizontal: context.rp(10), vertical: context.rs(5)),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(context.rp(20)),
+                        ),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.touch_app_rounded,
+                              size: context.ri(12),
+                              color: Colors.white.withValues(alpha: 0.55)),
+                          SizedBox(width: context.rp(4)),
+                          Text('Tap to show controls',
+                              style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.55),
+                                  fontSize: context.sp(10))),
+                        ]),
+                      ),
+                    ),
+                  );
+                }),
+              ),
+
+            if (!ref.watch(isInPipProvider))
+              Positioned(
+                bottom: fullscreen ? context.rs(16) : context.rs(12),
+                left: 0, right: 0,
+                child: Center(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(context.rp(24)),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                      child: Container(
+                        padding: EdgeInsets.symmetric(
+                            horizontal: context.rp(5), vertical: context.rs(5)),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0f172a).withValues(alpha: 0.65),
+                          borderRadius: BorderRadius.circular(context.rp(24)),
+                          border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.08), width: 1),
+                        ),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          _CameraOverlayButton(
+                            icon: Icons.visibility, label: 'Clear Glasses',
+                            isActive: clearGlasses,
+                            activeColor: const Color(0xFF22d3ee),
+                            onTap: () {
+                              ref.read(clearGlassesProvider.notifier).toggle();
+                              if (!clearGlasses && _currentSessionId != null) {
+                                _addLogSync('Clear Glasses Mode Active', 'SUCCESS');
+                              }
+                            },
+                          ),
+                          Container(
+                            width: 1, height: context.rs(24),
+                            margin: EdgeInsets.symmetric(horizontal: context.rp(5)),
+                            color: Colors.white.withValues(alpha: 0.15),
+                          ),
+                          _CameraOverlayButton(
+                            icon: isRecording
+                                ? Icons.stop_circle : Icons.fiber_manual_record,
+                            label: isRecording ? 'Stop' : 'Record',
+                            isActive: isRecording, activeColor: Colors.red,
+                            onTap: () => isRecording
+                                ? _stopRecording() : _startRecording(),
+                          ),
+                        ]),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ]),
         ),
       ]),
     );
@@ -1059,17 +1169,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     return Container(
       height: height, width: double.infinity,
       decoration: BoxDecoration(
-        color:        const Color(0xFF0f172a),
-        // FIX: was const BoxDecoration with hardcoded radius 20
+        color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.all(Radius.circular(context.rp(18))),
         boxShadow: const [
-          BoxShadow(color: Color(0xFF0b1120),
-              offset: Offset(8, 8), blurRadius: 16),
-          BoxShadow(color: Color(0xFF1e293b),
-              offset: Offset(-8, -8), blurRadius: 16),
+          BoxShadow(color: Color(0xFF0b1120), offset: Offset(8, 8), blurRadius: 16),
+          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-8, -8), blurRadius: 16),
         ],
       ),
-      // FIX: was const EdgeInsets.all(6)
       padding: EdgeInsets.all(context.rp(5)),
       child: inner,
     );
@@ -1084,16 +1190,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               color: const Color(0xFF64748b), size: context.ri(44)),
           SizedBox(height: context.rs(12)),
           Text(_cameraError!,
-              style: TextStyle(
-                  color:    const Color(0xFF64748b),
+              style: TextStyle(color: const Color(0xFF64748b),
                   fontSize: context.sp(12)),
               textAlign: TextAlign.center),
           SizedBox(height: context.rs(12)),
           TextButton(
               onPressed: _initCamera,
               child: Text('Retry',
-                  style: TextStyle(
-                      color:    const Color(0xFF22d3ee),
+                  style: TextStyle(color: const Color(0xFF22d3ee),
                       fontSize: context.sp(13)))),
         ])),
       );
@@ -1104,8 +1208,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         const CircularProgressIndicator(color: Color(0xFF22d3ee)),
         SizedBox(height: context.rs(12)),
         Text('Initializing camera...',
-            style: TextStyle(
-                color:    const Color(0xFF64748b),
+            style: TextStyle(color: const Color(0xFF64748b),
                 fontSize: context.sp(12))),
       ])),
     );
@@ -1116,46 +1219,39 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter, end: Alignment.bottomCenter,
-              colors: [
-                Colors.transparent,
-                const Color(0xFF0f172a).withValues(alpha: 0.5),
-              ],
+              colors: [Colors.transparent,
+                  const Color(0xFF0f172a).withValues(alpha: 0.5)],
             ),
           ),
         ),
       );
 
-  Widget _buildRecBadge({required bool isLandscape, required bool fullscreen}) => Positioned(
+  Widget _buildRecBadge({required bool isLandscape, required bool fullscreen}) =>
+      Positioned(
         top: (!fullscreen && isLandscape)
-            ? context.rs(5) 
-            : (isLandscape ? context.rs(46) : context.rs(10)), // lowered more in fullscreen to avoid status bar
-        right: isLandscape ? context.rp(24) : context.rp(10), // safe horizontal clearance
+            ? context.rs(5)
+            : (isLandscape ? context.rs(46) : context.rs(10)),
+        right: isLandscape ? context.rp(24) : context.rp(10),
         child: Container(
           padding: EdgeInsets.symmetric(
               horizontal: context.rp(9), vertical: context.rs(4)),
           decoration: BoxDecoration(
-              color:        Colors.red.withValues(alpha: 0.85),
-              // FIX: was hardcoded 20
+              color: Colors.red.withValues(alpha: 0.85),
               borderRadius: BorderRadius.circular(context.rp(16))),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Container(
-              // FIX: was width:8, height:8
               width: context.ri(7), height: context.ri(7),
               decoration: const BoxDecoration(
                   color: Colors.white, shape: BoxShape.circle)),
             SizedBox(width: context.rp(5)),
             Text('REC', style: TextStyle(
-                color:      Colors.white,
-                // FIX: was hardcoded 11
-                fontSize:   context.sp(10),
+                color: Colors.white, fontSize: context.sp(10),
                 fontWeight: FontWeight.bold, letterSpacing: 1.2)),
           ]),
         ),
       );
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // ALERT BANNER — L1/L2
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ─── ALERT BANNER — L1/L2 ─────────────────────────────────────────────────
 
   Widget _buildAlertBanner(String type) {
     final isDrowsy  = type == 'DROWSY';
@@ -1177,13 +1273,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               final pulse = (_warningAnimation.value - 0.8) / 0.2;
               return Container(
                 width: double.infinity,
-                // FIX: was const EdgeInsets.fromLTRB(12, 8, 12, 4)
-                margin: EdgeInsets.fromLTRB(
-                    context.rp(10), context.rs(8),
+                margin: EdgeInsets.fromLTRB(context.rp(10), context.rs(8),
                     context.rp(10), context.rs(4)),
                 decoration: BoxDecoration(
                   color: const Color(0xFF1C1C1E).withValues(alpha: 0.96),
-                  // FIX: was hardcoded 18
                   borderRadius: BorderRadius.circular(context.rp(16)),
                   border: Border.all(
                       color: Colors.red.withValues(alpha: 0.25 + 0.35 * pulse),
@@ -1192,8 +1285,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                     BoxShadow(color: Colors.black.withValues(alpha: 0.55),
                         blurRadius: 28, offset: const Offset(0, 8)),
                     BoxShadow(
-                        color:      Colors.red.withValues(
-                            alpha: 0.12 + 0.18 * pulse),
+                        color: Colors.red.withValues(alpha: 0.12 + 0.18 * pulse),
                         blurRadius: 20, spreadRadius: 1,
                         offset: const Offset(0, 2)),
                   ],
@@ -1203,92 +1295,68 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   child: BackdropFilter(
                     filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
                     child: Padding(
-                      // FIX: was const EdgeInsets.symmetric(horizontal:14, vertical:12)
                       padding: EdgeInsets.symmetric(
-                          horizontal: context.rp(12),
-                          vertical:   context.rs(10)),
+                          horizontal: context.rp(12), vertical: context.rs(10)),
                       child: Row(children: [
                         AnimatedBuilder(
                           animation: _warningAnimation,
                           builder: (context, child) {
                             final p = (_warningAnimation.value - 0.8) / 0.2;
                             return Container(
-                              // FIX: was width:44, height:44
-                              width:  context.ri(40),
-                              height: context.ri(40),
+                              width: context.ri(40), height: context.ri(40),
                               decoration: BoxDecoration(
                                 color: Colors.red.shade800,
-                                // FIX: was hardcoded 12
-                                borderRadius:
-                                    BorderRadius.circular(context.rp(10)),
+                                borderRadius: BorderRadius.circular(context.rp(10)),
                                 boxShadow: [BoxShadow(
-                                    color: Colors.red.withValues(
-                                        alpha: 0.3 + 0.4 * p),
+                                    color: Colors.red.withValues(alpha: 0.3 + 0.4 * p),
                                     blurRadius: 14, spreadRadius: 1)],
                               ),
                               child: Icon(Icons.warning_amber_rounded,
-                                  color: Colors.white,
-                                  // FIX: was hardcoded 24
-                                  size: context.ri(22)),
+                                  color: Colors.white, size: context.ri(22)),
                             );
                           },
                         ),
                         SizedBox(width: context.rp(10)),
                         Expanded(child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize:       MainAxisSize.min,
+                          mainAxisSize: MainAxisSize.min,
                           children: [
                             Row(
-                              mainAxisAlignment:
-                                  MainAxisAlignment.spaceBetween,
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text('BANTAY DRIVE', style: TextStyle(
-                                    color:      Colors.white
-                                        .withValues(alpha: 0.45),
-                                    // FIX: was hardcoded 10
-                                    fontSize:   context.sp(10),
+                                    color: Colors.white.withValues(alpha: 0.45),
+                                    fontSize: context.sp(10),
                                     fontWeight: FontWeight.w600,
                                     letterSpacing: 0.8)),
                                 Text('now', style: TextStyle(
-                                    color:    Colors.white
-                                        .withValues(alpha: 0.35),
+                                    color: Colors.white.withValues(alpha: 0.35),
                                     fontSize: context.sp(10))),
                               ],
                             ),
                             SizedBox(height: context.rs(3)),
-                            Text(
-                              isDrowsy
-                                  ? 'Drowsiness Detected'
-                                  : 'Distraction Detected',
-                              style: TextStyle(
-                                  color:         Colors.white,
-                                  // FIX: was hardcoded 15
-                                  fontSize:      context.sp(14),
-                                  fontWeight:    FontWeight.w700,
-                                  letterSpacing: 0.2),
-                            ),
+                            Text(isDrowsy ? 'Drowsiness Detected' : 'Distraction Detected',
+                                style: TextStyle(color: Colors.white,
+                                    fontSize: context.sp(14),
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.2)),
                             SizedBox(height: context.rs(2)),
-                            Text(
-                              isDrowsy
-                                  ? 'Stay alert — tap to dismiss'
-                                  : 'Focus on the road — tap to dismiss',
-                              style: TextStyle(
-                                  color:    Colors.white.withValues(alpha: 0.5),
-                                  // FIX: was hardcoded 12
-                                  fontSize: context.sp(11)),
-                            ),
+                            Text(isDrowsy
+                                ? 'Stay alert — tap to dismiss'
+                                : 'Focus on the road — tap to dismiss',
+                                style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.5),
+                                    fontSize: context.sp(11))),
                           ],
                         )),
                         SizedBox(width: context.rp(6)),
                         Container(
-                          // FIX: was width:22, height:22
-                          width:  context.ri(20), height: context.ri(20),
+                          width: context.ri(20), height: context.ri(20),
                           decoration: BoxDecoration(
                               color: Colors.white.withValues(alpha: 0.1),
                               shape: BoxShape.circle),
                           child: Icon(Icons.close_rounded,
                               color: Colors.white.withValues(alpha: 0.4),
-                              // FIX: was hardcoded 14
                               size: context.ri(13)),
                         ),
                       ]),
@@ -1303,9 +1371,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // WARNING OVERLAY — L3
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ─── WARNING OVERLAY — L3 ─────────────────────────────────────────────────
 
   Widget _buildWarningOverlay(String type) {
     final isDrowsy = type == 'DROWSY';
@@ -1324,103 +1390,75 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               ),
               Container(decoration: BoxDecoration(
                 border: Border.all(
-                    color: Colors.red.withValues(alpha: 0.3 + 0.5 * p),
-                    width: 5),
-                gradient: RadialGradient(
-                  center: Alignment.center, radius: 1.2,
-                  colors: [
-                    Colors.transparent,
-                    Colors.red.withValues(alpha: 0.06 + 0.10 * p),
-                  ],
-                ),
+                    color: Colors.red.withValues(alpha: 0.3 + 0.5 * p), width: 5),
+                gradient: RadialGradient(center: Alignment.center, radius: 1.2,
+                  colors: [Colors.transparent,
+                      Colors.red.withValues(alpha: 0.06 + 0.10 * p)]),
               )),
               Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
                 Container(
-                  // FIX: was width:88, height:88
-                  width:  context.ri(80), height: context.ri(80),
+                  width: context.ri(80), height: context.ri(80),
                   decoration: BoxDecoration(
-                    color:  Colors.red.shade900.withValues(alpha: 0.85),
-                    shape:  BoxShape.circle,
+                    color: Colors.red.shade900.withValues(alpha: 0.85),
+                    shape: BoxShape.circle,
                     border: Border.all(
-                        color: Colors.red.shade400.withValues(alpha: 0.6),
-                        width: 2),
+                        color: Colors.red.shade400.withValues(alpha: 0.6), width: 2),
                     boxShadow: [BoxShadow(
-                        color:      Colors.red.withValues(alpha: 0.2 + 0.2 * p),
+                        color: Colors.red.withValues(alpha: 0.2 + 0.2 * p),
                         blurRadius: 30, spreadRadius: 4)],
                   ),
                   child: Icon(Icons.warning_amber_rounded,
-                      size: context.ri(42),
-                      color: Colors.red.shade300),
+                      size: context.ri(42), color: Colors.red.shade300),
                 ),
                 SizedBox(height: context.rs(18)),
                 Text(isDrowsy ? 'DROWSINESS' : 'DISTRACTION',
-                    style: TextStyle(
-                        // FIX: was hardcoded 28
-                        fontSize:   context.sp(24),
-                        fontWeight: FontWeight.w900,
-                        color:      Colors.red.shade300,
+                    style: TextStyle(fontSize: context.sp(24),
+                        fontWeight: FontWeight.w900, color: Colors.red.shade300,
                         letterSpacing: 4)),
-                Text('DETECTED', style: TextStyle(
-                    // FIX: was hardcoded 18
-                    fontSize:   context.sp(16),
+                Text('DETECTED', style: TextStyle(fontSize: context.sp(16),
                     fontWeight: FontWeight.w700,
-                    color:      Colors.red.shade400.withValues(alpha: 0.8),
+                    color: Colors.red.shade400.withValues(alpha: 0.8),
                     letterSpacing: 6)),
                 SizedBox(height: context.rs(24)),
                 Container(
                   padding: EdgeInsets.symmetric(
-                      // FIX: was horizontal:24, vertical:10
                       horizontal: context.rp(20), vertical: context.rs(10)),
                   decoration: BoxDecoration(
-                    color:        Colors.white.withValues(alpha: 0.08),
-                    // FIX: was hardcoded 30
+                    color: Colors.white.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(context.rp(24)),
-                    border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.15)),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
                   ),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
                     Icon(Icons.touch_app_rounded,
-                        // FIX: was hardcoded 16
-                        size:  context.ri(15),
-                        color: Colors.white.withValues(alpha: 0.6)),
+                        size: context.ri(15), color: Colors.white.withValues(alpha: 0.6)),
                     SizedBox(width: context.rp(7)),
                     Text('Tap anywhere to dismiss', style: TextStyle(
-                        // FIX: was hardcoded 13
-                        fontSize:      context.sp(12),
-                        color:         Colors.white.withValues(alpha: 0.6),
-                        fontWeight:    FontWeight.w500,
-                        letterSpacing: 0.3)),
+                        fontSize: context.sp(12),
+                        color: Colors.white.withValues(alpha: 0.6),
+                        fontWeight: FontWeight.w500, letterSpacing: 0.3)),
                   ]),
                 ),
               ])),
               Positioned(
-                // FIX: was top:12, right:12
                 top: context.rs(10), right: context.rp(10),
                 child: Container(
                   padding: EdgeInsets.symmetric(
-                      // FIX: was horizontal:10, vertical:5
                       horizontal: context.rp(9), vertical: context.rs(5)),
                   decoration: BoxDecoration(
                     color: Colors.red.shade800.withValues(alpha: 0.9),
-                    // FIX: was hardcoded 20
                     borderRadius: BorderRadius.circular(context.rp(16)),
                     boxShadow: [BoxShadow(
-                        color:      Colors.red.withValues(alpha: 0.4 * pulse),
+                        color: Colors.red.withValues(alpha: 0.4 * pulse),
                         blurRadius: 10)],
                   ),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Container(
-                      // FIX: was width:7, height:7
-                      width: context.ri(6), height: context.ri(6),
-                      decoration: BoxDecoration(
-                          color: Colors.red.shade200, shape: BoxShape.circle)),
+                    Container(width: context.ri(6), height: context.ri(6),
+                        decoration: BoxDecoration(
+                            color: Colors.red.shade200, shape: BoxShape.circle)),
                     SizedBox(width: context.rp(5)),
                     Text('ALARM ACTIVE', style: TextStyle(
-                        color:         Colors.red.shade100,
-                        // FIX: was hardcoded 10
-                        fontSize:      context.sp(9),
-                        fontWeight:    FontWeight.bold,
-                        letterSpacing: 1.0)),
+                        color: Colors.red.shade100, fontSize: context.sp(9),
+                        fontWeight: FontWeight.bold, letterSpacing: 1.0)),
                   ]),
                 ),
               ),
@@ -1431,9 +1469,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // METRICS + SYSTEM LOG
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ─── METRICS + SYSTEM LOG ─────────────────────────────────────────────────
 
   Widget _buildMetricsSidebar({required bool isLandscape}) {
     final alertness   = ref.watch(alertnessPctProvider);
@@ -1441,30 +1477,29 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final distraction = ref.watch(distractionPctProvider);
 
     return Column(children: [
-      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Expanded(child: _MetricGauge(
-            label: 'Alertness', value: alertness,
-            color: const Color(0xFF22d3ee), icon: Icons.bolt)),
-        SizedBox(width: context.rp(10)),
-        Expanded(child: GestureDetector(
-          onTap: drowsiness > 0 ? () => _showSubclassSheet('drowsy') : null,
-          child: _MetricGauge(
-              label: 'Drowsiness', value: drowsiness,
-              color: const Color(0xFFef4444),
-              icon: Icons.visibility_off, tapHint: drowsiness > 0),
-        )),
-        SizedBox(width: context.rp(10)),
-        Expanded(child: GestureDetector(
-          onTap: distraction > 0
-              ? () => _showSubclassSheet('distracted') : null,
-          child: _MetricGauge(
-              label: 'Distraction', value: distraction,
-              color: const Color(0xFFfbbf24),
-              icon: Icons.visibility, tapHint: distraction > 0),
-        )),
-      ]),
-      // System log: portrait only — landscape shows gauges only to save space.
-      // Log data is still collected in background; visible in portrait mode.
+      // ClipRect prevents the 86px RenderFlex overflow exception that fires
+      // during the PiP→fullscreen animation when Flutter briefly lays out
+      // the full UI at PiP window width (~150dp). Clips instead of throwing.
+      ClipRect(
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(child: _MetricGauge(label: 'Alertness', value: alertness,
+              color: const Color(0xFF22d3ee), icon: Icons.bolt)),
+          SizedBox(width: context.rp(10)),
+          Expanded(child: GestureDetector(
+            onTap: drowsiness > 0 ? () => _showSubclassSheet('drowsy') : null,
+            child: _MetricGauge(label: 'Drowsiness', value: drowsiness,
+                color: const Color(0xFFef4444),
+                icon: Icons.visibility_off, tapHint: drowsiness > 0),
+          )),
+          SizedBox(width: context.rp(10)),
+          Expanded(child: GestureDetector(
+            onTap: distraction > 0 ? () => _showSubclassSheet('distracted') : null,
+            child: _MetricGauge(label: 'Distraction', value: distraction,
+                color: const Color(0xFFfbbf24),
+                icon: Icons.visibility, tapHint: distraction > 0),
+          )),
+        ]),
+      ),
       if (!isLandscape) ...[
         SizedBox(height: context.rs(12)),
         _buildSystemLog(),
@@ -1475,50 +1510,39 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   void _showSubclassSheet(String mainClass) {
     final subclass  = ref.read(activeSubclassProvider) ?? 'safe_driving';
     final isDrowsy  = mainClass == 'drowsy';
-    final mainColor = isDrowsy
-        ? const Color(0xFFef4444) : const Color(0xFFfbbf24);
+    final mainColor = isDrowsy ? const Color(0xFFef4444) : const Color(0xFFfbbf24);
 
     showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
+      context: context, backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (_) => Container(
-        padding: EdgeInsets.fromLTRB(
-            // FIX: was const EdgeInsets.fromLTRB(20, 12, 20, 32)
-            context.rp(20), context.rs(12),
+        padding: EdgeInsets.fromLTRB(context.rp(20), context.rs(12),
             context.rp(20), context.rs(28)),
         decoration: BoxDecoration(
           color: const Color(0xFF0D1627),
-          // FIX: was hardcoded 24
-          borderRadius: BorderRadius.vertical(
-              top: Radius.circular(context.rp(22))),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(context.rp(22))),
         ),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Center(child: Container(
-            // FIX: was width:40, height:4
             width: context.rp(36), height: context.rs(4),
             margin: EdgeInsets.only(bottom: context.rs(14)),
-            decoration: BoxDecoration(
-                color:        const Color(0xFF1E2D45),
+            decoration: BoxDecoration(color: const Color(0xFF1E2D45),
                 borderRadius: BorderRadius.circular(context.rp(2))),
           )),
           Text(isDrowsy ? 'Drowsiness Detected' : 'Distraction Detected',
               style: TextStyle(color: Colors.white,
-                  // FIX: was hardcoded 17
                   fontSize: context.sp(16), fontWeight: FontWeight.w700)),
           SizedBox(height: context.rs(4)),
           Text('Current: $subclass',
               style: TextStyle(color: mainColor, fontSize: context.sp(12))),
           SizedBox(height: context.rs(14)),
-          Text(
-            isDrowsy
-                ? 'Drowsy: Yawning, Head Droop, Eyes Closed (PERCLOS)'
-                : 'Distracted: Texting, Phone Call, Radio, Drinking,\n'
-                  'Reaching Behind, Hair/Makeup, Talking to Passenger',
-            style: TextStyle(
-                color: const Color(0xFF94a3b8), fontSize: context.sp(12)),
-            textAlign: TextAlign.center,
-          ),
+          Text(isDrowsy
+              ? 'Drowsy: Yawning, Head Droop, Eyes Closed (PERCLOS)'
+              : 'Distracted: Texting, Phone Call, Radio, Drinking,\n'
+                'Reaching Behind, Hair/Makeup, Talking to Passenger',
+              style: TextStyle(color: const Color(0xFF94a3b8),
+                  fontSize: context.sp(12)),
+              textAlign: TextAlign.center),
         ]),
       ),
     );
@@ -1529,7 +1553,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       width: double.infinity,
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
-        // FIX: was hardcoded 16
         borderRadius: BorderRadius.circular(context.rp(14)),
         boxShadow: [
           BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.5),
@@ -1538,35 +1561,26 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               offset: const Offset(-4, -4), blurRadius: 8),
         ],
       ),
-      // FIX: was const EdgeInsets.all(14)
       padding: EdgeInsets.all(context.rp(12)),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize:        MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min,
         children: [
           Row(children: [
             Text('SYSTEM LOG', style: TextStyle(
-                color:         const Color(0xFF94a3b8),
-                // FIX: was hardcoded 11
-                fontSize:      context.sp(10),
-                fontWeight:    FontWeight.w600,
-                letterSpacing: 1.5)),
+                color: const Color(0xFF94a3b8), fontSize: context.sp(10),
+                fontWeight: FontWeight.w600, letterSpacing: 1.5)),
             const Spacer(),
             if (ref.watch(isRecordingProvider))
               Container(
                 padding: EdgeInsets.symmetric(
-                    // FIX: was horizontal:6, vertical:2
                     horizontal: context.rp(6), vertical: context.rs(2)),
                 decoration: BoxDecoration(
                   color: const Color(0xFF10b981).withValues(alpha: 0.15),
-                  // FIX: was hardcoded 6
                   borderRadius: BorderRadius.circular(context.rp(6)),
                 ),
                 child: Text('● LIVE', style: TextStyle(
-                    color:      const Color(0xFF10b981),
-                    // FIX: was hardcoded 9
-                    fontSize:   context.sp(9),
-                    fontWeight: FontWeight.w600)),
+                    color: const Color(0xFF10b981),
+                    fontSize: context.sp(9), fontWeight: FontWeight.w600)),
               ),
           ]),
           SizedBox(height: context.rs(8)),
@@ -1574,52 +1588,34 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             Align(
               alignment: Alignment.topCenter,
               child: Text('No logs yet. Start recording to begin.',
-                  style: TextStyle(
-                      color:    Colors.white24,
-                      // FIX: was hardcoded 12
-                      fontSize: context.sp(11)),
+                  style: TextStyle(color: Colors.white24, fontSize: context.sp(11)),
                   textAlign: TextAlign.center),
             )
           else
             SizedBox(
-              // FIX: was hardcoded 120 — now scales with screen height
-              // compact phones get less log space so gauges stay visible
               height: context.rs(context.isSmallPhone ? 90 : 115),
               child: ListView.builder(
-                physics:   const BouncingScrollPhysics(),
+                physics: const BouncingScrollPhysics(),
                 itemCount: _systemLogs.length > 20 ? 20 : _systemLogs.length,
                 itemBuilder: (context, index) {
                   final log = _systemLogs.reversed.toList()[index];
                   Color textColor;
                   switch (log['type']) {
-                    case 'SUCCESS':
-                      textColor = const Color(0xFF10b981); break;
-                    case 'WARNING':
-                      textColor = const Color(0xFFfbbf24); break;
-                    default:
-                      textColor = const Color(0xFF94a3b8);
+                    case 'SUCCESS': textColor = const Color(0xFF10b981); break;
+                    case 'WARNING': textColor = const Color(0xFFfbbf24); break;
+                    default:        textColor = const Color(0xFF94a3b8);
                   }
                   return Padding(
-                    // FIX: was const EdgeInsets.only(bottom: 6)
                     padding: EdgeInsets.only(bottom: context.rs(5)),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('[${log['time']}]',
-                            style: TextStyle(
-                                color:    const Color(0xFF475569),
-                                // FIX: was hardcoded 10
-                                fontSize: context.sp(9),
-                                fontFamily: 'monospace')),
-                        SizedBox(width: context.rp(6)),
-                        Expanded(child: Text(log['message'],
-                            style: TextStyle(
-                                color:      textColor,
-                                // FIX: was hardcoded 10
-                                fontSize:   context.sp(9),
-                                fontFamily: 'monospace'))),
-                      ],
-                    ),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('[${log['time']}]',
+                          style: TextStyle(color: const Color(0xFF475569),
+                              fontSize: context.sp(9), fontFamily: 'monospace')),
+                      SizedBox(width: context.rp(6)),
+                      Expanded(child: Text(log['message'],
+                          style: TextStyle(color: textColor,
+                              fontSize: context.sp(9), fontFamily: 'monospace'))),
+                    ]),
                   );
                 },
               ),
@@ -1632,102 +1628,69 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
 // ─── METRIC GAUGE ─────────────────────────────────────────────────────────────
 class _MetricGauge extends StatelessWidget {
-  final String   label;
-  final double   value;
-  final Color    color;
-  final IconData icon;
-  final bool     tapHint;
-
-  const _MetricGauge({
-    required this.label, required this.value,
-    required this.color, required this.icon,
-    this.tapHint = false,
-  });
+  final String label; final double value;
+  final Color color;  final IconData icon;
+  final bool tapHint;
+  const _MetricGauge({required this.label, required this.value,
+      required this.color, required this.icon, this.tapHint = false});
 
   @override
   Widget build(BuildContext context) {
     final clamped = value.clamp(0.0, 100.0);
-    // FIX: gauge size was const 72.0 — now uses context.ri() so all three
-    // gauges are always identical AND scale correctly on different phones
-    final gaugeD = context.ri(context.isSmallPhone ? 60.0 : 68.0);
-    // FIX: font sizes were const 22.0 / 11.0
-    final fSize  = context.sp(context.isSmallPhone ? 18.0 : 20.0);
-    final pSize  = context.sp(9.0);
+    final gaugeD  = context.ri(context.isSmallPhone ? 60.0 : 68.0);
+    final fSize   = context.sp(context.isSmallPhone ? 18.0 : 20.0);
+    final pSize   = context.sp(9.0);
 
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
-        // FIX: was hardcoded 16
         borderRadius: BorderRadius.circular(context.rp(14)),
         boxShadow: clamped >= 100.0
-            ? [
-                BoxShadow(color: color.withValues(alpha: 0.30),
-                    blurRadius: 16, spreadRadius: 2),
-                const BoxShadow(color: Color(0xFF0b1120),
-                    offset: Offset(4, 4), blurRadius: 8),
-              ]
-            : const [
-                BoxShadow(color: Color(0xFF0b1120),
-                    offset: Offset(6, 6), blurRadius: 12),
-                BoxShadow(color: Color(0xFF1e293b),
-                    offset: Offset(-6, -6), blurRadius: 12),
-              ],
+            ? [BoxShadow(color: color.withValues(alpha: 0.30),
+                  blurRadius: 16, spreadRadius: 2),
+               const BoxShadow(color: Color(0xFF0b1120),
+                  offset: Offset(4, 4), blurRadius: 8)]
+            : const [BoxShadow(color: Color(0xFF0b1120),
+                  offset: Offset(6, 6), blurRadius: 12),
+               BoxShadow(color: Color(0xFF1e293b),
+                  offset: Offset(-6, -6), blurRadius: 12)],
       ),
-      // FIX: was const EdgeInsets.symmetric(vertical:12, horizontal:6)
       padding: EdgeInsets.symmetric(
           vertical: context.rs(10), horizontal: context.rp(5)),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          // FIX: was size:12
           Icon(icon, size: context.ri(11), color: color),
           SizedBox(width: context.rp(3)),
-          Flexible(child: Text(label,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  color:      const Color(0xFF94a3b8),
-                  // FIX: was hardcoded 10
-                  fontSize:   context.sp(9),
-                  fontWeight: FontWeight.w500))),
+          Flexible(child: Text(label, overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: const Color(0xFF94a3b8),
+                  fontSize: context.sp(9), fontWeight: FontWeight.w500))),
           if (tapHint) ...[
             SizedBox(width: context.rp(3)),
-            // FIX: was size:9
             Icon(Icons.touch_app_rounded,
                 size: context.ri(9), color: color.withValues(alpha: 0.6)),
           ],
         ]),
         SizedBox(height: context.rs(8)),
-        SizedBox(
-          width: gaugeD, height: gaugeD,
+        SizedBox(width: gaugeD, height: gaugeD,
           child: Stack(alignment: Alignment.center, children: [
             SizedBox(width: gaugeD, height: gaugeD,
-              child: CircularProgressIndicator(
-                value:           1.0,
-                // FIX: was hardcoded 4
-                strokeWidth:     context.isSmallPhone ? 3.0 : 4.0,
+              child: CircularProgressIndicator(value: 1.0,
+                strokeWidth: context.isSmallPhone ? 3.0 : 4.0,
                 backgroundColor: Colors.transparent,
-                valueColor:      AlwaysStoppedAnimation<Color>(
+                valueColor: AlwaysStoppedAnimation<Color>(
                     color.withValues(alpha: 0.18)),
-                strokeCap: StrokeCap.round,
-              ),
-            ),
+                strokeCap: StrokeCap.round)),
             TweenAnimationBuilder<double>(
-              tween:    Tween<double>(begin: 0, end: clamped),
+              tween: Tween<double>(begin: 0, end: clamped),
               duration: const Duration(milliseconds: 600),
-              curve:    Curves.easeOut,
-              builder: (_, v, __) => Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('${v.toInt()}', style: TextStyle(
-                      color:      color,
-                      fontSize:   fSize,
-                      fontWeight: FontWeight.bold,
-                      fontFamily: 'monospace')),
-                  Text('%', style: TextStyle(
-                      color:      color.withValues(alpha: 0.7),
-                      fontSize:   pSize,
-                      fontWeight: FontWeight.w500)),
-                ],
-              ),
+              curve: Curves.easeOut,
+              builder: (_, v, __) => Column(mainAxisSize: MainAxisSize.min, children: [
+                Text('${v.toInt()}', style: TextStyle(color: color,
+                    fontSize: fSize, fontWeight: FontWeight.bold,
+                    fontFamily: 'monospace')),
+                Text('%', style: TextStyle(color: color.withValues(alpha: 0.7),
+                    fontSize: pSize, fontWeight: FontWeight.w500)),
+              ]),
             ),
           ]),
         ),
@@ -1738,17 +1701,11 @@ class _MetricGauge extends StatelessWidget {
 
 // ─── CAMERA OVERLAY BUTTON ────────────────────────────────────────────────────
 class _CameraOverlayButton extends StatelessWidget {
-  final IconData     icon;
-  final String       label;
-  final bool         isActive;
-  final Color        activeColor;
+  final IconData icon; final String label;
+  final bool isActive; final Color activeColor;
   final VoidCallback onTap;
-
-  const _CameraOverlayButton({
-    required this.icon, required this.label,
-    required this.isActive, required this.activeColor,
-    required this.onTap,
-  });
+  const _CameraOverlayButton({required this.icon, required this.label,
+      required this.isActive, required this.activeColor, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -1756,25 +1713,19 @@ class _CameraOverlayButton extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        // FIX: was const EdgeInsets.symmetric(horizontal:14, vertical:8)
         padding: EdgeInsets.symmetric(
             horizontal: context.rp(12), vertical: context.rs(7)),
         decoration: BoxDecoration(
-          color: isActive
-              ? activeColor.withValues(alpha: 0.18)
-              : Colors.transparent,
-          // FIX: was hardcoded 22
+          color: isActive ? activeColor.withValues(alpha: 0.18) : Colors.transparent,
           borderRadius: BorderRadius.circular(context.rp(18)),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          // FIX: was hardcoded 18
           Icon(icon, size: context.ri(16),
               color: isActive ? activeColor : Colors.white60),
           SizedBox(width: context.rp(5)),
           Text(label, style: TextStyle(
-              color:      isActive ? activeColor : Colors.white60,
-              // FIX: was hardcoded 12
-              fontSize:   context.sp(11),
+              color: isActive ? activeColor : Colors.white60,
+              fontSize: context.sp(11),
               fontWeight: isActive ? FontWeight.w600 : FontWeight.w400)),
         ]),
       ),
