@@ -28,7 +28,6 @@
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:camera/camera.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -133,11 +132,17 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // overlay OVER CameraPreview (not instead of it) so CameraX can reattach
   // its surface to the existing texture without interference from us.
   bool    _cameraReconnecting  = false;
-  // FIX Bug 2: Both didChangeAppLifecycleState(resumed) AND pipEventStream fire
-  // on PiP exit. Without this flag, _resumeAfterPip() runs twice — the second
-  // run sees _cameraResuming=false (already cleared) and starts a new recovery
-  // cycle, causing the camera "Reconnecting..." flash to appear again.
-  // Reset to false only in _stopRecording so it re-arms for the next session.
+  // Prevents _initCamera() from running while CameraX is recovering from
+  // PiP. On Xiaomi, the CameraPreview widget rebuild after PiP exit can
+  // trigger a new CameraController.initialize() which creates new
+  // addUseCases → new CLOSING→REOPENING cycle on top of CameraX's own
+  // internal recovery. Set true on paused, false when recovery is done.
+  bool    _isInPipRecovery     = false;
+  // Prevents _resumeAfterPip() from running twice when both pipEventStream
+  // AND didChangeAppLifecycleState(resumed) fire on PiP exit (common on
+  // Xiaomi/Samsung). The second call triggers a new CLOSING→REOPENING cycle
+  // visible in logcat as triple camera restarts and 75+ skipped frames.
+  // Reset to false in _stopRecording() so it re-arms for the next session.
   bool    _pipResumeHandled    = false;
 
   StreamSubscription<Map<String, dynamic>>? _pipSubscription;
@@ -213,19 +218,18 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       if (type == 'pip') {
         final inPip = value as bool;
         if (!inPip) {
-          // FIX Bug 3: Flush pending logs BEFORE setting isInPip=false.
-          // If we set isInPip=false first, a setState rebuild can happen
-          // before _flushPendingLogs runs. On that rebuild, _pendingLogs
-          // is not yet in _systemLogs, so the log panel shows stale data.
-          // Flushing first ensures logs are in _systemLogs before any rebuild.
+          // FIX C: Flush BEFORE clearing isInPip. If isInPip is cleared first,
+          // a setState rebuild fires before _pendingLogs are moved to _systemLogs
+          // — the log panel briefly shows "No logs yet" on the first frame.
           _flushPendingLogs();
           ref.read(isInPipProvider.notifier).set(false);
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) setState(() {});
           });
-          // FIX Bug 2: Guard against double-resume. pipEventStream and
-          // didChangeAppLifecycleState(resumed) both fire on PiP exit.
-          // _pipResumeHandled ensures _resumeAfterPip runs exactly once.
+          // Guard: both pipEventStream and didChangeAppLifecycleState(resumed)
+          // fire on PiP exit. Without this, _resumeAfterPip() runs twice —
+          // causing a triple CLOSING→REOPENING cycle in CameraX (logcat shows
+          // 75+ skipped frames per extra cycle on Xiaomi devices).
           if (!_pipResumeHandled) {
             _pipResumeHandled = true;
             _resumeAfterPip();
@@ -276,14 +280,25 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // that didn't arrive as a bare String — including stop_recording on many
   // devices. Fixed by extracting the string value from both forms.
   void _onReceiveTaskData(Object data) async {
-    // Unwrap: bare String OR Map<dynamic,dynamic> with key 'data'
+    // Unwrap all known payload formats from flutter_foreground_task v9.x:
+    //   1. Bare String:                    'stop_recording'
+    //   2. Map with 'data' key:            {'data': 'stop_recording'}
+    //   3. Map with button id key:         {'notification_button_id': 'stop_recording'}
+    // Format 3 is how v9.x delivers notification button presses on some
+    // Android versions (the button press bypasses onNotificationButtonPressed
+    // and arrives directly as task data in the main isolate).
     String? message;
     if (data is String) {
       message = data;
     } else if (data is Map) {
-      // flutter_foreground_task v9.x wraps payload: {'data': 'stop_recording'}
       final raw = data['data'];
-      if (raw is String) message = raw;
+      if (raw is String) {
+        message = raw;
+      } else {
+        // v9.x notification button press format
+        final buttonId = data['notification_button_id'];
+        if (buttonId is String) message = buttonId;
+      }
     }
 
     // Log what we actually received so you can see it in logcat
@@ -324,10 +339,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     debugPrint('[Monitor] stopping — sessionId=$_currentSessionId');
     if (_currentSessionId != null) {
-      try {
-        await const MethodChannel('com.bantaydrive/pip')
-            .invokeMethod('setStopping');
-      } catch (_) {}
       await _stopRecording();
       await PipService.exitPip();
     } else {
@@ -348,12 +359,26 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) async {
     switch (state) {
       case AppLifecycleState.inactive:
-        await PipService.setRecording(ref.read(isRecordingProvider));
+        // FIX: Do NOT call setRecording() when transitioning to inactive
+        // while in PiP. On Xiaomi, PiP exit fires:
+        //   onPictureinPictureModeChanged(false) → inactive → resumed
+        // Calling setRecording() during inactive while CameraX is in its
+        // CLOSING→REOPENING recovery cycle triggers a second native camera
+        // open request, causing extra REOPENING cycles in logcat.
+        // Only call setRecording() when we're actually going to background
+        // (not as part of PiP exit sequence).
+        if (!ref.read(isInPipProvider)) {
+          await PipService.setRecording(ref.read(isRecordingProvider));
+        }
         break;
 
       case AppLifecycleState.paused:
         if (ref.read(isRecordingProvider)) {
           if (mounted) ref.read(isInPipProvider.notifier).set(true);
+          // Block camera reinit during PiP recovery — see _isInPipRecovery.
+          _isInPipRecovery = true;
+          // Reset resume guard so it's ready for when we come back from PiP.
+          _pipResumeHandled = false;
           // Do NOT pause camera stream here — PiP preview needs it running.
         } else {
           await _pauseCameraStream();
@@ -361,14 +386,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         break;
 
       case AppLifecycleState.resumed:
-        // FIX Bug 3: Flush pending logs BEFORE clearing isInPip so that
-        // _systemLogs is populated before the first full-screen rebuild.
-        // (Same order fix as the pipEventStream listener above.)
+        // FIX C: Flush pending logs BEFORE clearing isInPip — same reason as
+        // the pipEventStream listener above. Ensures logs are in _systemLogs
+        // before the rebuild that isInPipProvider.set(false) triggers.
         if (mounted) _flushPendingLogs();
-        // Clear PiP flag so the first rebuild renders the full layout.
         if (mounted) ref.read(isInPipProvider.notifier).set(false);
-        // FIX Bug 2: Guard against double-resume from pipEventStream + resumed.
-        // If pipEventStream already handled the resume, skip _resumeAfterPip here.
+        // Guard against double-resume — _pipResumeHandled is set in paused
+        // so it's always fresh for this PiP cycle. First caller (either
+        // pipEventStream or this resumed handler) wins; the second is skipped.
         if (!_pipResumeHandled) {
           _pipResumeHandled = true;
           await _resumeAfterPip();
@@ -444,7 +469,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       if (!_cameraController!.value.isStreamingImages) {
         await _cameraController!.startImageStream(_onCameraFrame);
       }
-      // Stream is running — clear both flags
+      // Stream is running — clear all recovery flags
+      _isInPipRecovery = false;
       if (mounted) setState(() { _cameraResuming = false; _cameraReconnecting = false; });
     } catch (e) {
       // startImageStream failed — CameraX is still recovering internally.
@@ -459,9 +485,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           if (!_cameraController!.value.isStreamingImages) {
             await _cameraController!.startImageStream(_onCameraFrame);
           }
+          _isInPipRecovery = false;
           if (mounted) setState(() => _cameraReconnecting = false);
         } catch (e2) {
           debugPrint('[Camera] retry startImageStream failed: $e2');
+          _isInPipRecovery = false;
           if (mounted) setState(() => _cameraReconnecting = false);
         }
       });
@@ -481,6 +509,16 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   Future<void> _initCamera() async {
     if (_camDisposing) return;
+    // CRITICAL: Do NOT reinitialize the camera during PiP recovery.
+    // On Xiaomi, the CameraPreview widget rebuild after PiP exit calls
+    // back into _initCamera via the widget tree. Creating a new
+    // CameraController here while CameraX is in CLOSING→REOPENING adds
+    // a second addUseCases call → second REOPENING cycle → triple restart.
+    // CameraX handles its own hardware recovery; we just need to wait.
+    if (_isInPipRecovery) {
+      debugPrint('[Camera] _initCamera skipped — PiP recovery in progress');
+      return;
+    }
     try {
       _cameras = await availableCameras();
       if (_cameras.isEmpty) {
@@ -520,11 +558,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   void _flushPendingLogs() {
     if (_pendingLogs.isEmpty) return;
-    // FIX Bug 3: If the widget is not mounted (e.g. stop came from notification
-    // while in PiP and the widget rebuilt before this flush), don't silently
-    // drop the pending logs. Persist them to DB directly so they survive and
-    // are visible if the user opens History. The in-memory list is also updated
-    // if mounted, so the log panel shows them immediately on next build.
+
+    // FIX B: Always persist pending logs to DB first — even if !mounted.
+    // When stop comes from the notification while in PiP, this method may be
+    // called after a rebuild where mounted=false. Without this, all logs
+    // accumulated during PiP (drowsy/distracted detections, alerts) are
+    // silently dropped and never appear in History's session detail.
     for (final entry in _pendingLogs) {
       if (_currentSessionId != null) {
         DatabaseHelper.instance.insertSystemLog(
@@ -534,10 +573,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         );
       }
     }
+
     if (!mounted) {
       _pendingLogs.clear();
       return;
     }
+
     setState(() {
       _systemLogs.addAll(_pendingLogs);
       _pendingLogs.clear();
@@ -622,13 +663,34 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
     if (_currentSessionId == null) return;
     _snapshotTimer?.cancel();
+
+    // FIX A: Save one last alertness snapshot right now, BEFORE pausing the
+    // camera stream. This ensures the final alertness value in the provider
+    // reflects actual inference data from this session — not the reset default
+    // of 100.0 that gets set after PiP recovery when stop is triggered quickly.
+    await _saveAlertnessSnapshot();
+
     await _pauseCameraStream();
     await _alarmPlayer.stop();
     _alertLevel = _consecutiveDrowsy = _consecutiveDistracted = 0;
 
     final durationSec = _sessionStartTime != null
         ? DateTime.now().difference(_sessionStartTime!).inSeconds : 0;
-    final alertness = ref.read(alertnessPctProvider);
+
+    // FIX A: Use the average of all saved alertness snapshots for the final
+    // score — much more accurate than the provider value (which may be stale
+    // at 100.0 if the provider was reset during PiP recovery before stop ran).
+    final snapshots = await DatabaseHelper.instance
+        .getAlertnessSnapshots(_currentSessionId!);
+    final double alertness;
+    if (snapshots.isNotEmpty) {
+      final sum = snapshots.fold<double>(
+          0.0, (acc, s) => acc + ((s['alertness_pct'] as num).toDouble()));
+      alertness = sum / snapshots.length;
+    } else {
+      // Fallback to provider if no snapshots were saved yet (very short session)
+      alertness = ref.read(alertnessPctProvider);
+    }
 
     final alerts =
         await DatabaseHelper.instance.getAlertsBySession(_currentSessionId!);
@@ -655,11 +717,39 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     debugPrint('[Monitor] Session $_currentSessionId ended — '
         'score: ${safetyScore.toInt()}%');
     await ActiveSession.clear();
-    // FIX Bug 2: Re-arm the double-resume guard for the next session.
-    _pipResumeHandled = false;
+
+    // FIX B+C — ORDER MATTERS. We must:
+    //   1. Clear isInPipProvider FIRST — so _addLogSync below does NOT go to
+    //      _pendingLogs (which would be lost when _currentSessionId is nulled).
+    //   2. Call _addLogSync WHILE _currentSessionId is still set — so the
+    //      "Session Ended" log is saved to DB correctly.
+    //   3. Flush _pendingLogs while _currentSessionId is still valid — so any
+    //      logs accumulated during PiP are persisted before the session closes.
+    //   4. Only THEN null _currentSessionId and set isRecording=false.
+    //
+    // Old order: isRecording=false → isInPip=false → _currentSessionId=null
+    //   Problem: isRecording=false triggers a rebuild. If _pendingLogs is not
+    //   yet flushed, the log panel shows "No logs yet." And when isInPip=false
+    //   triggers _flushPendingLogs, _currentSessionId is already null so the
+    //   DB insertSystemLog calls inside _flushPendingLogs are silently skipped.
+    if (mounted) {
+      // Step 1: Clear PiP flag so _addLogSync writes to _systemLogs, not _pendingLogs
+      ref.read(isInPipProvider.notifier).set(false);
+      // Step 2: Flush any logs that accumulated during PiP — while sessionId is valid
+      _flushPendingLogs();
+    }
+    // Step 3: Add final log — _currentSessionId still set, isInPip now false
     _addLogSync('Session Ended — Score: ${safetyScore.toInt()}%', 'INFO');
+
     BantayDriveService.stopService();
     PipService.setRecording(false);
+
+    // Step 4: Now safe to null the session and flip providers
+    _currentSessionId = null;
+    _sessionStartTime = null;
+    // Re-arm all PiP recovery guards for the next session.
+    _pipResumeHandled = false;
+    _isInPipRecovery  = false;
 
     ref.read(isRecordingProvider.notifier).set(false);
     ref.read(driverStateProvider.notifier).set('neutral');
@@ -669,10 +759,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(distractionPctProvider.notifier).set(0.0);
     ref.read(activeSubclassProvider.notifier).set(null);
     ref.read(activeSubclassIndexProvider.notifier).set(0);
-    _currentSessionId = null;
-    _sessionStartTime = null;
     if (mounted) {
-      ref.read(isInPipProvider.notifier).set(false);
       ref.read(dbChangeCounterProvider.notifier).increment();
     }
   }
