@@ -1,6 +1,7 @@
 package com.example.smartalertdrive
 
 import android.app.PictureInPictureParams
+import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Rect
 import android.os.Build
@@ -54,26 +55,17 @@ class MainActivity : FlutterActivity() {
                     }
 
                     "stopInPip" -> {
+                        isStopping  = true
+                        isRecording = false
                         if (isInPip) {
-                            isStopping  = true
-                            isRecording = false
-
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                // Android 12+
-                                try {
-                                    val params = PictureInPictureParams.Builder()
-                                        .setAutoEnterEnabled(false)
-                                        .build()
-                                    setPictureInPictureParams(params)
-                                } catch (_: Exception) { }
-                                // Small delay lets params propagate before task moves back
-                                window.decorView.postDelayed({
-                                    moveTaskToBack(false)
-                                }, 80)
-                            } else {
-                                // Android 8–11: moveTaskToBack is sufficient
-                                moveTaskToBack(false)
+                            // moveTaskToBack() does not dismiss PIP on MIUI/HyperOS.
+                            // Expanding back to full screen is the only reliable
+                            // cross-device approach to close the PIP window.
+                            val intent = Intent(this, MainActivity::class.java).apply {
+                                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                                        Intent.FLAG_ACTIVITY_CLEAR_TOP
                             }
+                            startActivity(intent)
                         }
                         result.success(null)
                     }

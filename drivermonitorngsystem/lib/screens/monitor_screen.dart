@@ -222,6 +222,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           // a setState rebuild fires before _pendingLogs are moved to _systemLogs
           // — the log panel briefly shows "No logs yet" on the first frame.
           _flushPendingLogs();
+          // Pre-arm _cameraResuming so the first rebuild triggered by
+          // isInPipProvider.set(false) already sees _cameraResuming=true.
+          // Without this, there is one frame where canShow=false AND
+          // _cameraResuming=false → _buildCameraFallback() (loading spinner).
+          if (mounted && ref.read(isRecordingProvider)) {
+            setState(() => _cameraResuming = true);
+          }
           ref.read(isInPipProvider.notifier).set(false);
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) setState(() {});
@@ -390,6 +397,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         // the pipEventStream listener above. Ensures logs are in _systemLogs
         // before the rebuild that isInPipProvider.set(false) triggers.
         if (mounted) _flushPendingLogs();
+        // Pre-arm _cameraResuming before isInPipProvider clears so the first
+        // rebuild after PiP exit shows black instead of the loading spinner.
+        if (mounted && ref.read(isRecordingProvider)) {
+          setState(() => _cameraResuming = true);
+        }
         if (mounted) ref.read(isInPipProvider.notifier).set(false);
         // Guard against double-resume — _pipResumeHandled is set in paused
         // so it's always fresh for this PiP cycle. First caller (either
@@ -1123,9 +1135,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       ]);
     }
 
-    if (_cameraResuming) {
-      // Stream restarting but controller not yet initialized — show plain black
-      // (not the spinner fallback) so layout doesn't jump
+    // Show black box (not spinner) while CameraX is recovering its surface after
+    // PiP resize. _cameraResuming covers the initial recovery attempt;
+    // _cameraReconnecting covers the retry window after startImageStream fails
+    // and CameraX is still in CLOSING→REOPENING. Without this check, the brief
+    // window between those two states showed the loading spinner instead.
+    if (_cameraResuming || _cameraReconnecting) {
       return const ColoredBox(color: Colors.black);
     }
 

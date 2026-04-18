@@ -76,6 +76,12 @@ void main() async {
 
   await BantayDriveService.initialize();
 
+  // CRITICAL: registers the IsolateNameServer port so sendDataToMain() in the
+  // background isolate can deliver messages (heartbeats, stop_recording) to the
+  // main isolate's DataCallbacks. Without this call every sendDataToMain() call
+  // silently drops its payload — notification Stop button never fires.
+  FlutterForegroundTask.initCommunicationPort();
+
   runApp(const ProviderScope(child: BantayDriveApp()));
 }
 
