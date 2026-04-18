@@ -588,9 +588,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     double penalty = 0.0;
     for (final a in alerts) {
       final level = (a['alert_level'] as int?) ?? 1;
-      if (level == 1) penalty += 2.0;
-      else if (level == 2) penalty += 4.0;
-      else penalty += 8.0;
+      if (level == 1) {
+        penalty += 2.0;
+      } else if (level == 2) {
+        penalty += 4.0;
+      } else {
+        penalty += 8.0;
+      }
     }
     final safetyScore = (alertness - penalty).clamp(0.0, 100.0);
 
@@ -698,8 +702,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (consecutive < thresholds[0]) return;
 
     int newLevel = 1;
-    if (consecutive >= thresholds[2]) newLevel = 3;
-    else if (consecutive >= thresholds[1]) newLevel = 2;
+    if (consecutive >= thresholds[2]) {
+      newLevel = 3;
+    } else if (consecutive >= thresholds[1]) {
+      newLevel = 2;
+    }
 
     if (newLevel <= _alertLevel) return;
     _alertLevel = newLevel;
