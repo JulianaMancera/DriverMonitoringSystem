@@ -42,28 +42,18 @@ class MainActivity : FlutterActivity() {
                         result.success(null)
                     }
 
+                    "setStopping" -> {
+                        isStopping = true
+                        result.success(null)
+                    }
+
                     "enterPip" -> {
                         val isLandscape = call.argument<Boolean>("isLandscape") ?: false
                         val success = enterPipMode(isLandscape)
                         result.success(success)
                     }
 
-                    // FIX A: exitPip now correctly closes the PiP window on all
-                    // Android versions.
-                    //
-                    // Previous implementation used moveTaskToBack(false) alone.
-                    // On Android 8–11 this collapses the PiP window correctly.
-                    // On Android 12+ (API 31+) the activity stays in PiP mode
-                    // even after moveTaskToBack — the window persists because
-                    // onPictureInPictureModeChanged never fires false.
-                    //
-                    // Fix for Android 12+:
-                    //   1. Set autoEnterEnabled=false so the system won't re-enter
-                    //      PiP when we move to background.
-                    //   2. Post moveTaskToBack with a short delay so the params
-                    //      update propagates before the activity moves back.
-                    //   The system then collapses the PiP window cleanly.
-                    "exitPip" -> {
+                    "stopInPip" -> {
                         if (isInPip) {
                             isStopping  = true
                             isRecording = false

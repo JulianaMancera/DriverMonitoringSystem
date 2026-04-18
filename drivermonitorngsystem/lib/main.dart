@@ -311,13 +311,13 @@ class MainShell extends ConsumerWidget {
     if (isInPip) {
       return Scaffold(
         backgroundColor: Colors.black,
-        body: SafeArea(
-          top: false, bottom: false,
-          child: _screens[1],
+        body: IndexedStack(   // ← use IndexedStack, not _screens[1] directly
+          index: 1,
+          children: _screens,
         ),
       );
     }
-    
+      
     return Scaffold(
       backgroundColor: const Color(0xFF080E1A),
       extendBodyBehindAppBar: isFullscreen || isTransparent,

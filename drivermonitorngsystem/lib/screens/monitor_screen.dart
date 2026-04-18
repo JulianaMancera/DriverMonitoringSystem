@@ -28,6 +28,7 @@
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:camera/camera.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -132,6 +133,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // overlay OVER CameraPreview (not instead of it) so CameraX can reattach
   // its surface to the existing texture without interference from us.
   bool    _cameraReconnecting  = false;
+  // FIX Bug 2: Both didChangeAppLifecycleState(resumed) AND pipEventStream fire
+  // on PiP exit. Without this flag, _resumeAfterPip() runs twice — the second
+  // run sees _cameraResuming=false (already cleared) and starts a new recovery
+  // cycle, causing the camera "Reconnecting..." flash to appear again.
+  // Reset to false only in _stopRecording so it re-arms for the next session.
+  bool    _pipResumeHandled    = false;
 
   StreamSubscription<Map<String, dynamic>>? _pipSubscription;
 
@@ -205,13 +212,26 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       final value = event['value'];
       if (type == 'pip') {
         final inPip = value as bool;
-        ref.read(isInPipProvider.notifier).set(inPip);
         if (!inPip) {
+          // FIX Bug 3: Flush pending logs BEFORE setting isInPip=false.
+          // If we set isInPip=false first, a setState rebuild can happen
+          // before _flushPendingLogs runs. On that rebuild, _pendingLogs
+          // is not yet in _systemLogs, so the log panel shows stale data.
+          // Flushing first ensures logs are in _systemLogs before any rebuild.
           _flushPendingLogs();
+          ref.read(isInPipProvider.notifier).set(false);
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) setState(() {});
           });
-          _resumeAfterPip();
+          // FIX Bug 2: Guard against double-resume. pipEventStream and
+          // didChangeAppLifecycleState(resumed) both fire on PiP exit.
+          // _pipResumeHandled ensures _resumeAfterPip runs exactly once.
+          if (!_pipResumeHandled) {
+            _pipResumeHandled = true;
+            _resumeAfterPip();
+          }
+        } else {
+          ref.read(isInPipProvider.notifier).set(true);
         }
       }
     });
@@ -304,6 +324,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     debugPrint('[Monitor] stopping — sessionId=$_currentSessionId');
     if (_currentSessionId != null) {
+      try {
+        await const MethodChannel('com.bantaydrive/pip')
+            .invokeMethod('setStopping');
+      } catch (_) {}
       await _stopRecording();
       await PipService.exitPip();
     } else {
@@ -337,13 +361,18 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         break;
 
       case AppLifecycleState.resumed:
-        // Clear PiP flag synchronously BEFORE _resumeAfterPip so the first
-        // rebuild renders the full layout (not _buildPipView).
-        if (mounted) {
-          ref.read(isInPipProvider.notifier).set(false);
-          _flushPendingLogs();
+        // FIX Bug 3: Flush pending logs BEFORE clearing isInPip so that
+        // _systemLogs is populated before the first full-screen rebuild.
+        // (Same order fix as the pipEventStream listener above.)
+        if (mounted) _flushPendingLogs();
+        // Clear PiP flag so the first rebuild renders the full layout.
+        if (mounted) ref.read(isInPipProvider.notifier).set(false);
+        // FIX Bug 2: Guard against double-resume from pipEventStream + resumed.
+        // If pipEventStream already handled the resume, skip _resumeAfterPip here.
+        if (!_pipResumeHandled) {
+          _pipResumeHandled = true;
+          await _resumeAfterPip();
         }
-        await _resumeAfterPip();
         if (mounted) {
           Future.delayed(const Duration(milliseconds: 120), () {
             if (mounted) setState(() {});
@@ -490,7 +519,25 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // ─── LOG HELPERS ──────────────────────────────────────────────────────────
 
   void _flushPendingLogs() {
-    if (_pendingLogs.isEmpty || !mounted) return;
+    if (_pendingLogs.isEmpty) return;
+    // FIX Bug 3: If the widget is not mounted (e.g. stop came from notification
+    // while in PiP and the widget rebuilt before this flush), don't silently
+    // drop the pending logs. Persist them to DB directly so they survive and
+    // are visible if the user opens History. The in-memory list is also updated
+    // if mounted, so the log panel shows them immediately on next build.
+    for (final entry in _pendingLogs) {
+      if (_currentSessionId != null) {
+        DatabaseHelper.instance.insertSystemLog(
+          sessionId: _currentSessionId!,
+          message:   entry['message'] as String,
+          logType:   entry['type'] as String,
+        );
+      }
+    }
+    if (!mounted) {
+      _pendingLogs.clear();
+      return;
+    }
     setState(() {
       _systemLogs.addAll(_pendingLogs);
       _pendingLogs.clear();
@@ -608,6 +655,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     debugPrint('[Monitor] Session $_currentSessionId ended — '
         'score: ${safetyScore.toInt()}%');
     await ActiveSession.clear();
+    // FIX Bug 2: Re-arm the double-resume guard for the next session.
+    _pipResumeHandled = false;
     _addLogSync('Session Ended — Score: ${safetyScore.toInt()}%', 'INFO');
     BantayDriveService.stopService();
     PipService.setRecording(false);
