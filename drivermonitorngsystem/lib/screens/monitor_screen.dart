@@ -1,30 +1,3 @@
-// monitor_screen.dart — v7 (definitive fixes)
-//
-// ROOT CAUSES FIXED IN THIS VERSION:
-//
-// BUG 1 — Notification stop never worked:
-//   flutter_foreground_task v9.x wraps sendDataToMain payloads differently
-//   depending on the platform bridge version. The old check "if (data is! String)"
-//   silently dropped everything if the payload arrived as a Map<String,dynamic>
-//   with key 'data'. Fixed: unwrap both String and Map forms.
-//
-// BUG 2 — Camera shows loading when returning from PiP:
-//   CameraController loses its surface texture when the window resizes for PiP
-//   on Android (known flutter/camera issue). isInitialized becomes false.
-//   When the app returns to full screen, CameraPreview renders with an
-//   uninitialized controller → shows a black/loading frame.
-//   Fixed: _recoverCamera() detects this and re-initializes without full dispose.
-//   Also: _cameraController! was force-unwrapped even when _cameraResuming=true
-//   but controller could be null → null crash → error widget hides logs.
-//   Fixed: null-safe camera widget selection.
-//
-// BUG 3 — System logs disappear after PiP:
-//   This was a SYMPTOM of Bug 2. The null crash in _buildCameraWithOverlay
-//   threw an exception that prevented the full layout from rendering,
-//   making it appear the log panel was gone. Fix Bug 2 → logs reappear.
-//   Added extra safety: _flushPendingLogs is also called in the build method
-//   itself if pending logs exist and pip is no longer active.
-
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -41,11 +14,10 @@ import 'package:bantaydrive/core/preference/preference_helper.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import '../utils/responsive.dart';
 
-// ─── GLOBAL — allows stop from notification even during PiP ──────────────────
+// GLOBAL — allows stop from notification even during PiP 
 _MonitorScreenState? _activeMonitorState;
 
-// ─── PROVIDERS ────────────────────────────────────────────────────────────────
-
+// PROVIDERS
 class _StringNotifier extends Notifier<String> {
   final String _initial;
   _StringNotifier(this._initial);
@@ -99,8 +71,6 @@ final showAlertBannerProvider = NotifierProvider<_BoolNotifier, bool>(
     () => _BoolNotifier(false));
 final alertBannerTypeProvider = NotifierProvider<_StringNotifier, String>(
     () => _StringNotifier('DROWSY'));
-final clearGlassesProvider = NotifierProvider<_BoolNotifier, bool>(
-    () => _BoolNotifier(false));
 final isInPipProvider = NotifierProvider<_BoolNotifier, bool>(
     () => _BoolNotifier(false));
 final activeSubclassProvider =
@@ -109,7 +79,6 @@ final activeSubclassProvider =
 final activeSubclassIndexProvider = NotifierProvider<_IntNotifier, int>(
     () => _IntNotifier(0));
 
-// ─────────────────────────────────────────────────────────────────────────────
 class MonitorScreen extends ConsumerStatefulWidget {
   const MonitorScreen({super.key});
   @override
@@ -126,22 +95,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   String? _cameraError;
   bool    _camDisposing      = false;
   bool    _cameraResuming      = false;
-  // true while CameraX is internally recovering its hardware session after
-  // the MIUI buffer queue destruction on PiP resize. We show a semi-transparent
-  // overlay OVER CameraPreview (not instead of it) so CameraX can reattach
-  // its surface to the existing texture without interference from us.
   bool    _cameraReconnecting  = false;
-  // Prevents _initCamera() from running while CameraX is recovering from
-  // PiP. On Xiaomi, the CameraPreview widget rebuild after PiP exit can
-  // trigger a new CameraController.initialize() which creates new
-  // addUseCases → new CLOSING→REOPENING cycle on top of CameraX's own
-  // internal recovery. Set true on paused, false when recovery is done.
   bool    _isInPipRecovery     = false;
-  // Prevents _resumeAfterPip() from running twice when both pipEventStream
-  // AND didChangeAppLifecycleState(resumed) fire on PiP exit (common on
-  // Xiaomi/Samsung). The second call triggers a new CLOSING→REOPENING cycle
-  // visible in logcat as triple camera restarts and 75+ skipped frames.
-  // Reset to false in _stopRecording() so it re-arms for the next session.
   bool    _pipResumeHandled    = false;
 
   StreamSubscription<Map<String, dynamic>>? _pipSubscription;
@@ -181,8 +136,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   DateTime _lastInferTs  = DateTime.fromMillisecondsSinceEpoch(0);
   static const int _kInferThrottleMs = 200;
 
-  // ─── LIFECYCLE ─────────────────────────────────────────────────────────────
-
+  // LIFECYCLE
   @override
   void initState() {
     super.initState();
@@ -217,14 +171,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       if (type == 'pip') {
         final inPip = value as bool;
         if (!inPip) {
-          // FIX C: Flush BEFORE clearing isInPip. If isInPip is cleared first,
-          // a setState rebuild fires before _pendingLogs are moved to _systemLogs
-          // — the log panel briefly shows "No logs yet" on the first frame.
           _flushPendingLogs();
-          // Pre-arm _cameraResuming so the first rebuild triggered by
-          // isInPipProvider.set(false) already sees _cameraResuming=true.
-          // Without this, there is one frame where canShow=false AND
-          // _cameraResuming=false → _buildCameraFallback() (loading spinner).
           if (mounted && ref.read(isRecordingProvider)) {
             setState(() => _cameraResuming = true);
           }
@@ -232,10 +179,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) setState(() {});
           });
-          // Guard: both pipEventStream and didChangeAppLifecycleState(resumed)
-          // fire on PiP exit. Without this, _resumeAfterPip() runs twice —
-          // causing a triple CLOSING→REOPENING cycle in CameraX (logcat shows
-          // 75+ skipped frames per extra cycle on Xiaomi devices).
           if (!_pipResumeHandled) {
             _pipResumeHandled = true;
             _resumeAfterPip();
@@ -275,24 +218,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     super.dispose();
   }
 
-  // ─── TASK DATA CALLBACK ───────────────────────────────────────────────────
-  //
-  // BUG 1 FIX: flutter_foreground_task v9.x changed how sendDataToMain delivers
-  // payloads. In some build configurations the String is wrapped in a Map:
-  //   {'data': 'stop_recording'}
-  // or arrives as a completely different runtime type.
-  //
-  // The old "if (data is! String) return;" silently dropped all messages
-  // that didn't arrive as a bare String — including stop_recording on many
-  // devices. Fixed by extracting the string value from both forms.
+  // TASK DATA CALLBACK
   void _onReceiveTaskData(Object data) async {
-    // Unwrap all known payload formats from flutter_foreground_task v9.x:
-    //   1. Bare String:                    'stop_recording'
-    //   2. Map with 'data' key:            {'data': 'stop_recording'}
-    //   3. Map with button id key:         {'notification_button_id': 'stop_recording'}
-    // Format 3 is how v9.x delivers notification button presses on some
-    // Android versions (the button press bypasses onNotificationButtonPressed
-    // and arrives directly as task data in the main isolate).
     String? message;
     if (data is String) {
       message = data;
@@ -301,22 +228,19 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       if (raw is String) {
         message = raw;
       } else {
-        // v9.x notification button press format
         final buttonId = data['notification_button_id'];
         if (buttonId is String) message = buttonId;
       }
     }
 
-    // Log what we actually received so you can see it in logcat
     debugPrint('[Monitor] taskData received — type: ${data.runtimeType}, '
         'message: $message, this=$hashCode mounted=$mounted');
 
     if (message == null) return;
-    if (message == 'heartbeat') return; // ignore keepalive ticks
+    if (message == 'heartbeat') return;
 
     if (message != 'stop_recording') return;
 
-    // Delegate to the most recently mounted instance
     if (_activeMonitorState != null &&
         _activeMonitorState != this &&
         _activeMonitorState!.mounted) {
@@ -333,7 +257,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       return;
     }
 
-    // Try in-memory first, then SharedPreferences fallback
     if (_currentSessionId == null) {
       final restored = await ActiveSession.restoreIfNeeded();
       if (restored) {
@@ -356,26 +279,15 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         ref.read(showAlertBannerProvider.notifier).set(false);
         ref.read(isInPipProvider.notifier).set(false);
       }
-      // Still try to exit PIP even when there's no active session — the
-      // Android PIP window stays until the activity is brought to foreground.
       await PipService.exitPip();
     }
   }
 
-  // ─── LIFECYCLE STATE ───────────────────────────────────────────────────────
-
+  // LIFECYCLE STATE
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) async {
     switch (state) {
       case AppLifecycleState.inactive:
-        // FIX: Do NOT call setRecording() when transitioning to inactive
-        // while in PiP. On Xiaomi, PiP exit fires:
-        //   onPictureinPictureModeChanged(false) → inactive → resumed
-        // Calling setRecording() during inactive while CameraX is in its
-        // CLOSING→REOPENING recovery cycle triggers a second native camera
-        // open request, causing extra REOPENING cycles in logcat.
-        // Only call setRecording() when we're actually going to background
-        // (not as part of PiP exit sequence).
         if (!ref.read(isInPipProvider)) {
           await PipService.setRecording(ref.read(isRecordingProvider));
         }
@@ -384,30 +296,19 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       case AppLifecycleState.paused:
         if (ref.read(isRecordingProvider)) {
           if (mounted) ref.read(isInPipProvider.notifier).set(true);
-          // Block camera reinit during PiP recovery — see _isInPipRecovery.
           _isInPipRecovery = true;
-          // Reset resume guard so it's ready for when we come back from PiP.
           _pipResumeHandled = false;
-          // Do NOT pause camera stream here — PiP preview needs it running.
         } else {
           await _pauseCameraStream();
         }
         break;
 
       case AppLifecycleState.resumed:
-        // FIX C: Flush pending logs BEFORE clearing isInPip — same reason as
-        // the pipEventStream listener above. Ensures logs are in _systemLogs
-        // before the rebuild that isInPipProvider.set(false) triggers.
         if (mounted) _flushPendingLogs();
-        // Pre-arm _cameraResuming before isInPipProvider clears so the first
-        // rebuild after PiP exit shows black instead of the loading spinner.
         if (mounted && ref.read(isRecordingProvider)) {
           setState(() => _cameraResuming = true);
         }
         if (mounted) ref.read(isInPipProvider.notifier).set(false);
-        // Guard against double-resume — _pipResumeHandled is set in paused
-        // so it's always fresh for this PiP cycle. First caller (either
-        // pipEventStream or this resumed handler) wins; the second is skipped.
         if (!_pipResumeHandled) {
           _pipResumeHandled = true;
           await _resumeAfterPip();
@@ -424,17 +325,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // ─── CAMERA LIFECYCLE ─────────────────────────────────────────────────────
-
-  // Called whenever CameraController.value changes (streaming state, errors, etc.)
-  // CameraX fires this when it finishes internal hardware recovery after PiP.
+  // CAMERA LIFECYCLE 
   void _onCameraValueChanged() {
     if (!mounted || _camDisposing) return;
     final ctrl = _cameraController;
     if (ctrl == null) return;
 
     if (_cameraReconnecting && ctrl.value.isStreamingImages) {
-      // CameraX has reattached the surface and resumed streaming — clear overlay
       setState(() => _cameraReconnecting = false);
       debugPrint('[Camera] CameraX recovery complete — streaming resumed');
     }
@@ -451,30 +348,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // Called on PiP exit (both from pipEventStream and resumed lifecycle).
-  //
-  // LOGCAT FINDING: MIUI destroys the Camera2 BufferQueue when the window
-  // resizes for PiP (ERROR_CAMERA_DEVICE code 4 + ERROR_CAMERA_SERVICE code 5).
-  // CameraX handles this internally: CLOSING → REOPENING → OPENED.
-  // We must NOT dispose/reinitialize the controller — that interrupts CameraX's
-  // own recovery and causes a second recovery cycle (62 skipped frames in log).
-  //
-  // Correct approach: show a reconnecting overlay OVER the CameraPreview
-  // and wait for CameraX to finish on its own. _onCameraValueChanged clears
-  // the overlay when isStreamingImages becomes true again.
   Future<void> _resumeAfterPip() async {
     if (_cameraController == null || _camDisposing) return;
     if (!ref.read(isRecordingProvider)) return;
-    // Guard: if already resuming (pipEventStream and resumed both fire on Xiaomi),
-    // the second call is a no-op — CameraX only needs one recovery attempt.
     if (_cameraResuming) return;
 
-    // Show reconnecting overlay immediately — CameraPreview stays mounted
-    // so CameraX can reattach its surface without a new controller.
     if (mounted) setState(() { _cameraResuming = true; _cameraReconnecting = true; });
 
-    // Give CameraX a moment to start its recovery before we try the stream.
-    // If the stream is already running (surface was never lost), this is a no-op.
     await Future.delayed(const Duration(milliseconds: 300));
 
     if (!mounted || _camDisposing) return;
@@ -483,16 +363,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       if (!_cameraController!.value.isStreamingImages) {
         await _cameraController!.startImageStream(_onCameraFrame);
       }
-      // Stream is running — clear all recovery flags
       _isInPipRecovery = false;
       if (mounted) setState(() { _cameraResuming = false; _cameraReconnecting = false; });
     } catch (e) {
-      // startImageStream failed — CameraX is still recovering internally.
-      // Leave _cameraReconnecting=true; _onCameraValueChanged will clear it
-      // when CameraX finishes its REOPENING cycle.
       debugPrint('[Camera] startImageStream during recovery: $e — waiting for CameraX');
       if (mounted) setState(() => _cameraResuming = false);
-      // Retry stream start after CameraX finishes its cycle (~800ms on Xiaomi)
       Future.delayed(const Duration(milliseconds: 800), () async {
         if (!mounted || _camDisposing || _cameraController == null) return;
         try {
@@ -510,8 +385,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // ─── CAMERA INIT ──────────────────────────────────────────────────────────
-
+  // CAMERA INIT
   Future<void> _loadPreferencesAndInit() async {
     final prefs = PreferencesHelper.instance;
     _prefAlertSensitivity = await prefs.getAlertSensitivity();
@@ -523,12 +397,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   Future<void> _initCamera() async {
     if (_camDisposing) return;
-    // CRITICAL: Do NOT reinitialize the camera during PiP recovery.
-    // On Xiaomi, the CameraPreview widget rebuild after PiP exit calls
-    // back into _initCamera via the widget tree. Creating a new
-    // CameraController here while CameraX is in CLOSING→REOPENING adds
-    // a second addUseCases call → second REOPENING cycle → triple restart.
-    // CameraX handles its own hardware recovery; we just need to wait.
     if (_isInPipRecovery) {
       debugPrint('[Camera] _initCamera skipped — PiP recovery in progress');
       return;
@@ -554,9 +422,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       if (!mounted || _camDisposing) return;
       setState(() { _cameraInitialized = true; _cameraError = null; });
 
-      // Listen to CameraController value changes so we can detect when
-      // CameraX finishes its internal hardware recovery after PiP resize.
-      // When isStreamingImages flips back to true, we clear the reconnecting overlay.
       _cameraController!.addListener(_onCameraValueChanged);
 
       if (_prefAutoStart) {
@@ -568,16 +433,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // ─── LOG HELPERS ──────────────────────────────────────────────────────────
-
+  // LOG HELPERS 
   void _flushPendingLogs() {
     if (_pendingLogs.isEmpty) return;
 
-    // FIX B: Always persist pending logs to DB first — even if !mounted.
-    // When stop comes from the notification while in PiP, this method may be
-    // called after a rebuild where mounted=false. Without this, all logs
-    // accumulated during PiP (drowsy/distracted detections, alerts) are
-    // silently dropped and never appear in History's session detail.
     for (final entry in _pendingLogs) {
       if (_currentSessionId != null) {
         DatabaseHelper.instance.insertSystemLog(
@@ -609,7 +468,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         '${now.second.toString().padLeft(2, '0')}';
     final entry = {'time': t, 'message': message, 'type': type};
 
-    // Always persist to DB regardless of UI state
     if (_currentSessionId != null) {
       DatabaseHelper.instance.insertSystemLog(
           sessionId: _currentSessionId!, message: message, logType: type);
@@ -629,8 +487,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     });
   }
 
-  // ─── SESSION ──────────────────────────────────────────────────────────────
-
+  // SESSION
   Future<void> _startRecording() async {
     _currentSessionId      = await DatabaseHelper.instance.insertSession();
     await DatabaseHelper.instance.insertStateCount(_currentSessionId!);
@@ -661,9 +518,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       _modelLoaded ? 'SUCCESS' : 'WARNING',
     );
     _addLogSync('Monitoring Started', 'INFO');
-    if (ref.read(clearGlassesProvider)) {
-      _addLogSync('Clear Glasses Mode Active', 'INFO');
-    }
 
     _snapshotTimer = Timer.periodic(
         const Duration(seconds: 5), (_) => _saveAlertnessSnapshot());
@@ -678,10 +532,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (_currentSessionId == null) return;
     _snapshotTimer?.cancel();
 
-    // FIX A: Save one last alertness snapshot right now, BEFORE pausing the
-    // camera stream. This ensures the final alertness value in the provider
-    // reflects actual inference data from this session — not the reset default
-    // of 100.0 that gets set after PiP recovery when stop is triggered quickly.
     await _saveAlertnessSnapshot();
 
     await _pauseCameraStream();
@@ -691,9 +541,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final durationSec = _sessionStartTime != null
         ? DateTime.now().difference(_sessionStartTime!).inSeconds : 0;
 
-    // FIX A: Use the average of all saved alertness snapshots for the final
-    // score — much more accurate than the provider value (which may be stale
-    // at 100.0 if the provider was reset during PiP recovery before stop ran).
     final snapshots = await DatabaseHelper.instance
         .getAlertnessSnapshots(_currentSessionId!);
     final double alertness;
@@ -702,7 +549,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           0.0, (acc, s) => acc + ((s['alertness_pct'] as num).toDouble()));
       alertness = sum / snapshots.length;
     } else {
-      // Fallback to provider if no snapshots were saved yet (very short session)
       alertness = ref.read(alertnessPctProvider);
     }
 
@@ -732,36 +578,17 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         'score: ${safetyScore.toInt()}%');
     await ActiveSession.clear();
 
-    // FIX B+C — ORDER MATTERS. We must:
-    //   1. Clear isInPipProvider FIRST — so _addLogSync below does NOT go to
-    //      _pendingLogs (which would be lost when _currentSessionId is nulled).
-    //   2. Call _addLogSync WHILE _currentSessionId is still set — so the
-    //      "Session Ended" log is saved to DB correctly.
-    //   3. Flush _pendingLogs while _currentSessionId is still valid — so any
-    //      logs accumulated during PiP are persisted before the session closes.
-    //   4. Only THEN null _currentSessionId and set isRecording=false.
-    //
-    // Old order: isRecording=false → isInPip=false → _currentSessionId=null
-    //   Problem: isRecording=false triggers a rebuild. If _pendingLogs is not
-    //   yet flushed, the log panel shows "No logs yet." And when isInPip=false
-    //   triggers _flushPendingLogs, _currentSessionId is already null so the
-    //   DB insertSystemLog calls inside _flushPendingLogs are silently skipped.
     if (mounted) {
-      // Step 1: Clear PiP flag so _addLogSync writes to _systemLogs, not _pendingLogs
       ref.read(isInPipProvider.notifier).set(false);
-      // Step 2: Flush any logs that accumulated during PiP — while sessionId is valid
       _flushPendingLogs();
     }
-    // Step 3: Add final log — _currentSessionId still set, isInPip now false
     _addLogSync('Session Ended — Score: ${safetyScore.toInt()}%', 'INFO');
 
     BantayDriveService.stopService();
     PipService.setRecording(false);
 
-    // Step 4: Now safe to null the session and flip providers
     _currentSessionId = null;
     _sessionStartTime = null;
-    // Re-arm all PiP recovery guards for the next session.
     _pipResumeHandled = false;
     _isInPipRecovery  = false;
 
@@ -808,8 +635,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─── INFERENCE ────────────────────────────────────────────────────────────
-
+  // INFERENCE
   bool _isInferring = false;
 
   Future<void> _onCameraFrame(CameraImage frame) async {
@@ -934,18 +760,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         alertnessPct: ref.read(alertnessPctProvider).clamp(0.0, 100.0));
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
   // BUILD
-  // ═══════════════════════════════════════════════════════════════════════════
-
   @override
   Widget build(BuildContext context) {
     final isInPip = ref.watch(isInPipProvider);
 
     if (isInPip) return _buildPipView();
 
-    // Safety flush: if we somehow have pending logs but pip is no longer active,
-    // flush them now rather than waiting for the next lifecycle event.
     if (_pendingLogs.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _flushPendingLogs());
     }
@@ -970,14 +791,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─── PiP VIEW ─────────────────────────────────────────────────────────────
-
+  // PiP VIEW
   Widget _buildPipView() {
     final isRecording = ref.watch(isRecordingProvider);
 
-    // Fallback: if recording stopped but the native PIP window didn't close
-    // (can happen on MIUI/HyperOS where startActivity from PIP is unreliable),
-    // show a stopped state so the user knows they can tap the window to dismiss it.
     if (!isRecording) {
       return const ColoredBox(
         color: Colors.black,
@@ -1087,8 +904,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─── LAYOUTS ──────────────────────────────────────────────────────────────
-
+  // LAYOUTS
   Widget _buildPortraitLayout() => SingleChildScrollView(
         child: Padding(
           padding: EdgeInsets.symmetric(horizontal: context.rp(14)),
@@ -1104,13 +920,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         ),
       );
 
-  // ─── CAMERA WITH OVERLAY ──────────────────────────────────────────────────
-
-  // Shows CameraPreview whenever the controller exists and is initialized.
-  // During MIUI's internal CameraX recovery (BufferQueue destroyed on PiP resize),
-  // we keep CameraPreview mounted — removing it would interrupt CameraX's
-  // surface reattachment. Instead we layer a semi-transparent reconnecting
-  // overlay on top until _onCameraValueChanged clears _cameraReconnecting.
+  // CAMERA WITH OVERLAY
   Widget _buildCameraChild(double camW, double camH) {
     final ctrl = _cameraController;
     final canShow = _cameraInitialized &&
@@ -1121,8 +931,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (canShow) {
       return Stack(children: [
         CameraPreview(key: _cameraKey, ctrl),
-        // Reconnecting overlay — shown while CameraX recovers its hardware session.
-        // Keeps the texture alive and gives the user visual feedback.
         if (_cameraReconnecting)
           Positioned.fill(
             child: Container(
@@ -1143,11 +951,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       ]);
     }
 
-    // Show black box (not spinner) while CameraX is recovering its surface after
-    // PiP resize. _cameraResuming covers the initial recovery attempt;
-    // _cameraReconnecting covers the retry window after startImageStream fails
-    // and CameraX is still in CLOSING→REOPENING. Without this check, the brief
-    // window between those two states showed the loading spinner instead.
     if (_cameraResuming || _cameraReconnecting) {
       return const ColoredBox(color: Colors.black);
     }
@@ -1156,8 +959,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   Widget _buildCameraWithOverlay({double? height}) {
-    final isRecording  = ref.watch(isRecordingProvider);
-    final clearGlasses = ref.watch(clearGlassesProvider);
+    final isRecording = ref.watch(isRecordingProvider);
 
     double camAspect;
     final ctrl = _cameraController;
@@ -1235,6 +1037,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 ),
               ),
 
+            // Camera overlay controls — Record/Stop only
             if (!ref.watch(isInPipProvider))
               Positioned(
                 bottom: context.rs(12),
@@ -1253,32 +1056,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                           border: Border.all(
                               color: Colors.white.withValues(alpha: 0.08), width: 1),
                         ),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          _CameraOverlayButton(
-                            icon: Icons.visibility, label: 'Clear Glasses',
-                            isActive: clearGlasses,
-                            activeColor: const Color(0xFF22d3ee),
-                            onTap: () {
-                              ref.read(clearGlassesProvider.notifier).toggle();
-                              if (!clearGlasses && _currentSessionId != null) {
-                                _addLogSync('Clear Glasses Mode Active', 'SUCCESS');
-                              }
-                            },
-                          ),
-                          Container(
-                            width: 1, height: context.rs(24),
-                            margin: EdgeInsets.symmetric(horizontal: context.rp(5)),
-                            color: Colors.white.withValues(alpha: 0.15),
-                          ),
-                          _CameraOverlayButton(
-                            icon: isRecording
-                                ? Icons.stop_circle : Icons.fiber_manual_record,
-                            label: isRecording ? 'Stop' : 'Record',
-                            isActive: isRecording, activeColor: Colors.red,
-                            onTap: () => isRecording
-                                ? _stopRecording() : _startRecording(),
-                          ),
-                        ]),
+                        child: _CameraOverlayButton(
+                          icon: isRecording
+                              ? Icons.stop_circle : Icons.fiber_manual_record,
+                          label: isRecording ? 'Stop' : 'Record',
+                          isActive: isRecording, activeColor: Colors.red,
+                          onTap: () => isRecording
+                              ? _stopRecording() : _startRecording(),
+                        ),
                       ),
                     ),
                   ),
@@ -1369,8 +1154,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         ),
       );
 
-  // ─── ALERT BANNER — L1/L2 ─────────────────────────────────────────────────
-
+  // ALERT BANNER — L1/L2
   Widget _buildAlertBanner(String type) {
     final isDrowsy  = type == 'DROWSY';
     final slideAnim = _notifSlide ?? AlwaysStoppedAnimation(Offset.zero);
@@ -1489,8 +1273,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─── WARNING OVERLAY — L3 ─────────────────────────────────────────────────
-
+  // WARNING OVERLAY — L3
   Widget _buildWarningOverlay(String type) {
     final isDrowsy = type == 'DROWSY';
     return GestureDetector(
@@ -1587,17 +1370,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // ─── METRICS + SYSTEM LOG ─────────────────────────────────────────────────
-
+  // METRICS + SYSTEM LOG
   Widget _buildMetricsSidebar() {
     final alertness   = ref.watch(alertnessPctProvider);
     final drowsiness  = ref.watch(drowsinessPctProvider);
     final distraction = ref.watch(distractionPctProvider);
 
     return Column(children: [
-      // ClipRect prevents the 86px RenderFlex overflow exception that fires
-      // during the PiP→fullscreen animation when Flutter briefly lays out
-      // the full UI at PiP window width (~150dp). Clips instead of throwing.
       ClipRect(
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(child: _MetricGauge(label: 'Alertness', value: alertness,
@@ -1735,9 +1514,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       ),
     );
   }
-} // end _MonitorScreenState
+} 
 
-// ─── METRIC GAUGE ─────────────────────────────────────────────────────────────
+// METRIC GAUGE
 class _MetricGauge extends StatelessWidget {
   final String label; final double value;
   final Color color;  final IconData icon;
@@ -1805,7 +1584,7 @@ class _MetricGauge extends StatelessWidget {
   }
 }
 
-// ─── CAMERA OVERLAY BUTTON ────────────────────────────────────────────────────
+// CAMERA OVERLAY BUTTON
 class _CameraOverlayButton extends StatelessWidget {
   final IconData icon; final String label;
   final bool isActive; final Color activeColor;
@@ -1839,8 +1618,7 @@ class _CameraOverlayButton extends StatelessWidget {
   }
 }
 
-// ─── SESSION SUMMARY MODAL ───────────────────────────────────────────────────
-
+// SESSION SUMMARY MODAL
 class _SessionSummaryModal extends StatefulWidget {
   final int    durationSec;
   final double safetyScore;
