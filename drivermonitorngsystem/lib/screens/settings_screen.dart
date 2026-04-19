@@ -593,7 +593,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               Navigator.pop(dialogCtx);
               await DatabaseHelper.instance.clearAllData();
               ref.read(dbChangeCounterProvider.notifier).increment();
-              await PreferencesHelper.instance.setClearGlasses(false);
               if (context.mounted) {
                 _showSnackbar(context, 'All history cleared.', isError: false);
               }
