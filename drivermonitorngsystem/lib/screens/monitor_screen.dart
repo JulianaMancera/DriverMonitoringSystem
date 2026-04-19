@@ -14,7 +14,7 @@ import 'package:bantaydrive/core/preference/preference_helper.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import '../utils/responsive.dart';
 
-// GLOBAL — allows stop from notification even during PiP 
+// GLOBAL — allows stop from notification even during PiP
 _MonitorScreenState? _activeMonitorState;
 
 // PROVIDERS
@@ -79,6 +79,7 @@ final activeSubclassProvider =
 final activeSubclassIndexProvider = NotifierProvider<_IntNotifier, int>(
     () => _IntNotifier(0));
 
+// MONITOR SCREEN 
 class MonitorScreen extends ConsumerStatefulWidget {
   const MonitorScreen({super.key});
   @override
@@ -91,13 +92,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   final GlobalKey _cameraKey = GlobalKey();
   CameraController? _cameraController;
   List<CameraDescription> _cameras = [];
-  bool    _cameraInitialized = false;
+  bool    _cameraInitialized  = false;
   String? _cameraError;
-  bool    _camDisposing      = false;
-  bool    _cameraResuming      = false;
-  bool    _cameraReconnecting  = false;
-  bool    _isInPipRecovery     = false;
-  bool    _pipResumeHandled    = false;
+  bool    _camDisposing       = false;
+  bool    _cameraResuming     = false;
+  bool    _cameraReconnecting = false;
+  bool    _isInPipRecovery    = false;
+  bool    _pipResumeHandled   = false;
 
   StreamSubscription<Map<String, dynamic>>? _pipSubscription;
 
@@ -136,7 +137,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   DateTime _lastInferTs  = DateTime.fromMillisecondsSinceEpoch(0);
   static const int _kInferThrottleMs = 200;
 
-  // LIFECYCLE
+  // LIFECYCLE 
   @override
   void initState() {
     super.initState();
@@ -238,7 +239,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     if (message == null) return;
     if (message == 'heartbeat') return;
-
     if (message != 'stop_recording') return;
 
     if (_activeMonitorState != null &&
@@ -296,7 +296,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       case AppLifecycleState.paused:
         if (ref.read(isRecordingProvider)) {
           if (mounted) ref.read(isInPipProvider.notifier).set(true);
-          _isInPipRecovery = true;
+          _isInPipRecovery  = true;
           _pipResumeHandled = false;
         } else {
           await _pauseCameraStream();
@@ -325,7 +325,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // CAMERA LIFECYCLE 
+  // CAMERA LIFECYCLE
   void _onCameraValueChanged() {
     if (!mounted || _camDisposing) return;
     final ctrl = _cameraController;
@@ -433,7 +433,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // LOG HELPERS 
+  // LOG HELPERS
   void _flushPendingLogs() {
     if (_pendingLogs.isEmpty) return;
 
@@ -603,14 +603,21 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(distractionPctProvider.notifier).set(0.0);
     ref.read(activeSubclassProvider.notifier).set(null);
     ref.read(activeSubclassIndexProvider.notifier).set(0);
+
     if (mounted) {
       ref.read(dbChangeCounterProvider.notifier).increment();
-      _showSessionSummaryModal(
-        durationSec:       durationSec,
-        safetyScore:       safetyScore,
-        drowsyAlerts:      drowsyAlerts,
-        distractedAlerts:  distractedAlerts,
-      );
+
+      // Only show the session summary modal if the user has enabled it in Settings.
+      final showSummary =
+          await PreferencesHelper.instance.getShowSessionSummary();
+      if (mounted && showSummary) {
+        _showSessionSummaryModal(
+          durationSec:      durationSec,
+          safetyScore:      safetyScore,
+          drowsyAlerts:     drowsyAlerts,
+          distractedAlerts: distractedAlerts,
+        );
+      }
     }
   }
 
@@ -908,12 +915,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   Widget _buildPortraitLayout() => LayoutBuilder(
       builder: (context, constraints) {
         final availH = constraints.maxHeight;
-       final camH = availH * (context.isSmallPhone ? 0.50 : 0.52);
+        final camH = availH * (context.isSmallPhone ? 0.50 : 0.52);
 
         return SingleChildScrollView(
           physics: const NeverScrollableScrollPhysics(),
           child: SizedBox(
-            height: availH, // exact fit — walang overflow, walang dead space
+            height: availH,
             child: Padding(
               padding: EdgeInsets.symmetric(horizontal: context.rp(14)),
               child: Column(
@@ -932,7 +939,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       },
     );
 
-  // CAMERA WITH OVERLAY
+  // CAMERA CHILD — ML Kit face box overlay removed
   Widget _buildCameraChild(double camW, double camH) {
     final ctrl = _cameraController;
     final canShow = _cameraInitialized &&
@@ -943,6 +950,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (canShow) {
       return Stack(children: [
         CameraPreview(key: _cameraKey, ctrl),
+
         if (_cameraReconnecting)
           Positioned.fill(
             child: Container(
@@ -1049,7 +1057,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 ),
               ),
 
-            // Camera overlay controls — Record/Stop only
             if (!ref.watch(isInPipProvider))
               Positioned(
                 bottom: context.rs(12),
@@ -1526,7 +1533,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       ),
     );
   }
-} 
+}
 
 // METRIC GAUGE
 class _MetricGauge extends StatelessWidget {
@@ -1720,7 +1727,6 @@ class _SessionSummaryModalState extends State<_SessionSummaryModal>
           child: SafeArea(
             top: false,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              // Drag handle
               Padding(
                 padding: const EdgeInsets.only(top: 12, bottom: 4),
                 child: Container(
@@ -1730,7 +1736,6 @@ class _SessionSummaryModalState extends State<_SessionSummaryModal>
                         borderRadius: BorderRadius.circular(2))),
               ),
 
-              // Header row
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 10, 16, 14),
                 child: Row(children: [
@@ -1773,7 +1778,6 @@ class _SessionSummaryModalState extends State<_SessionSummaryModal>
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
                 child: Column(children: [
-                  // Safety score card
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(
@@ -1812,7 +1816,6 @@ class _SessionSummaryModalState extends State<_SessionSummaryModal>
 
                   const SizedBox(height: 14),
 
-                  // Alert chips row
                   Row(children: [
                     Expanded(child: _AlertChip(
                       label: 'Drowsy',
@@ -1831,7 +1834,6 @@ class _SessionSummaryModalState extends State<_SessionSummaryModal>
 
                   const SizedBox(height: 20),
 
-                  // Close button
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
