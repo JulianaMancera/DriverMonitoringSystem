@@ -40,7 +40,6 @@ import '../core/session_state.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import '../utils/responsive.dart';
-import '../main.dart' show landscapeFullscreenProvider, sidebarOpenProvider;
 
 // ─── GLOBAL — allows stop from notification even during PiP ──────────────────
 _MonitorScreenState? _activeMonitorState;
@@ -918,9 +917,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       WidgetsBinding.instance.addPostFrameCallback((_) => _flushPendingLogs());
     }
 
-    final isDesktop   = MediaQuery.of(context).size.width >= 1024;
-    final isLandscape =
-        MediaQuery.of(context).orientation == Orientation.landscape;
     final showAlert = ref.watch(showAlertBannerProvider);
     final alertType = ref.watch(alertBannerTypeProvider);
     final isLevel3  = _alertLevel == 3;
@@ -928,12 +924,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     return ColoredBox(
       color: const Color(0xFF080E1A),
       child: Stack(children: [
-        if (isDesktop)
-          SafeArea(child: _buildDesktopLayout())
-        else if (isLandscape)
-          _buildLandscapeLayout()
-        else
-          SafeArea(bottom: false, child: _buildPortraitLayout()),
+        SafeArea(bottom: false, child: _buildPortraitLayout()),
 
         if (showAlert && !isLevel3)
           Positioned(top: 0, left: 0, right: 0,
@@ -1050,51 +1041,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             SizedBox(height: context.rs(20)),
             _buildCameraWithOverlay(
                 height: MediaQuery.of(context).size.height *
-                    (context.isSmallPhone ? 0.36 : 0.40),
-                isLandscape: false),
+                    (context.isSmallPhone ? 0.36 : 0.40)),
             SizedBox(height: context.rs(10)),
-            _buildMetricsSidebar(isLandscape: false),
+            _buildMetricsSidebar(),
             SizedBox(height: context.rs(14)),
           ]),
         ),
       );
-
-  Widget _buildLandscapeLayout() {
-    final lsFullscreen = ref.watch(landscapeFullscreenProvider);
-    if (lsFullscreen) {
-      return GestureDetector(
-        onTap: () {
-          ref.read(landscapeFullscreenProvider.notifier).set(false);
-          ref.read(sidebarOpenProvider.notifier).set(false);
-        },
-        behavior: HitTestBehavior.translucent,
-        child: _buildCameraWithOverlay(isLandscape: true, fullscreen: true),
-      );
-    }
-    return GestureDetector(
-      onTap: () {
-        ref.read(landscapeFullscreenProvider.notifier).set(true);
-        ref.read(sidebarOpenProvider.notifier).set(false);
-      },
-      behavior: HitTestBehavior.translucent,
-      child: _buildCameraWithOverlay(isLandscape: true, fullscreen: false),
-    );
-  }
-
-  Widget _buildDesktopLayout() => Column(children: [
-        Expanded(child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(flex: 8, child: Column(children: [
-              Expanded(child: _buildCameraWithOverlay(isLandscape: true)),
-              SizedBox(height: context.rs(16)),
-              _buildMetricsSidebar(isLandscape: false),
-            ])),
-            SizedBox(width: context.rp(24)),
-            Expanded(flex: 4, child: _buildMetricsSidebar(isLandscape: false)),
-          ],
-        )),
-      ]);
 
   // ─── CAMERA WITH OVERLAY ──────────────────────────────────────────────────
 
@@ -1147,11 +1100,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     return _buildCameraFallback();
   }
 
-  Widget _buildCameraWithOverlay({
-    double? height,
-    required bool isLandscape,
-    bool fullscreen = false,
-  }) {
+  Widget _buildCameraWithOverlay({double? height}) {
     final isRecording  = ref.watch(isRecordingProvider);
     final clearGlasses = ref.watch(clearGlassesProvider);
 
@@ -1161,10 +1110,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         ctrl.value.isInitialized &&
         ctrl.value.previewSize != null) {
       final ps = ctrl.value.previewSize!;
-      final sensorAspect = ps.width / ps.height;
-      camAspect = isLandscape ? sensorAspect : (1.0 / sensorAspect);
+      camAspect = 1.0 / (ps.width / ps.height);
     } else {
-      camAspect = isLandscape ? 4.0 / 3.0 : 3.0 / 4.0;
+      camAspect = 3.0 / 4.0;
     }
 
     final cameraWidget = LayoutBuilder(
@@ -1195,23 +1143,19 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
 
     final inner = ClipRRect(
-      borderRadius: fullscreen
-          ? BorderRadius.zero
-          : BorderRadius.circular(context.rp(14)),
+      borderRadius: BorderRadius.circular(context.rp(14)),
       child: Stack(fit: StackFit.expand, children: [
         cameraWidget,
         _buildGradientOverlay(),
 
         SafeArea(
           child: Stack(fit: StackFit.expand, children: [
-            if (isRecording) _buildRecBadge(isLandscape: isLandscape, fullscreen: fullscreen),
+            if (isRecording) _buildRecBadge(),
 
             if (!ref.watch(isInPipProvider))
               Positioned(
-                top: (!fullscreen && isLandscape)
-                    ? context.rs(5)
-                    : (isLandscape ? context.rs(46) : context.rs(10)),
-                left: isLandscape ? context.rp(24) : context.rp(10),
+                top: context.rs(10),
+                left: context.rp(10),
                 child: Container(
                   padding: EdgeInsets.symmetric(
                       horizontal: context.rp(7), vertical: context.rs(4)),
@@ -1236,42 +1180,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 ),
               ),
 
-            if (fullscreen)
-              Positioned(
-                bottom: context.rs(64), right: context.rp(16),
-                child: Consumer(builder: (ctx, ref2, _) {
-                  final isFullNow = ref2.watch(landscapeFullscreenProvider);
-                  return AnimatedOpacity(
-                    opacity: isFullNow ? 1.0 : 0.0,
-                    duration: const Duration(milliseconds: 350),
-                    child: IgnorePointer(
-                      ignoring: !isFullNow,
-                      child: Container(
-                        padding: EdgeInsets.symmetric(
-                            horizontal: context.rp(10), vertical: context.rs(5)),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.45),
-                          borderRadius: BorderRadius.circular(context.rp(20)),
-                        ),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(Icons.touch_app_rounded,
-                              size: context.ri(12),
-                              color: Colors.white.withValues(alpha: 0.55)),
-                          SizedBox(width: context.rp(4)),
-                          Text('Tap to show controls',
-                              style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.55),
-                                  fontSize: context.sp(10))),
-                        ]),
-                      ),
-                    ),
-                  );
-                }),
-              ),
-
             if (!ref.watch(isInPipProvider))
               Positioned(
-                bottom: fullscreen ? context.rs(16) : context.rs(12),
+                bottom: context.rs(12),
                 left: 0, right: 0,
                 child: Center(
                   child: ClipRRect(
@@ -1323,16 +1234,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       ]),
     );
 
-    if (fullscreen) return SizedBox.expand(child: inner);
     return Container(
       height: height, width: double.infinity,
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.all(Radius.circular(context.rp(18))),
-        boxShadow: const [
-          BoxShadow(color: Color(0xFF0b1120), offset: Offset(8, 8), blurRadius: 16),
-          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-8, -8), blurRadius: 16),
-        ],
+        border: Border.all(color: const Color(0xFF1E2D45), width: 1),
       ),
       padding: EdgeInsets.all(context.rp(5)),
       child: inner,
@@ -1384,12 +1291,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         ),
       );
 
-  Widget _buildRecBadge({required bool isLandscape, required bool fullscreen}) =>
+  Widget _buildRecBadge() =>
       Positioned(
-        top: (!fullscreen && isLandscape)
-            ? context.rs(5)
-            : (isLandscape ? context.rs(46) : context.rs(10)),
-        right: isLandscape ? context.rp(24) : context.rp(10),
+        top: context.rs(10),
+        right: context.rp(10),
         child: Container(
           padding: EdgeInsets.symmetric(
               horizontal: context.rp(9), vertical: context.rs(4)),
@@ -1629,7 +1534,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   // ─── METRICS + SYSTEM LOG ─────────────────────────────────────────────────
 
-  Widget _buildMetricsSidebar({required bool isLandscape}) {
+  Widget _buildMetricsSidebar() {
     final alertness   = ref.watch(alertnessPctProvider);
     final drowsiness  = ref.watch(drowsinessPctProvider);
     final distraction = ref.watch(distractionPctProvider);
@@ -1658,10 +1563,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           )),
         ]),
       ),
-      if (!isLandscape) ...[
-        SizedBox(height: context.rs(12)),
-        _buildSystemLog(),
-      ],
+      SizedBox(height: context.rs(12)),
+      _buildSystemLog(),
     ]);
   }
 
@@ -1712,12 +1615,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.circular(context.rp(14)),
-        boxShadow: [
-          BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.5),
-              offset: const Offset(4, 4), blurRadius: 8),
-          BoxShadow(color: const Color(0xFF1e293b).withValues(alpha: 0.5),
-              offset: const Offset(-4, -4), blurRadius: 8),
-        ],
+        border: Border.all(color: const Color(0xFF1E2D45), width: 1),
       ),
       padding: EdgeInsets.all(context.rp(12)),
       child: Column(
@@ -1803,15 +1701,10 @@ class _MetricGauge extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.circular(context.rp(14)),
-        boxShadow: clamped >= 100.0
-            ? [BoxShadow(color: color.withValues(alpha: 0.30),
-                  blurRadius: 16, spreadRadius: 2),
-               const BoxShadow(color: Color(0xFF0b1120),
-                  offset: Offset(4, 4), blurRadius: 8)]
-            : const [BoxShadow(color: Color(0xFF0b1120),
-                  offset: Offset(6, 6), blurRadius: 12),
-               BoxShadow(color: Color(0xFF1e293b),
-                  offset: Offset(-6, -6), blurRadius: 12)],
+        border: Border.all(
+          color: clamped >= 100.0 ? color.withValues(alpha: 0.5) : const Color(0xFF1E2D45),
+          width: 1,
+        ),
       ),
       padding: EdgeInsets.symmetric(
           vertical: context.rs(10), horizontal: context.rp(5)),

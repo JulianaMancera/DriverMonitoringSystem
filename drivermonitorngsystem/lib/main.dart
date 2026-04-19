@@ -12,7 +12,6 @@ import 'screens/analytics_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/history_screen.dart';
 import 'utils/responsive.dart';
-import 'constants/layout_constants.dart';
 import 'screens/splash_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'core/services/pip_service.dart';
@@ -24,8 +23,6 @@ void main() async {
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
-    DeviceOrientation.landscapeLeft,
-    DeviceOrientation.landscapeRight,
   ]);
 
   SystemChrome.setSystemUIOverlayStyle(
@@ -220,30 +217,6 @@ final navIndexProvider = NotifierProvider<_NavIndexNotifier, int>(
   _NavIndexNotifier.new,
 );
 
-class _SidebarNotifier extends Notifier<bool> {
-  @override
-  bool build() => false;
-  void toggle() => state = !state;
-  void set(bool value) => state = value;
-}
-
-final sidebarOpenProvider = NotifierProvider<_SidebarNotifier, bool>(
-  _SidebarNotifier.new,
-);
-
-// Landscape fullscreen provider
-// false = AppBar/sidebar visible (default when entering Monitor)
-// true  = AppBar hidden, camera fills screen (after user closes sidebar)
-class _LandscapeFullscreenNotifier extends Notifier<bool> {
-  @override
-  bool build() => false; // start with nav visible
-  void set(bool v) => state = v;
-  void toggle() => state = !state;
-}
-
-final landscapeFullscreenProvider =
-    NotifierProvider<_LandscapeFullscreenNotifier, bool>(
-        _LandscapeFullscreenNotifier.new);
 
 // FIX: FutureProvider is unchanged in Riverpod 3.x — no changes needed here.
 final deviceNameProvider = FutureProvider<String>((ref) async {
@@ -285,23 +258,11 @@ class MainShell extends ConsumerWidget {
     const SettingsScreen(),
   ];
 
-  static const List<_NavData> _navItems = [
-    _NavData(icon: Icons.home_rounded, label: 'Home'),
-    _NavData(icon: Icons.videocam_rounded, label: 'Monitor'),
-    _NavData(icon: Icons.bar_chart_rounded, label: 'Analytics'),
-    _NavData(icon: Icons.history_rounded, label: 'History'),
-    _NavData(icon: Icons.settings_rounded, label: 'Settings'),
-  ];
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final currentIndex = ref.watch(navIndexProvider);
     final isRecording  = ref.watch(isRecordingProvider);
-    final sidebarOpen  = ref.watch(sidebarOpenProvider);
-    final isInPip = ref.watch(isInPipProvider);
-    final lsFullscreen = ref.watch(landscapeFullscreenProvider);
-    final isLandscape  =
-        MediaQuery.of(context).orientation == Orientation.landscape;
+    final isInPip      = ref.watch(isInPipProvider);
 
     final deviceName = ref.watch(deviceNameProvider).when(
       data: (name) => name,
@@ -309,345 +270,104 @@ class MainShell extends ConsumerWidget {
       error: (err, stack) => 'USER',
     );
 
-    final isMonitor = currentIndex == 1;
-    // Fullscreen: landscape + Monitor + user hasn't tapped to reveal nav
-    final isFullscreen  = isLandscape && isMonitor && lsFullscreen;
-    final isTransparent = isLandscape && isMonitor && !lsFullscreen;
-
     if (isInPip) {
       return Scaffold(
         backgroundColor: Colors.black,
-        body: IndexedStack(   // ← use IndexedStack, not _screens[1] directly
+        body: IndexedStack(
           index: 1,
           children: _screens,
         ),
       );
     }
-      
+
     return Scaffold(
       backgroundColor: const Color(0xFF080E1A),
-      extendBodyBehindAppBar: isFullscreen || isTransparent,
 
-      appBar: isFullscreen
-          ? PreferredSize(
-              preferredSize: Size.zero,
-              child: const SizedBox.shrink(),
-            )
-          : PreferredSize(
-              preferredSize: Size.fromHeight(
-                  isLandscape ? context.rs(44) : context.rs(58)),
-              child: AppBar(
-                backgroundColor: isTransparent
-                    ? const Color(0xFF0D1627).withValues(alpha: 0.55)
-                    : const Color(0xFF0D1627),
-                elevation: 0,
-                centerTitle: false,
+      appBar: PreferredSize(
+        preferredSize: Size.fromHeight(context.rs(58)),
+        child: AppBar(
+          backgroundColor: const Color(0xFF0D1627),
+          elevation: 0,
+          centerTitle: false,
 
-                leading: isLandscape
-                    ? IconButton(
-                        icon: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 250),
-                          transitionBuilder: (child, anim) =>
-                              RotationTransition(
-                                turns: Tween(begin: 0.875, end: 1.0)
-                                    .animate(anim),
-                                child: FadeTransition(
-                                    opacity: anim, child: child),
-                              ),
-                          child: Icon(
-                            sidebarOpen
-                                ? Icons.close_rounded
-                                : Icons.menu_rounded,
-                            key: ValueKey(sidebarOpen),
-                            color: Colors.white,
-                            size: context.ri(24),
-                          ),
-                        ),
-                        onPressed: () =>
-                            ref.read(sidebarOpenProvider.notifier).toggle(),
-                      )
-                    : null,
-
-                title: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                _titles[currentIndex],
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: context.sp(24),
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              RichText(
+                text: TextSpan(
+                  text: 'Connected: ',
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: context.sp(12),
+                  ),
                   children: [
-                    Text(
-                      _titles[currentIndex],
-                      style: TextStyle(
-                        color: Colors.white,
-                        // FIX: was hardcoded 18/26
-                        fontSize: isLandscape
-                            ? context.sp(16)
-                            : context.sp(24),
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
-                    RichText(
-                      text: TextSpan(
-                        text: 'Connected: ',
-                        style: TextStyle(
-                          color: Colors.white54,
-                          // FIX: was hardcoded 10/13
-                          fontSize: isLandscape
-                              ? context.sp(9)
-                              : context.sp(12),
-                        ),
-                        children: [
-                          TextSpan(
-                            text: deviceName,
-                            style: const TextStyle(
-                              color: Color(0xFF00D4FF),
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
+                    TextSpan(
+                      text: deviceName,
+                      style: const TextStyle(
+                        color: Color(0xFF00D4FF),
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
                 ),
+              ),
+            ],
+          ),
 
-                actions: [
-                  Padding(
-                    padding: EdgeInsets.only(right: context.rp(20)),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 400),
-                      curve: Curves.easeInOut,
-                      // FIX: was hardcoded 10/10
-                      width: context.ri(10), height: context.ri(10),
-                      decoration: BoxDecoration(
-                        color: isRecording
-                            ? const Color(0xFF00FF88)
-                            : const Color(0xFF3A4A5C),
-                        shape: BoxShape.circle,
-                        boxShadow: isRecording
-                            ? [
-                                BoxShadow(
-                                  color: const Color(0xFF00FF88)
-                                      .withValues(alpha: 0.6),
-                                  blurRadius: 8, spreadRadius: 1,
-                                ),
-                              ]
-                            : [],
-                      ),
-                    ),
-                  ),
-                ],
-
-                bottom: isTransparent
-                    ? null
-                    : PreferredSize(
-                        preferredSize: const Size.fromHeight(1),
-                        child: Container(
-                          height: 1,
-                          color: Colors.white.withValues(alpha: 0.05),
-                        ),
-                      ),
-                    ),
-                  ),
-
-      body: SafeArea(
-        top: !isFullscreen && !isTransparent,
-        child: isLandscape
-            ? _LandscapeSidebarLayout(
-                // Sidebar rules:
-                //   fullscreen → always closed (camera must fill screen)
-                //   Monitor not fullscreen → closed (sidebar overlaps camera)
-                //   other screens → respects sidebarOpen
-                sidebarOpen: sidebarOpen && !isFullscreen,
-                currentIndex: currentIndex,
-                navItems: _navItems,
-                screens: _screens,
-                onNavTap: (i) {
-                  ref.read(navIndexProvider.notifier).set(i);
-                  ref.read(landscapeFullscreenProvider.notifier).set(false);
-                },
-              )
-            : IndexedStack(index: currentIndex, children: _screens),
-      ),
-
-      bottomNavigationBar: isFullscreen
-          ? const SizedBox.shrink()
-          : isLandscape
-          ? null
-          : _BottomNav(
-              currentIndex: currentIndex,
-              onTap: (i) => ref.read(navIndexProvider.notifier).set(i),
-            ),
-    );
-  }
-}
-
-// ─── LANDSCAPE SIDEBAR PUSH LAYOUT ───────────────────────────────────────────
-
-class _LandscapeSidebarLayout extends StatelessWidget {
-  final bool sidebarOpen;
-  final int currentIndex;
-  final List<_NavData> navItems;
-  final List<Widget> screens;
-  final ValueChanged<int> onNavTap;
-
-  const _LandscapeSidebarLayout({
-    required this.sidebarOpen,
-    required this.currentIndex,
-    required this.navItems,
-    required this.screens,
-    required this.onNavTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        AnimatedContainer(
-          duration: const Duration(milliseconds: 280),
-          curve: Curves.easeInOutCubic,
-          width: sidebarOpen ? kSidebarWidth : 0,
-          child: ClipRect(
-            child: OverflowBox(
-              maxWidth: kSidebarWidth,
-              alignment: Alignment.centerLeft,
-              child: SizedBox(
-                width: kSidebarWidth,
-                child: _LandscapeSidebar(
-                  currentIndex: currentIndex,
-                  navItems: navItems,
-                  onNavTap: onNavTap,
+          actions: [
+            Padding(
+              padding: EdgeInsets.only(right: context.rp(20)),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 400),
+                curve: Curves.easeInOut,
+                width: context.ri(10), height: context.ri(10),
+                decoration: BoxDecoration(
+                  color: isRecording
+                      ? const Color(0xFF00FF88)
+                      : const Color(0xFF3A4A5C),
+                  shape: BoxShape.circle,
+                  boxShadow: isRecording
+                      ? [
+                          BoxShadow(
+                            color: const Color(0xFF00FF88)
+                                .withValues(alpha: 0.6),
+                            blurRadius: 8, spreadRadius: 1,
+                          ),
+                        ]
+                      : [],
                 ),
               ),
+            ),
+          ],
+
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(1),
+            child: Container(
+              height: 1,
+              color: Colors.white.withValues(alpha: 0.05),
             ),
           ),
         ),
-        AnimatedContainer(
-          duration: const Duration(milliseconds: 280),
-          curve: Curves.easeInOutCubic,
-          width: sidebarOpen ? 1 : 0,
-          color: Colors.white.withValues(alpha: 0.05),
-        ),
-        Expanded(
-          child: IndexedStack(index: currentIndex, children: screens),
-        ),
-      ],
-    );
-  }
-}
+      ),
 
-// ─── LANDSCAPE SIDEBAR CONTENT ────────────────────────────────────────────────
+      body: SafeArea(
+        top: true,
+        child: IndexedStack(index: currentIndex, children: _screens),
+      ),
 
-class _LandscapeSidebar extends StatelessWidget {
-  final int currentIndex;
-  final List<_NavData> navItems;
-  final ValueChanged<int> onNavTap;
-
-  const _LandscapeSidebar({
-    required this.currentIndex,
-    required this.navItems,
-    required this.onNavTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isMonitor = currentIndex == 1;
-    final appBarH = isMonitor ? 89.0 : 8.0;
-    final screenH = MediaQuery.of(context).size.height;
-    final available = screenH - appBarH - 16;
-    final needsScroll = available < 240;
-
-    return Container(
-      color: const Color(0xFF0D1627),
-      padding: EdgeInsets.only(top: appBarH, bottom: context.rs(14), left: context.rp(10), right: context.rp(10)),
-      child: SingleChildScrollView(
-        physics: needsScroll
-            ? const ClampingScrollPhysics()
-            : const NeverScrollableScrollPhysics(),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: EdgeInsets.only(
-                left: context.rp(8),
-                bottom: context.rs(12),
-              ),
-              child: Text(
-                'NAVIGATION',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.3),
-                  fontSize: context.sp(10),
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.4,
-                ),
-              ),
-            ),
-            ...navItems.asMap().entries.map((entry) {
-              final i = entry.key;
-              final item = entry.value;
-              final active = i == currentIndex;
-
-              return Padding(
-                padding: EdgeInsets.only(bottom: context.rs(4)),
-                child: GestureDetector(
-                  onTap: () => onNavTap(i),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    curve: Curves.easeInOut,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: active
-                          ? const Color(0xFF00D4FF).withValues(alpha: 0.12)
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(context.rp(12)),
-                      border: Border.all(
-                        color: active
-                            ? const Color(0xFF00D4FF).withValues(alpha: 0.25)
-                            : Colors.transparent,
-                        width: 1,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          item.icon,
-                          size: context.ri(20),
-                          color: active
-                              ? const Color(0xFF00D4FF)
-                              : Colors.white38,
-                        ),
-                        SizedBox(width: context.rp(12)),
-                        Expanded(
-                          child: Text(
-                            item.label,
-                            style: TextStyle(
-                              color: active
-                                  ? const Color(0xFF00D4FF)
-                                  : Colors.white54,
-                              fontSize: context.sp(14),
-                              fontWeight: active
-                                  ? FontWeight.w600
-                                  : FontWeight.w400,
-                            ),
-                          ),
-                        ),
-                        if (active)
-                          Container(
-                            width: 4,
-                            height: 4,
-                            decoration: const BoxDecoration(
-                              color: Color(0xFF00D4FF),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            }),
-          ],
-        ),
+      bottomNavigationBar: _BottomNav(
+        currentIndex: currentIndex,
+        onTap: (i) => ref.read(navIndexProvider.notifier).set(i),
       ),
     );
   }

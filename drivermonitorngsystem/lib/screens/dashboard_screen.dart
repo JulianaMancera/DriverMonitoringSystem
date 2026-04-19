@@ -90,8 +90,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           scoreLabel = "GOOD";
       }
 
-    final isMobile = Responsive.isMobile(context);
-
     return RefreshIndicator(
       color:           const Color(0xFF22d3ee),
       backgroundColor: const Color(0xFF0f172a),
@@ -102,41 +100,19 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             horizontal: context.hPad, vertical: context.rs(10)),
         child: Column(children: [
 
-          // Safety score + stat cards 
-          LayoutBuilder(builder: (context, constraints) {
-            if (isMobile || Responsive.isTablet(context)) {
-              return Column(children: [
-                _buildSafetyScoreCard(
-                    context, safetyScore, scoreLabel, hasAnySessions),
-                SizedBox(height: context.rs(24)),
-                hasAnySessions
-                    ? _buildQuickStatsGrid(context,
-                        totalDriveHrs: totalDriveHrs,
-                        alertsLast24h: alertsLast24h,
-                        safetyStreak:  safetyStreak,
-                        avgAlertness:  avgAlertness)
-                    : _buildEmptyStatsGrid(context),
-              ]);
-            } else {
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(flex: 4,
-                      child: _buildSafetyScoreCard(
-                          context, safetyScore, scoreLabel, hasAnySessions)),
-                  SizedBox(width: context.rp(24)),
-                  Expanded(flex: 8,
-                      child: hasAnySessions
-                          ? _buildQuickStatsGrid(context,
-                              totalDriveHrs: totalDriveHrs,
-                              alertsLast24h: alertsLast24h,
-                              safetyStreak:  safetyStreak,
-                              avgAlertness:  avgAlertness)
-                          : _buildEmptyStatsGrid(context)),
-                ],
-              );
-            }
-          }),
+          // Safety score + stat cards
+          Column(children: [
+            _buildSafetyScoreCard(
+                context, safetyScore, scoreLabel, hasAnySessions),
+            SizedBox(height: context.rs(24)),
+            hasAnySessions
+                ? _buildQuickStatsGrid(context,
+                    totalDriveHrs: totalDriveHrs,
+                    alertsLast24h: alertsLast24h,
+                    safetyStreak:  safetyStreak,
+                    avgAlertness:  avgAlertness)
+                : _buildEmptyStatsGrid(context),
+          ]),
 
           SizedBox(height: context.rs(24)),
           _buildSafetyScoreHistory(context, dailyScores, hasAnySessions),
@@ -158,12 +134,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         color: const Color(0xFF0f172a),
         // FIX: was Responsive.responsiveBorderRadius(mobile:20)
         borderRadius: BorderRadius.circular(context.rp(20)),
-        boxShadow: const [
-          BoxShadow(color: Color(0xFF0b1120),
-              offset: Offset(6, 6), blurRadius: 16),
-          BoxShadow(color: Color(0xFF1e293b),
-              offset: Offset(-6, -6), blurRadius: 16),
-        ],
+        border: Border.all(color: const Color(0xFF1E2D45), width: 1),
       ),
       child: Stack(children: [
         Positioned(top: 0, left: 0, right: 0,
@@ -455,12 +426,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         color:        const Color(0xFF0f172a),
         // FIX: was Responsive.responsiveBorderRadius(mobile:20)
         borderRadius: BorderRadius.circular(context.rp(20)),
-        boxShadow: const [
-          BoxShadow(color: Color(0xFF0b1120),
-              offset: Offset(6, 6), blurRadius: 16),
-          BoxShadow(color: Color(0xFF1e293b),
-              offset: Offset(-6, -6), blurRadius: 16),
-        ],
+        border: Border.all(color: const Color(0xFF1E2D45), width: 1),
       ),
       padding: EdgeInsets.fromLTRB(
           context.hPad, context.rs(16), context.hPad, context.rs(12)),
@@ -778,50 +744,44 @@ class _StatCard extends StatelessWidget {
   @override
   @override
   Widget build(BuildContext context) {
-    final isLandscape =
-        MediaQuery.orientationOf(context) == Orientation.landscape;
-
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       curve:    Curves.easeInOut,
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.circular(context.rp(14)),
-        boxShadow: const [
-          BoxShadow(color: Color(0xFF0b1120), offset: Offset(3, 3), blurRadius: 8),
-          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-3, -3), blurRadius: 8),
-        ],
+        border: Border.all(color: const Color(0xFF1E2D45), width: 1),
       ),
-      padding: EdgeInsets.all(isLandscape ? context.rp(8) : context.rp(12)),
+      padding: EdgeInsets.all(context.rp(12)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment:  MainAxisAlignment.spaceBetween,
         children: [
           Row(children: [
             Container(
-              padding: EdgeInsets.all(isLandscape ? context.rp(5) : context.rp(7)),
+              padding: EdgeInsets.all(context.rp(7)),
               decoration: BoxDecoration(
                 color: const Color(0xFF22d3ee).withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(context.rp(8)),
               ),
               child: Icon(icon,
-                  size: isLandscape ? context.ri(13) : context.ri(17),
+                  size: context.ri(17),
                   color: const Color(0xFF22d3ee)),
             ),
             if (accent)
               Padding(
                 padding: EdgeInsets.only(left: context.rp(6)),
                 child: Container(
-                  width:  isLandscape ? context.ri(6) : context.ri(8),
-                  height: isLandscape ? context.ri(6) : context.ri(8),
+                  width:  context.ri(8),
+                  height: context.ri(8),
                   decoration: BoxDecoration(
                     color:  const Color(0xFF22d3ee),
                     shape:  BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
                         color:      const Color(0xFF22d3ee).withValues(alpha: 0.4),
-                        blurRadius: isLandscape ? 6 : 8,
-                        spreadRadius: isLandscape ? 1 : 2),
+                        blurRadius: 8,
+                        spreadRadius: 2),
                     ],
                   ),
                 ),
@@ -830,23 +790,18 @@ class _StatCard extends StatelessWidget {
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(label, style: TextStyle(
               color:      const Color(0xFF64748b),
-              // Portrait: restored original sp(11); Landscape: compact sp(8)
-              fontSize:   isLandscape ? context.sp(8) : context.sp(11),
+              fontSize:   context.sp(11),
               fontWeight: FontWeight.w500,
             ), maxLines: 1, overflow: TextOverflow.ellipsis),
             SizedBox(height: context.rs(2)),
             Text(value, style: TextStyle(
-              // Portrait: restored original sizes; Landscape: compact
-              fontSize: isLandscape
-                  ? context.forTier(base: 15.0, compact: 13.0, small: 14.0, large: 16.0)
-                  : context.forTier(base: 20.0, compact: 16.0, small: 18.0, large: 22.0),
+              fontSize: context.forTier(base: 20.0, compact: 16.0, small: 18.0, large: 22.0),
               fontWeight: FontWeight.bold,
               color:      const Color(0xFFe2e8f0),
             ), overflow: TextOverflow.ellipsis),
             SizedBox(height: context.rs(1)),
             Text(subtext, style: TextStyle(
-              // Portrait: restored original sp(10); Landscape: compact sp(8)
-              fontSize: isLandscape ? context.sp(8) : context.sp(10),
+              fontSize: context.sp(10),
               color:    const Color(0xFF475569),
             ), maxLines: 1, overflow: TextOverflow.ellipsis),
           ]),
@@ -866,48 +821,40 @@ class _EmptyStatCard extends StatelessWidget {
   @override
     @override
   Widget build(BuildContext context) {
-    final isLandscape =
-        MediaQuery.orientationOf(context) == Orientation.landscape;
-
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.circular(context.rp(14)),
-        boxShadow: const [
-          BoxShadow(color: Color(0xFF0b1120), offset: Offset(3, 3), blurRadius: 8),
-          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-3, -3), blurRadius: 8),
-        ],
+        border: Border.all(color: const Color(0xFF1E2D45), width: 1),
       ),
-      padding: EdgeInsets.all(isLandscape ? context.rp(8) : context.rp(12)),
+      padding: EdgeInsets.all(context.rp(12)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment:  MainAxisAlignment.spaceBetween,
         children: [
           Container(
-            padding: EdgeInsets.all(isLandscape ? context.rp(5) : context.rp(7)),
+            padding: EdgeInsets.all(context.rp(7)),
             decoration: BoxDecoration(
               color:        const Color(0xFF1e293b),
               borderRadius: BorderRadius.circular(context.rp(8))),
             child: Icon(icon,
-                size: isLandscape ? context.ri(13) : context.ri(17),
+                size: context.ri(17),
                 color: const Color(0xFF334155)),
           ),
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(label, style: TextStyle(
               color: const Color(0xFF334155),
-              fontSize: isLandscape ? context.sp(8) : context.sp(11),
+              fontSize: context.sp(11),
               fontWeight: FontWeight.w500,
             ), maxLines: 1, overflow: TextOverflow.ellipsis),
             SizedBox(height: context.rs(2)),
             Text('—', style: TextStyle(
-              fontSize: isLandscape
-                  ? context.forTier(base: 15.0, compact: 13.0, small: 14.0, large: 16.0)
-                  : context.forTier(base: 20.0, compact: 16.0, small: 18.0, large: 22.0),
+              fontSize: context.forTier(base: 20.0, compact: 16.0, small: 18.0, large: 22.0),
               fontWeight: FontWeight.bold,
               color:      const Color(0xFF1e293b))),
             SizedBox(height: context.rs(1)),
             Text('No data', style: TextStyle(
-              fontSize: isLandscape ? context.sp(8) : context.sp(10),
+              fontSize: context.sp(10),
               color:    const Color(0xFF1e293b))),
           ]),
         ],

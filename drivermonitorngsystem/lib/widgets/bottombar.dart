@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
-class Sidebar extends StatelessWidget {
+class BottomBar extends StatelessWidget {
   final String activeTab;
   final Function(String) onTabChanged;
   final bool isMobile;
 
-  const Sidebar({
+  const BottomBar({
     super.key,
     required this.activeTab,
     required this.onTabChanged,
@@ -16,15 +16,13 @@ class Sidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     return isMobile
         ? _buildMobileNavBar(context)
-        : _buildDesktopSidebar(context);
+        : _buildDesktopBottomBar(context);
   }
 
   Widget _buildMobileNavBar(BuildContext context) {
-    final isLandscape =
-        MediaQuery.of(context).orientation == Orientation.landscape;
-    final double barHeight = isLandscape ? 56 : 72;
-    final double btnSize   = isLandscape ? 40 : 48;
-    final double iconSize  = isLandscape ? 18 : 22;
+    const double barHeight = 72;
+    const double btnSize   = 48;
+    const double iconSize  = 22;
     final items = _getNavItems();
 
     final activeIndex = items.indexWhere((i) => i.id == activeTab);
@@ -48,7 +46,7 @@ class Sidebar extends StatelessWidget {
     );
   }
 
-  Widget _buildDesktopSidebar(BuildContext context) {
+  Widget _buildDesktopBottomBar(BuildContext context) {
     final items       = _getNavItems();
     final activeIndex = items.indexWhere((i) => i.id == activeTab);
 
@@ -111,11 +109,11 @@ class _SlidingNavBarState extends State<_SlidingNavBar> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final totalWidth   = constraints.maxWidth;
-        final itemWidth    = totalWidth / _totalItems;
-        final pillWidth    = widget.btnSize;
-        final pillOffset   = (itemWidth - pillWidth) / 2;
-        final pillLeft     = widget.activeIndex * itemWidth + pillOffset;
+        final totalWidth = constraints.maxWidth;
+        final itemWidth  = totalWidth / _totalItems;
+        final pillWidth  = widget.btnSize;
+        final pillOffset = (itemWidth - pillWidth) / 2;
+        final pillLeft   = widget.activeIndex * itemWidth + pillOffset;
 
         return Stack(
           alignment: Alignment.center,
@@ -257,17 +255,17 @@ class _SlidingDesktopNavState extends State<_SlidingDesktopNav> {
                   borderRadius: BorderRadius.circular(14),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF0b1120).withValues(alpha: 0.9),  // Ln 274
+                      color: const Color(0xFF0b1120).withValues(alpha: 0.9),
                       offset: const Offset(3, 3),
                       blurRadius: 6,
                     ),
                     BoxShadow(
-                      color: const Color(0xFF1e293b).withValues(alpha: 0.9),  // Ln 279
+                      color: const Color(0xFF1e293b).withValues(alpha: 0.9),
                       offset: const Offset(-3, -3),
                       blurRadius: 6,
                     ),
                     BoxShadow(
-                      color: const Color(0xFF22d3ee).withValues(alpha: 0.12), // Ln 284
+                      color: const Color(0xFF22d3ee).withValues(alpha: 0.12),
                       blurRadius: 14,
                       spreadRadius: 1,
                     ),
