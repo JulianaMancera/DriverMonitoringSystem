@@ -1,6 +1,7 @@
 package com.example.smartalertdrive
 
 import android.app.PictureInPictureParams
+import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Rect
 import android.os.Build
@@ -42,48 +43,29 @@ class MainActivity : FlutterActivity() {
                         result.success(null)
                     }
 
+                    "setStopping" -> {
+                        isStopping = true
+                        result.success(null)
+                    }
+
                     "enterPip" -> {
                         val isLandscape = call.argument<Boolean>("isLandscape") ?: false
                         val success = enterPipMode(isLandscape)
                         result.success(success)
                     }
 
-                    // FIX A: exitPip now correctly closes the PiP window on all
-                    // Android versions.
-                    //
-                    // Previous implementation used moveTaskToBack(false) alone.
-                    // On Android 8–11 this collapses the PiP window correctly.
-                    // On Android 12+ (API 31+) the activity stays in PiP mode
-                    // even after moveTaskToBack — the window persists because
-                    // onPictureInPictureModeChanged never fires false.
-                    //
-                    // Fix for Android 12+:
-                    //   1. Set autoEnterEnabled=false so the system won't re-enter
-                    //      PiP when we move to background.
-                    //   2. Post moveTaskToBack with a short delay so the params
-                    //      update propagates before the activity moves back.
-                    //   The system then collapses the PiP window cleanly.
-                    "exitPip" -> {
+                    "stopInPip" -> {
+                        isStopping  = true
+                        isRecording = false
                         if (isInPip) {
-                            isStopping  = true
-                            isRecording = false
-
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                // Android 12+
-                                try {
-                                    val params = PictureInPictureParams.Builder()
-                                        .setAutoEnterEnabled(false)
-                                        .build()
-                                    setPictureInPictureParams(params)
-                                } catch (_: Exception) { }
-                                // Small delay lets params propagate before task moves back
-                                window.decorView.postDelayed({
-                                    moveTaskToBack(false)
-                                }, 80)
-                            } else {
-                                // Android 8–11: moveTaskToBack is sufficient
-                                moveTaskToBack(false)
+                            // moveTaskToBack() does not dismiss PIP on MIUI/HyperOS.
+                            // Expanding back to full screen is the only reliable
+                            // cross-device approach to close the PIP window.
+                            val intent = Intent(this, MainActivity::class.java).apply {
+                                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                                        Intent.FLAG_ACTIVITY_CLEAR_TOP
                             }
+                            startActivity(intent)
                         }
                         result.success(null)
                     }

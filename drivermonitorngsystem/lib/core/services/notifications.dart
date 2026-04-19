@@ -180,11 +180,23 @@ class BantayDriveTaskHandler extends TaskHandler {
 
   @override
   void onNotificationButtonPressed(String id) {
-    // Send to main isolate only — do NOT call stopService() here.
-    // stopService() here kills the service before Flutter receives the message,
-    // so _onReceiveTaskData never fires and the session is never saved to DB.
+    // flutter_foreground_task v9.x: onNotificationButtonPressed still exists
+    // but on some devices/versions the button press arrives via onReceiveTaskData
+    // as a Map instead. Handle both paths to be safe.
     if (id == 'stop_recording') {
       FlutterForegroundTask.sendDataToMain('stop_recording');
+    }
+  }
+
+  @override
+  void onReceiveData(Object data) {
+    // v9.x routes notification button presses through onReceiveData on some
+    // Android versions as: {'notification_button_id': 'stop_recording'}
+    if (data is Map) {
+      final buttonId = data['notification_button_id'];
+      if (buttonId == 'stop_recording') {
+        FlutterForegroundTask.sendDataToMain('stop_recording');
+      }
     }
   }
 

@@ -64,7 +64,7 @@ class PipService {
   /// Native side (MainActivity) handles the Android version differences.
   static Future<void> exitPip() async {
     try {
-      await _method.invokeMethod('exitPip');
+      await _method.invokeMethod('stopInPip');
     } catch (_) {}
   }
 }

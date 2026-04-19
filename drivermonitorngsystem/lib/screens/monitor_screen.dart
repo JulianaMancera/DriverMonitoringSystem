@@ -40,7 +40,6 @@ import '../core/session_state.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import '../utils/responsive.dart';
-import '../main.dart' show landscapeFullscreenProvider, sidebarOpenProvider;
 
 // ─── GLOBAL — allows stop from notification even during PiP ──────────────────
 _MonitorScreenState? _activeMonitorState;
@@ -132,6 +131,18 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // overlay OVER CameraPreview (not instead of it) so CameraX can reattach
   // its surface to the existing texture without interference from us.
   bool    _cameraReconnecting  = false;
+  // Prevents _initCamera() from running while CameraX is recovering from
+  // PiP. On Xiaomi, the CameraPreview widget rebuild after PiP exit can
+  // trigger a new CameraController.initialize() which creates new
+  // addUseCases → new CLOSING→REOPENING cycle on top of CameraX's own
+  // internal recovery. Set true on paused, false when recovery is done.
+  bool    _isInPipRecovery     = false;
+  // Prevents _resumeAfterPip() from running twice when both pipEventStream
+  // AND didChangeAppLifecycleState(resumed) fire on PiP exit (common on
+  // Xiaomi/Samsung). The second call triggers a new CLOSING→REOPENING cycle
+  // visible in logcat as triple camera restarts and 75+ skipped frames.
+  // Reset to false in _stopRecording() so it re-arms for the next session.
+  bool    _pipResumeHandled    = false;
 
   StreamSubscription<Map<String, dynamic>>? _pipSubscription;
 
@@ -205,13 +216,32 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       final value = event['value'];
       if (type == 'pip') {
         final inPip = value as bool;
-        ref.read(isInPipProvider.notifier).set(inPip);
         if (!inPip) {
+          // FIX C: Flush BEFORE clearing isInPip. If isInPip is cleared first,
+          // a setState rebuild fires before _pendingLogs are moved to _systemLogs
+          // — the log panel briefly shows "No logs yet" on the first frame.
           _flushPendingLogs();
+          // Pre-arm _cameraResuming so the first rebuild triggered by
+          // isInPipProvider.set(false) already sees _cameraResuming=true.
+          // Without this, there is one frame where canShow=false AND
+          // _cameraResuming=false → _buildCameraFallback() (loading spinner).
+          if (mounted && ref.read(isRecordingProvider)) {
+            setState(() => _cameraResuming = true);
+          }
+          ref.read(isInPipProvider.notifier).set(false);
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) setState(() {});
           });
-          _resumeAfterPip();
+          // Guard: both pipEventStream and didChangeAppLifecycleState(resumed)
+          // fire on PiP exit. Without this, _resumeAfterPip() runs twice —
+          // causing a triple CLOSING→REOPENING cycle in CameraX (logcat shows
+          // 75+ skipped frames per extra cycle on Xiaomi devices).
+          if (!_pipResumeHandled) {
+            _pipResumeHandled = true;
+            _resumeAfterPip();
+          }
+        } else {
+          ref.read(isInPipProvider.notifier).set(true);
         }
       }
     });
@@ -256,14 +286,25 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // that didn't arrive as a bare String — including stop_recording on many
   // devices. Fixed by extracting the string value from both forms.
   void _onReceiveTaskData(Object data) async {
-    // Unwrap: bare String OR Map<dynamic,dynamic> with key 'data'
+    // Unwrap all known payload formats from flutter_foreground_task v9.x:
+    //   1. Bare String:                    'stop_recording'
+    //   2. Map with 'data' key:            {'data': 'stop_recording'}
+    //   3. Map with button id key:         {'notification_button_id': 'stop_recording'}
+    // Format 3 is how v9.x delivers notification button presses on some
+    // Android versions (the button press bypasses onNotificationButtonPressed
+    // and arrives directly as task data in the main isolate).
     String? message;
     if (data is String) {
       message = data;
     } else if (data is Map) {
-      // flutter_foreground_task v9.x wraps payload: {'data': 'stop_recording'}
       final raw = data['data'];
-      if (raw is String) message = raw;
+      if (raw is String) {
+        message = raw;
+      } else {
+        // v9.x notification button press format
+        final buttonId = data['notification_button_id'];
+        if (buttonId is String) message = buttonId;
+      }
     }
 
     // Log what we actually received so you can see it in logcat
@@ -324,12 +365,26 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) async {
     switch (state) {
       case AppLifecycleState.inactive:
-        await PipService.setRecording(ref.read(isRecordingProvider));
+        // FIX: Do NOT call setRecording() when transitioning to inactive
+        // while in PiP. On Xiaomi, PiP exit fires:
+        //   onPictureinPictureModeChanged(false) → inactive → resumed
+        // Calling setRecording() during inactive while CameraX is in its
+        // CLOSING→REOPENING recovery cycle triggers a second native camera
+        // open request, causing extra REOPENING cycles in logcat.
+        // Only call setRecording() when we're actually going to background
+        // (not as part of PiP exit sequence).
+        if (!ref.read(isInPipProvider)) {
+          await PipService.setRecording(ref.read(isRecordingProvider));
+        }
         break;
 
       case AppLifecycleState.paused:
         if (ref.read(isRecordingProvider)) {
           if (mounted) ref.read(isInPipProvider.notifier).set(true);
+          // Block camera reinit during PiP recovery — see _isInPipRecovery.
+          _isInPipRecovery = true;
+          // Reset resume guard so it's ready for when we come back from PiP.
+          _pipResumeHandled = false;
           // Do NOT pause camera stream here — PiP preview needs it running.
         } else {
           await _pauseCameraStream();
@@ -337,13 +392,23 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         break;
 
       case AppLifecycleState.resumed:
-        // Clear PiP flag synchronously BEFORE _resumeAfterPip so the first
-        // rebuild renders the full layout (not _buildPipView).
-        if (mounted) {
-          ref.read(isInPipProvider.notifier).set(false);
-          _flushPendingLogs();
+        // FIX C: Flush pending logs BEFORE clearing isInPip — same reason as
+        // the pipEventStream listener above. Ensures logs are in _systemLogs
+        // before the rebuild that isInPipProvider.set(false) triggers.
+        if (mounted) _flushPendingLogs();
+        // Pre-arm _cameraResuming before isInPipProvider clears so the first
+        // rebuild after PiP exit shows black instead of the loading spinner.
+        if (mounted && ref.read(isRecordingProvider)) {
+          setState(() => _cameraResuming = true);
         }
-        await _resumeAfterPip();
+        if (mounted) ref.read(isInPipProvider.notifier).set(false);
+        // Guard against double-resume — _pipResumeHandled is set in paused
+        // so it's always fresh for this PiP cycle. First caller (either
+        // pipEventStream or this resumed handler) wins; the second is skipped.
+        if (!_pipResumeHandled) {
+          _pipResumeHandled = true;
+          await _resumeAfterPip();
+        }
         if (mounted) {
           Future.delayed(const Duration(milliseconds: 120), () {
             if (mounted) setState(() {});
@@ -415,7 +480,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       if (!_cameraController!.value.isStreamingImages) {
         await _cameraController!.startImageStream(_onCameraFrame);
       }
-      // Stream is running — clear both flags
+      // Stream is running — clear all recovery flags
+      _isInPipRecovery = false;
       if (mounted) setState(() { _cameraResuming = false; _cameraReconnecting = false; });
     } catch (e) {
       // startImageStream failed — CameraX is still recovering internally.
@@ -430,9 +496,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           if (!_cameraController!.value.isStreamingImages) {
             await _cameraController!.startImageStream(_onCameraFrame);
           }
+          _isInPipRecovery = false;
           if (mounted) setState(() => _cameraReconnecting = false);
         } catch (e2) {
           debugPrint('[Camera] retry startImageStream failed: $e2');
+          _isInPipRecovery = false;
           if (mounted) setState(() => _cameraReconnecting = false);
         }
       });
@@ -452,6 +520,16 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   Future<void> _initCamera() async {
     if (_camDisposing) return;
+    // CRITICAL: Do NOT reinitialize the camera during PiP recovery.
+    // On Xiaomi, the CameraPreview widget rebuild after PiP exit calls
+    // back into _initCamera via the widget tree. Creating a new
+    // CameraController here while CameraX is in CLOSING→REOPENING adds
+    // a second addUseCases call → second REOPENING cycle → triple restart.
+    // CameraX handles its own hardware recovery; we just need to wait.
+    if (_isInPipRecovery) {
+      debugPrint('[Camera] _initCamera skipped — PiP recovery in progress');
+      return;
+    }
     try {
       _cameras = await availableCameras();
       if (_cameras.isEmpty) {
@@ -490,7 +568,28 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // ─── LOG HELPERS ──────────────────────────────────────────────────────────
 
   void _flushPendingLogs() {
-    if (_pendingLogs.isEmpty || !mounted) return;
+    if (_pendingLogs.isEmpty) return;
+
+    // FIX B: Always persist pending logs to DB first — even if !mounted.
+    // When stop comes from the notification while in PiP, this method may be
+    // called after a rebuild where mounted=false. Without this, all logs
+    // accumulated during PiP (drowsy/distracted detections, alerts) are
+    // silently dropped and never appear in History's session detail.
+    for (final entry in _pendingLogs) {
+      if (_currentSessionId != null) {
+        DatabaseHelper.instance.insertSystemLog(
+          sessionId: _currentSessionId!,
+          message:   entry['message'] as String,
+          logType:   entry['type'] as String,
+        );
+      }
+    }
+
+    if (!mounted) {
+      _pendingLogs.clear();
+      return;
+    }
+
     setState(() {
       _systemLogs.addAll(_pendingLogs);
       _pendingLogs.clear();
@@ -575,13 +674,34 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
     if (_currentSessionId == null) return;
     _snapshotTimer?.cancel();
+
+    // FIX A: Save one last alertness snapshot right now, BEFORE pausing the
+    // camera stream. This ensures the final alertness value in the provider
+    // reflects actual inference data from this session — not the reset default
+    // of 100.0 that gets set after PiP recovery when stop is triggered quickly.
+    await _saveAlertnessSnapshot();
+
     await _pauseCameraStream();
     await _alarmPlayer.stop();
     _alertLevel = _consecutiveDrowsy = _consecutiveDistracted = 0;
 
     final durationSec = _sessionStartTime != null
         ? DateTime.now().difference(_sessionStartTime!).inSeconds : 0;
-    final alertness = ref.read(alertnessPctProvider);
+
+    // FIX A: Use the average of all saved alertness snapshots for the final
+    // score — much more accurate than the provider value (which may be stale
+    // at 100.0 if the provider was reset during PiP recovery before stop ran).
+    final snapshots = await DatabaseHelper.instance
+        .getAlertnessSnapshots(_currentSessionId!);
+    final double alertness;
+    if (snapshots.isNotEmpty) {
+      final sum = snapshots.fold<double>(
+          0.0, (acc, s) => acc + ((s['alertness_pct'] as num).toDouble()));
+      alertness = sum / snapshots.length;
+    } else {
+      // Fallback to provider if no snapshots were saved yet (very short session)
+      alertness = ref.read(alertnessPctProvider);
+    }
 
     final alerts =
         await DatabaseHelper.instance.getAlertsBySession(_currentSessionId!);
@@ -608,9 +728,39 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     debugPrint('[Monitor] Session $_currentSessionId ended — '
         'score: ${safetyScore.toInt()}%');
     await ActiveSession.clear();
+
+    // FIX B+C — ORDER MATTERS. We must:
+    //   1. Clear isInPipProvider FIRST — so _addLogSync below does NOT go to
+    //      _pendingLogs (which would be lost when _currentSessionId is nulled).
+    //   2. Call _addLogSync WHILE _currentSessionId is still set — so the
+    //      "Session Ended" log is saved to DB correctly.
+    //   3. Flush _pendingLogs while _currentSessionId is still valid — so any
+    //      logs accumulated during PiP are persisted before the session closes.
+    //   4. Only THEN null _currentSessionId and set isRecording=false.
+    //
+    // Old order: isRecording=false → isInPip=false → _currentSessionId=null
+    //   Problem: isRecording=false triggers a rebuild. If _pendingLogs is not
+    //   yet flushed, the log panel shows "No logs yet." And when isInPip=false
+    //   triggers _flushPendingLogs, _currentSessionId is already null so the
+    //   DB insertSystemLog calls inside _flushPendingLogs are silently skipped.
+    if (mounted) {
+      // Step 1: Clear PiP flag so _addLogSync writes to _systemLogs, not _pendingLogs
+      ref.read(isInPipProvider.notifier).set(false);
+      // Step 2: Flush any logs that accumulated during PiP — while sessionId is valid
+      _flushPendingLogs();
+    }
+    // Step 3: Add final log — _currentSessionId still set, isInPip now false
     _addLogSync('Session Ended — Score: ${safetyScore.toInt()}%', 'INFO');
+
     BantayDriveService.stopService();
     PipService.setRecording(false);
+
+    // Step 4: Now safe to null the session and flip providers
+    _currentSessionId = null;
+    _sessionStartTime = null;
+    // Re-arm all PiP recovery guards for the next session.
+    _pipResumeHandled = false;
+    _isInPipRecovery  = false;
 
     ref.read(isRecordingProvider.notifier).set(false);
     ref.read(driverStateProvider.notifier).set('neutral');
@@ -620,10 +770,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(distractionPctProvider.notifier).set(0.0);
     ref.read(activeSubclassProvider.notifier).set(null);
     ref.read(activeSubclassIndexProvider.notifier).set(0);
-    _currentSessionId = null;
-    _sessionStartTime = null;
     if (mounted) {
-      ref.read(isInPipProvider.notifier).set(false);
       ref.read(dbChangeCounterProvider.notifier).increment();
     }
   }
@@ -770,9 +917,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       WidgetsBinding.instance.addPostFrameCallback((_) => _flushPendingLogs());
     }
 
-    final isDesktop   = MediaQuery.of(context).size.width >= 1024;
-    final isLandscape =
-        MediaQuery.of(context).orientation == Orientation.landscape;
     final showAlert = ref.watch(showAlertBannerProvider);
     final alertType = ref.watch(alertBannerTypeProvider);
     final isLevel3  = _alertLevel == 3;
@@ -780,12 +924,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     return ColoredBox(
       color: const Color(0xFF080E1A),
       child: Stack(children: [
-        if (isDesktop)
-          SafeArea(child: _buildDesktopLayout())
-        else if (isLandscape)
-          _buildLandscapeLayout()
-        else
-          SafeArea(bottom: false, child: _buildPortraitLayout()),
+        SafeArea(bottom: false, child: _buildPortraitLayout()),
 
         if (showAlert && !isLevel3)
           Positioned(top: 0, left: 0, right: 0,
@@ -902,51 +1041,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             SizedBox(height: context.rs(20)),
             _buildCameraWithOverlay(
                 height: MediaQuery.of(context).size.height *
-                    (context.isSmallPhone ? 0.36 : 0.40),
-                isLandscape: false),
+                    (context.isSmallPhone ? 0.36 : 0.40)),
             SizedBox(height: context.rs(10)),
-            _buildMetricsSidebar(isLandscape: false),
+            _buildMetricsSidebar(),
             SizedBox(height: context.rs(14)),
           ]),
         ),
       );
-
-  Widget _buildLandscapeLayout() {
-    final lsFullscreen = ref.watch(landscapeFullscreenProvider);
-    if (lsFullscreen) {
-      return GestureDetector(
-        onTap: () {
-          ref.read(landscapeFullscreenProvider.notifier).set(false);
-          ref.read(sidebarOpenProvider.notifier).set(false);
-        },
-        behavior: HitTestBehavior.translucent,
-        child: _buildCameraWithOverlay(isLandscape: true, fullscreen: true),
-      );
-    }
-    return GestureDetector(
-      onTap: () {
-        ref.read(landscapeFullscreenProvider.notifier).set(true);
-        ref.read(sidebarOpenProvider.notifier).set(false);
-      },
-      behavior: HitTestBehavior.translucent,
-      child: _buildCameraWithOverlay(isLandscape: true, fullscreen: false),
-    );
-  }
-
-  Widget _buildDesktopLayout() => Column(children: [
-        Expanded(child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(flex: 8, child: Column(children: [
-              Expanded(child: _buildCameraWithOverlay(isLandscape: true)),
-              SizedBox(height: context.rs(16)),
-              _buildMetricsSidebar(isLandscape: false),
-            ])),
-            SizedBox(width: context.rp(24)),
-            Expanded(flex: 4, child: _buildMetricsSidebar(isLandscape: false)),
-          ],
-        )),
-      ]);
 
   // ─── CAMERA WITH OVERLAY ──────────────────────────────────────────────────
 
@@ -987,20 +1088,19 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       ]);
     }
 
-    if (_cameraResuming) {
-      // Stream restarting but controller not yet initialized — show plain black
-      // (not the spinner fallback) so layout doesn't jump
+    // Show black box (not spinner) while CameraX is recovering its surface after
+    // PiP resize. _cameraResuming covers the initial recovery attempt;
+    // _cameraReconnecting covers the retry window after startImageStream fails
+    // and CameraX is still in CLOSING→REOPENING. Without this check, the brief
+    // window between those two states showed the loading spinner instead.
+    if (_cameraResuming || _cameraReconnecting) {
       return const ColoredBox(color: Colors.black);
     }
 
     return _buildCameraFallback();
   }
 
-  Widget _buildCameraWithOverlay({
-    double? height,
-    required bool isLandscape,
-    bool fullscreen = false,
-  }) {
+  Widget _buildCameraWithOverlay({double? height}) {
     final isRecording  = ref.watch(isRecordingProvider);
     final clearGlasses = ref.watch(clearGlassesProvider);
 
@@ -1010,10 +1110,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         ctrl.value.isInitialized &&
         ctrl.value.previewSize != null) {
       final ps = ctrl.value.previewSize!;
-      final sensorAspect = ps.width / ps.height;
-      camAspect = isLandscape ? sensorAspect : (1.0 / sensorAspect);
+      camAspect = 1.0 / (ps.width / ps.height);
     } else {
-      camAspect = isLandscape ? 4.0 / 3.0 : 3.0 / 4.0;
+      camAspect = 3.0 / 4.0;
     }
 
     final cameraWidget = LayoutBuilder(
@@ -1044,23 +1143,19 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
 
     final inner = ClipRRect(
-      borderRadius: fullscreen
-          ? BorderRadius.zero
-          : BorderRadius.circular(context.rp(14)),
+      borderRadius: BorderRadius.circular(context.rp(14)),
       child: Stack(fit: StackFit.expand, children: [
         cameraWidget,
         _buildGradientOverlay(),
 
         SafeArea(
           child: Stack(fit: StackFit.expand, children: [
-            if (isRecording) _buildRecBadge(isLandscape: isLandscape, fullscreen: fullscreen),
+            if (isRecording) _buildRecBadge(),
 
             if (!ref.watch(isInPipProvider))
               Positioned(
-                top: (!fullscreen && isLandscape)
-                    ? context.rs(5)
-                    : (isLandscape ? context.rs(46) : context.rs(10)),
-                left: isLandscape ? context.rp(24) : context.rp(10),
+                top: context.rs(10),
+                left: context.rp(10),
                 child: Container(
                   padding: EdgeInsets.symmetric(
                       horizontal: context.rp(7), vertical: context.rs(4)),
@@ -1085,42 +1180,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 ),
               ),
 
-            if (fullscreen)
-              Positioned(
-                bottom: context.rs(64), right: context.rp(16),
-                child: Consumer(builder: (ctx, ref2, _) {
-                  final isFullNow = ref2.watch(landscapeFullscreenProvider);
-                  return AnimatedOpacity(
-                    opacity: isFullNow ? 1.0 : 0.0,
-                    duration: const Duration(milliseconds: 350),
-                    child: IgnorePointer(
-                      ignoring: !isFullNow,
-                      child: Container(
-                        padding: EdgeInsets.symmetric(
-                            horizontal: context.rp(10), vertical: context.rs(5)),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.45),
-                          borderRadius: BorderRadius.circular(context.rp(20)),
-                        ),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(Icons.touch_app_rounded,
-                              size: context.ri(12),
-                              color: Colors.white.withValues(alpha: 0.55)),
-                          SizedBox(width: context.rp(4)),
-                          Text('Tap to show controls',
-                              style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.55),
-                                  fontSize: context.sp(10))),
-                        ]),
-                      ),
-                    ),
-                  );
-                }),
-              ),
-
             if (!ref.watch(isInPipProvider))
               Positioned(
-                bottom: fullscreen ? context.rs(16) : context.rs(12),
+                bottom: context.rs(12),
                 left: 0, right: 0,
                 child: Center(
                   child: ClipRRect(
@@ -1172,16 +1234,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       ]),
     );
 
-    if (fullscreen) return SizedBox.expand(child: inner);
     return Container(
       height: height, width: double.infinity,
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.all(Radius.circular(context.rp(18))),
-        boxShadow: const [
-          BoxShadow(color: Color(0xFF0b1120), offset: Offset(8, 8), blurRadius: 16),
-          BoxShadow(color: Color(0xFF1e293b), offset: Offset(-8, -8), blurRadius: 16),
-        ],
+        border: Border.all(color: const Color(0xFF1E2D45), width: 1),
       ),
       padding: EdgeInsets.all(context.rp(5)),
       child: inner,
@@ -1233,12 +1291,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         ),
       );
 
-  Widget _buildRecBadge({required bool isLandscape, required bool fullscreen}) =>
+  Widget _buildRecBadge() =>
       Positioned(
-        top: (!fullscreen && isLandscape)
-            ? context.rs(5)
-            : (isLandscape ? context.rs(46) : context.rs(10)),
-        right: isLandscape ? context.rp(24) : context.rp(10),
+        top: context.rs(10),
+        right: context.rp(10),
         child: Container(
           padding: EdgeInsets.symmetric(
               horizontal: context.rp(9), vertical: context.rs(4)),
@@ -1478,7 +1534,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   // ─── METRICS + SYSTEM LOG ─────────────────────────────────────────────────
 
-  Widget _buildMetricsSidebar({required bool isLandscape}) {
+  Widget _buildMetricsSidebar() {
     final alertness   = ref.watch(alertnessPctProvider);
     final drowsiness  = ref.watch(drowsinessPctProvider);
     final distraction = ref.watch(distractionPctProvider);
@@ -1507,10 +1563,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           )),
         ]),
       ),
-      if (!isLandscape) ...[
-        SizedBox(height: context.rs(12)),
-        _buildSystemLog(),
-      ],
+      SizedBox(height: context.rs(12)),
+      _buildSystemLog(),
     ]);
   }
 
@@ -1561,12 +1615,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.circular(context.rp(14)),
-        boxShadow: [
-          BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.5),
-              offset: const Offset(4, 4), blurRadius: 8),
-          BoxShadow(color: const Color(0xFF1e293b).withValues(alpha: 0.5),
-              offset: const Offset(-4, -4), blurRadius: 8),
-        ],
+        border: Border.all(color: const Color(0xFF1E2D45), width: 1),
       ),
       padding: EdgeInsets.all(context.rp(12)),
       child: Column(
@@ -1652,15 +1701,10 @@ class _MetricGauge extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.circular(context.rp(14)),
-        boxShadow: clamped >= 100.0
-            ? [BoxShadow(color: color.withValues(alpha: 0.30),
-                  blurRadius: 16, spreadRadius: 2),
-               const BoxShadow(color: Color(0xFF0b1120),
-                  offset: Offset(4, 4), blurRadius: 8)]
-            : const [BoxShadow(color: Color(0xFF0b1120),
-                  offset: Offset(6, 6), blurRadius: 12),
-               BoxShadow(color: Color(0xFF1e293b),
-                  offset: Offset(-6, -6), blurRadius: 12)],
+        border: Border.all(
+          color: clamped >= 100.0 ? color.withValues(alpha: 0.5) : const Color(0xFF1E2D45),
+          width: 1,
+        ),
       ),
       padding: EdgeInsets.symmetric(
           vertical: context.rs(10), horizontal: context.rp(5)),

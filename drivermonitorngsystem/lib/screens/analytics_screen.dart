@@ -32,9 +32,6 @@ class AnalyticsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final asyncData = ref.watch(analyticsDataProvider);
     final selDays   = ref.watch(analyticsFilterProvider);
-    final isMobile  = Responsive.isMobile(context);
-    final isTablet  = Responsive.isTablet(context);
-
     return ColoredBox(
       color: const Color(0xFF080E1A),
       child: asyncData.when(
@@ -45,7 +42,7 @@ class AnalyticsScreen extends ConsumerWidget {
                 style: const TextStyle(color: Colors.white54),
                 textAlign: TextAlign.center)),
         data: (data) => _Content(
-          data: data, isMobile: isMobile, isTablet: isTablet,
+          data: data,
           selDays: selDays,
           filterTabs: _FilterTabs(selectedDays: selDays, ref: ref),
         ),
@@ -72,12 +69,7 @@ class _FilterTabs extends StatelessWidget {
         decoration: BoxDecoration(
           color: const Color(0xFF0f172a),
           borderRadius: BorderRadius.circular(context.rp(16)),
-          boxShadow: const [
-            BoxShadow(color: Color(0xFF0b1120),
-                offset: Offset(4, 4), blurRadius: 8),
-            BoxShadow(color: Color(0xFF1e293b),
-                offset: Offset(-4, -4), blurRadius: 8),
-          ],
+          border: Border.all(color: const Color(0xFF1E2D45), width: 1),
         ),
         child: IntrinsicWidth(
           child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -106,10 +98,6 @@ class _FilterTabs extends StatelessWidget {
           decoration: BoxDecoration(
             color: sel ? const Color(0xFF1e293b) : Colors.transparent,
             borderRadius: BorderRadius.circular(ctx.rp(12)),
-            boxShadow: sel
-                ? const [BoxShadow(color: Color(0xFF0b1120),
-                    offset: Offset(2, 2), blurRadius: 4)]
-                : [],
           ),
           child: Text(label, style: TextStyle(
             fontSize:   ctx.sp(12),
@@ -123,11 +111,10 @@ class _FilterTabs extends StatelessWidget {
 // ── CONTENT ───────────────────────────────────────────────────────────────────
 class _Content extends StatelessWidget {
   final Map<String, dynamic> data;
-  final bool isMobile, isTablet;
   final int? selDays;
   final Widget filterTabs;
   const _Content({
-    required this.data, required this.isMobile, required this.isTablet,
+    required this.data,
     required this.selDays, required this.filterTabs,
   });
 
@@ -152,24 +139,16 @@ class _Content extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Padding(
-              padding: EdgeInsets.only(
-                  top: MediaQuery.of(context).orientation == Orientation.landscape
-                      ? context.rs(8) : 0),
-              child: filterTabs,
-            ),
+            filterTabs,
             SizedBox(height: context.rs(16)),
             _SummaryCards(
-              isMobile: isMobile, isTablet: isTablet,
               sessions: sessions, alerts: alerts,
               drowsy: drowsy, distracted: distracted,
             ),
             SizedBox(height: context.rs(24)),
             Padding(
               padding: EdgeInsets.symmetric(horizontal: context.rp(20)),
-              child: isMobile || isTablet
-                  ? _mobileCharts(context, dailyTrends, hourlyDist)
-                  : _desktopCharts(context, dailyTrends, hourlyDist),
+              child: _mobileCharts(context, dailyTrends, hourlyDist),
             ),
             SizedBox(height: context.rs(32)),
           ],
@@ -187,47 +166,27 @@ class _Content extends StatelessWidget {
         _BarCard(hourlyDist: hourly),
       ]);
 
-  Widget _desktopCharts(BuildContext ctx,
-      List<Map<String, dynamic>> trends,
-      List<Map<String, dynamic>> hourly) =>
-      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Expanded(flex: 6, child: _LineCard(dailyTrends: trends, selDays: selDays)),
-        SizedBox(width: ctx.rp(24)),
-        Expanded(flex: 4, child: _BarCard(hourlyDist: hourly)),
-      ]);
 }
 
 // ── SUMMARY CARDS ─────────────────────────────────────────────────────────────
 class _SummaryCards extends StatelessWidget {
-  final bool isMobile, isTablet;
-  final int  sessions, alerts, drowsy, distracted;
+  final int sessions, alerts, drowsy, distracted;
   const _SummaryCards({
-    required this.isMobile, required this.isTablet,
     required this.sessions, required this.alerts,
     required this.drowsy, required this.distracted,
   });
 
-  double _aspect(BuildContext ctx) {
-    final landscape = MediaQuery.of(ctx).orientation == Orientation.landscape;
-    if (landscape) {
-      final screenW = MediaQuery.of(ctx).size.width;
-      final hPad    = ctx.rp(20) * 2;
-      final spacing = ctx.rp(10) * 3;
-      final cardW   = (screenW - hPad - spacing) / 4;
-      return (cardW / 130).clamp(1.0, 2.2);
-    }
-    return ctx.forTier(base: 0.95, compact: 0.85, small: 0.90, large: 1.0);
-  }
+  double _aspect(BuildContext ctx) =>
+      ctx.forTier(base: 0.95, compact: 0.85, small: 0.90, large: 1.0);
 
   @override
   Widget build(BuildContext ctx) {
-    final landscape = MediaQuery.of(ctx).orientation == Orientation.landscape;
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: ctx.rp(20)),
       child: GridView.count(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
-        crossAxisCount: landscape || !isMobile ? 4 : 2,
+        crossAxisCount: 2,
         mainAxisSpacing:  ctx.rs(10),
         crossAxisSpacing: ctx.rp(10),
         childAspectRatio: _aspect(ctx),
@@ -686,78 +645,59 @@ class _StatCard extends StatefulWidget {
 }
 
 class _StatCardState extends State<_StatCard> {
-  bool _hov = false;
   @override
   Widget build(BuildContext context) {
     final dot = widget.accentColor ??
         (widget.positive ? const Color(0xFF10b981) : const Color(0xFFfbbf24));
-    final ls  = MediaQuery.of(context).orientation == Orientation.landscape;
 
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hov = true),
-      onExit:  (_) => setState(() => _hov = false),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
+    return Container(
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: const Color(0xFF0f172a),
           borderRadius: BorderRadius.circular(context.rp(14)),
-          boxShadow: _hov
-              ? const [
-                  BoxShadow(color: Color(0xFF0b1120),
-                      offset: Offset(-3, -3), blurRadius: 6),
-                  BoxShadow(color: Color(0xFF1e293b),
-                      offset: Offset(3, 3), blurRadius: 6),
-                ]
-              : const [
-                  BoxShadow(color: Color(0xFF0b1120),
-                      offset: Offset(6, 6), blurRadius: 12),
-                  BoxShadow(color: Color(0xFF1e293b),
-                      offset: Offset(-6, -6), blurRadius: 12),
-                ],
+          border: Border.all(color: const Color(0xFF1E2D45), width: 1),
         ),
-        padding: EdgeInsets.all(ls ? context.rp(8) : context.rp(12)),
+        padding: EdgeInsets.all(context.rp(12)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment:  MainAxisAlignment.spaceBetween,
           children: [
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
               Container(
-                padding: EdgeInsets.all(ls ? context.rp(5) : context.rp(7)),
+                padding: EdgeInsets.all(context.rp(7)),
                 decoration: BoxDecoration(
                     color: const Color(0xFF1e293b),
                     borderRadius: BorderRadius.circular(context.rp(8))),
                 child: Icon(widget.icon,
-                    size: ls ? context.ri(13) : context.ri(17),
+                    size: context.ri(17),
                     color: const Color(0xFF22d3ee)),
               ),
               Container(
-                width:  ls ? context.ri(7) : context.ri(9),
-                height: ls ? context.ri(7) : context.ri(9),
+                width:  context.ri(9),
+                height: context.ri(9),
                 decoration: BoxDecoration(
                   color: dot, shape: BoxShape.circle,
                   boxShadow: [BoxShadow(
                       color: dot.withValues(alpha: 0.6),
-                      blurRadius: ls ? 6 : 8,
-                      spreadRadius: ls ? 1 : 2)],
+                      blurRadius: 8,
+                      spreadRadius: 2)],
                 ),
               ),
             ]),
             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(widget.value, style: TextStyle(
-                fontSize: ls ? context.sp(18) : context.sp(22),
+                fontSize: context.sp(22),
                 fontWeight: FontWeight.bold,
                 color: const Color(0xFFe2e8f0),
               )),
-              SizedBox(height: ls ? context.rs(1) : context.rs(3)),
+              SizedBox(height: context.rs(3)),
               Text(widget.label, style: TextStyle(
-                fontSize: ls ? context.sp(8) : context.sp(10),
+                fontSize: context.sp(10),
                 color: const Color(0xFF64748b),
               ), maxLines: 2, overflow: TextOverflow.ellipsis),
             ]),
           ],
         ),
-      ),
     );
   }
 }
@@ -772,13 +712,7 @@ class _ChartModal extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final landscape =
-        MediaQuery.of(context).orientation == Orientation.landscape;
-    final mq = MediaQuery.of(context);
-    // Use 0.92 in portrait so the modal is taller, giving the chart and
-    // the bottom hint row more room on all devices (including Samsung with
-    // button-style navigation).
-    final h = mq.size.height * (landscape ? 0.95 : 0.92);
+    final h = MediaQuery.of(context).size.height * 0.92;
 
     return Container(
       height: h,
@@ -849,12 +783,7 @@ class _ChartModal extends StatelessWidget {
 BoxDecoration _cardDecor(BuildContext ctx) => BoxDecoration(
       color:        const Color(0xFF0f172a),
       borderRadius: BorderRadius.all(Radius.circular(ctx.rp(18))),
-      boxShadow: const [
-        BoxShadow(color: Color(0xFF0b1120),
-            offset: Offset(8, 8), blurRadius: 16),
-        BoxShadow(color: Color(0xFF1e293b),
-            offset: Offset(-8, -8), blurRadius: 16),
-      ],
+      border: Border.all(color: const Color(0xFF1E2D45), width: 1),
     );
 
 Widget _legend(BuildContext ctx, String label, Color c) => Row(children: [

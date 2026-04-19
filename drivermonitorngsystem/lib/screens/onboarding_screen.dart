@@ -209,97 +209,16 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                     ),
                   ),
 
-                  // Dots + button — responsive for portrait and landscape
+                  // Dots + button
                   Builder(builder: (context) {
-                    final isLandscape = MediaQuery.of(context).orientation ==
-                        Orientation.landscape;
-                    final bottomPad  = isLandscape ? 8.0  : 40.0;
-                    final btnHeight  = isLandscape ? 40.0 : 54.0;
-                    final dotSpacing = isLandscape ? 12.0 : 28.0;
-                    final btnWidth   = isLandscape
-                        ? MediaQuery.of(context).size.width * 0.45
-                        : double.infinity;
+                    const double bottomPad  = 40.0;
+                    const double btnHeight  = 54.0;
+                    const double dotSpacing = 28.0;
+                    const double btnWidth   = double.infinity;
 
                     return Padding(
                       padding: EdgeInsets.fromLTRB(MediaQuery.of(context).size.width * 0.08, 0, MediaQuery.of(context).size.width * 0.08, bottomPad),
-                      child: isLandscape
-                          // ── LANDSCAPE: dots + button side by side ──────────
-                          ? Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                // Dot indicators
-                                Row(
-                                  children: List.generate(
-                                    _pages.length,
-                                    (i) => AnimatedContainer(
-                                      duration: const Duration(milliseconds: 280),
-                                      curve: Curves.easeInOutCubic,
-                                      margin: EdgeInsets.symmetric(horizontal: context.rp(3)),
-                                      width:  i == _currentPage ? context.wp(0.045) : context.wp(0.012),
-                                      height: 5,
-                                      decoration: BoxDecoration(
-                                        color: i == _currentPage
-                                            ? const Color(0xFF00D4FF)
-                                            : Colors.white.withValues(alpha: 0.15),
-                                        borderRadius: BorderRadius.circular(3),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                SizedBox(width: context.rp(20)),
-                                // Button — compact width only
-                                SizedBox(
-                                  width:  btnWidth,
-                                  height: btnHeight,
-                                  child: GestureDetector(
-                                    onTap: _nextPage,
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        gradient: const LinearGradient(
-                                          colors: [Color(0xFF00B8D9), Color(0xFF00D4FF)],
-                                        ),
-                                        borderRadius: BorderRadius.circular(10),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: const Color(0xFF00D4FF).withValues(alpha: 0.20),
-                                            blurRadius: 12,
-                                            offset: const Offset(0, 4),
-                                          ),
-                                        ],
-                                      ),
-                                      child: Center(
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Text(
-                                              _currentPage < _pages.length - 1
-                                                  ? 'Next'
-                                                  : 'Get Started',
-                                              style: TextStyle(
-                                                color: Color(0xFF080E1A),
-                                                fontSize: Responsive.responsiveFont(context, mobile: 13, tablet: 14, desktop: 15),
-                                                fontWeight: FontWeight.w700,
-                                                letterSpacing: 0.5,
-                                              ),
-                                            ),
-                                            SizedBox(width: context.rp(6)),
-                                            Icon(
-                                              _currentPage < _pages.length - 1
-                                                  ? Icons.arrow_forward_rounded
-                                                  : Icons.check_rounded,
-                                              color: const Color(0xFF080E1A),
-                                              size: 14,
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            )
-                          // ── PORTRAIT: stacked dots then button ─────────────
-                          : Column(
+                      child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Row(
