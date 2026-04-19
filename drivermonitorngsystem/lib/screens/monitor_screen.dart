@@ -905,20 +905,32 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   // LAYOUTS
-  Widget _buildPortraitLayout() => SingleChildScrollView(
-        child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: context.rp(14)),
-          child: Column(children: [
-            SizedBox(height: context.rs(20)),
-            _buildCameraWithOverlay(
-                height: MediaQuery.of(context).size.height *
-                    (context.isSmallPhone ? 0.36 : 0.40)),
-            SizedBox(height: context.rs(10)),
-            _buildMetricsSidebar(),
-            SizedBox(height: context.rs(14)),
-          ]),
-        ),
-      );
+  Widget _buildPortraitLayout() => LayoutBuilder(
+      builder: (context, constraints) {
+        final availH = constraints.maxHeight;
+       final camH = availH * (context.isSmallPhone ? 0.50 : 0.52);
+
+        return SingleChildScrollView(
+          physics: const NeverScrollableScrollPhysics(),
+          child: SizedBox(
+            height: availH, // exact fit — walang overflow, walang dead space
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: context.rp(14)),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(height: context.rs(20)),
+                  _buildCameraWithOverlay(height: camH),
+                  SizedBox(height: context.rs(10)),
+                  _buildMetricsSidebar(),
+                  SizedBox(height: context.rs(14)),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
 
   // CAMERA WITH OVERLAY
   Widget _buildCameraChild(double camW, double camH) {
