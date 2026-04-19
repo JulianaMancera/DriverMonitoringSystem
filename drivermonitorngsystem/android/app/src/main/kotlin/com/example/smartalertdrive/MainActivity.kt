@@ -57,16 +57,20 @@ class MainActivity : FlutterActivity() {
                     "stopInPip" -> {
                         isStopping  = true
                         isRecording = false
-                        if (isInPip) {
-                            // moveTaskToBack() does not dismiss PIP on MIUI/HyperOS.
-                            // Expanding back to full screen is the only reliable
-                            // cross-device approach to close the PIP window.
-                            val intent = Intent(this, MainActivity::class.java).apply {
-                                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                                        Intent.FLAG_ACTIVITY_CLEAR_TOP
-                            }
-                            startActivity(intent)
-                        }
+                        // Use applicationContext + the launcher intent to bring the app
+                        // to the foreground. On MIUI/HyperOS, calling this.startActivity()
+                        // from within the PIP activity (even with REORDER_TO_FRONT) does
+                        // not expand the floating window — MIUI appears to suppress it.
+                        // applicationContext.startActivity() with the same intent the home
+                        // screen launcher uses bypasses this restriction: MIUI treats it as
+                        // a genuine "open app" request and expands/closes the PIP window.
+                        try {
+                            val launchIntent = packageManager
+                                .getLaunchIntentForPackage(packageName)
+                                ?: Intent(applicationContext, MainActivity::class.java)
+                                    .apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
+                            applicationContext.startActivity(launchIntent)
+                        } catch (_: Exception) { }
                         result.success(null)
                     }
 

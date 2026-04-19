@@ -356,6 +356,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         ref.read(showAlertBannerProvider.notifier).set(false);
         ref.read(isInPipProvider.notifier).set(false);
       }
+      // Still try to exit PIP even when there's no active session — the
+      // Android PIP window stays until the activity is brought to foreground.
+      await PipService.exitPip();
     }
   }
 
@@ -941,6 +944,28 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   Widget _buildPipView() {
     final isRecording = ref.watch(isRecordingProvider);
+
+    // Fallback: if recording stopped but the native PIP window didn't close
+    // (can happen on MIUI/HyperOS where startActivity from PIP is unreliable),
+    // show a stopped state so the user knows they can tap the window to dismiss it.
+    if (!isRecording) {
+      return const ColoredBox(
+        color: Colors.black,
+        child: Center(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.stop_circle_outlined, color: Colors.white54, size: 28),
+            SizedBox(height: 6),
+            Text('Monitoring Stopped',
+                style: TextStyle(color: Colors.white,
+                    fontSize: 11, fontWeight: FontWeight.bold)),
+            SizedBox(height: 4),
+            Text('Tap here to close',
+                style: TextStyle(color: Colors.white54, fontSize: 9)),
+          ]),
+        ),
+      );
+    }
+
     final driverState = ref.watch(driverStateProvider);
     final showAlert   = ref.watch(showAlertBannerProvider);
     final alertType   = ref.watch(alertBannerTypeProvider);
