@@ -1,6 +1,3 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// preference_helper.dart
-//
 // PURPOSE:
 //   Persists small user settings across app restarts using SharedPreferences.
 //   This is NOT for drive session data — that goes in database_helper.dart.
@@ -19,10 +16,7 @@
 //   • monitor_screen.dart   — reads volume, sensitivity, autoStart, clearGlasses
 //   • onboarding_screen.dart— reads/writes onboarding_seen
 //   • database_helper.dart  — retention value used by deleteSessionsOlderThan()
-// ─────────────────────────────────────────────────────────────────────────────
-
 import 'package:shared_preferences/shared_preferences.dart';
-
 class PreferencesHelper {
   static final PreferencesHelper instance = PreferencesHelper._init();
   PreferencesHelper._init();
@@ -31,7 +25,7 @@ class PreferencesHelper {
   // Initialised lazily on first access via _prefs().
   SharedPreferences? _cache;
 
-  // ── KEYS ──────────────────────────────────────────────────────────────────
+  // KEYS
   static const String _keyAlertVolume      = 'alert_volume';
   static const String _keyAlertSensitivity = 'alert_sensitivity';
   static const String _keyAutoStart        = 'auto_start';
@@ -39,8 +33,7 @@ class PreferencesHelper {
   static const String _keyClearGlasses     = 'clear_glasses';
   static const String _keyOnboardingSeen   = 'onboarding_seen';
 
-  // ── ALERT SETTINGS ────────────────────────────────────────────────────────
-
+  //ALERT SETTINGS
   /// Alert volume — 0.0 (silent) to 1.0 (full volume).
   /// Default: 0.8 — loud enough to wake a drowsy driver.
   /// Used by monitor_screen to set audioplayers volume on each alert.
@@ -67,7 +60,6 @@ class PreferencesHelper {
 
   /// Convenience: returns the L1/L2/L3 frame thresholds for the
   /// current sensitivity setting. Used directly by monitor_screen.
-  ///
   /// Returns [l1Threshold, l2Threshold, l3Threshold]
   Future<List<int>> getAlertThresholds() async {
     final sensitivity = await getAlertSensitivity();
@@ -78,8 +70,7 @@ class PreferencesHelper {
     }
   }
 
-  // ── MONITORING SETTINGS ───────────────────────────────────────────────────
-
+  // MONITORING SETTINGS 
   /// Auto-start recording — if true, monitor_screen starts recording
   /// automatically when the app opens (or when Monitor tab is tapped).
   /// Default: false — user must manually start recording.
@@ -99,12 +90,10 @@ class PreferencesHelper {
   Future<void> setClearGlasses(bool value) async =>
       (await _prefs()).setBool(_keyClearGlasses, value);
 
-  // ── DATA & PRIVACY ────────────────────────────────────────────────────────
-
-  /// Session retention period.
+  // DATA & PRIVACY 
   /// Valid values: '7 days', '30 days', 'forever'
   /// Default: '30 days'
-  ///
+
   /// settings_screen enforces this immediately on change by calling
   /// DatabaseHelper.instance.deleteSessionsOlderThan(days).
   Future<String> getRetention() async =>
@@ -129,8 +118,7 @@ class PreferencesHelper {
     }
   }
 
-  // ── ONBOARDING ────────────────────────────────────────────────────────────
-
+  // ONBOARDING 
   /// Whether the user has completed the onboarding walkthrough.
   /// Set to true by onboarding_screen.dart when user taps "Get Started".
   /// Read by main.dart EntryPoint to decide whether to show onboarding.
@@ -140,8 +128,7 @@ class PreferencesHelper {
   Future<void> setOnboardingSeen(bool value) async =>
       (await _prefs()).setBool(_keyOnboardingSeen, value);
 
-  // ── UTILITY ───────────────────────────────────────────────────────────────
-
+  // UTILITY
   /// Resets ALL preferences to their default values.
   /// Called by settings_screen "Reset to Defaults" if you add that feature.
   Future<void> resetToDefaults() async {
@@ -155,7 +142,7 @@ class PreferencesHelper {
     // — user should not have to redo onboarding after a settings reset.
   }
 
-  // ── PRIVATE ───────────────────────────────────────────────────────────────
+  // PRIVATE
 
   /// Returns the cached SharedPreferences instance.
   /// Initialises once on first call — all subsequent calls return cache.
