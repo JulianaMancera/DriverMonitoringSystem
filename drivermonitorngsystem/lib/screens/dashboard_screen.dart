@@ -122,7 +122,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  // SAFETY SCORE CARD 
+  // SAFETY SCORE CARD
   Widget _buildSafetyScoreCard(
     BuildContext context,
     double score,
@@ -132,7 +132,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
-        // FIX: was Responsive.responsiveBorderRadius(mobile:20)
         borderRadius: BorderRadius.circular(context.rp(20)),
         border: Border.all(color: const Color(0xFF1E2D45), width: 1),
       ),
@@ -161,12 +160,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 Text('SAFETY SCORE',
                     style: TextStyle(
                       color:         const Color(0xFF94a3b8),
-                      // FIX: was Responsive.responsiveFont(mobile:18)
                       fontSize:      context.sp(15),
                       fontWeight:    FontWeight.w500,
                       letterSpacing: 1.5,
                     )),
-                // FIX: was Responsive.responsiveSpacing(mobile:24)
                 SizedBox(height: context.rs(20)),
                 _buildCircularScoreIndicator(
                     context, hasAnySessions ? score : 100.0,
@@ -219,7 +216,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           width: progressSize, height: progressSize,
           child: CircularProgressIndicator(
             value:           hasAnySessions ? score / 100 : 0,
-            // FIX: was Responsive.responsiveValue(mobile:6.0)
             strokeWidth:     context.forTier(
                 base: 6.0, compact: 5.0, large: 7.0),
             backgroundColor: const Color(0xFF1e293b),
@@ -246,7 +242,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             Text(
               hasAnySessions ? score.toStringAsFixed(0) : '—',
               style: TextStyle(
-                // FIX: was Responsive.responsiveFont(mobile:38)
                 fontSize:   context.forTier(
                     base: 34.0, compact: 26.0, small: 30.0, large: 38.0),
                 fontWeight: FontWeight.bold,
@@ -258,7 +253,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             SizedBox(height: context.rs(2)),
             Text(label,
                 style: TextStyle(
-                  // FIX: was Responsive.responsiveFont(mobile:9)
                   fontSize:      context.sp(9),
                   color:         const Color(0xFF64748b),
                   letterSpacing: 1,
@@ -269,131 +263,86 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  // QUICK STATS GRID
+  // SHARED STATS GRID HELPER — single source of truth for GridView layout config
+  Widget _buildStatsGrid(BuildContext context, {required List<Widget> children}) {
+    final isPortrait =
+        MediaQuery.orientationOf(context) == Orientation.portrait;
+    final int    crossCount;
+    final double mainSpacing;
+    final double crossSpacing;
+    final double aspect;
+
+    if (isPortrait) {
+      crossCount   = 2;
+      mainSpacing  = context.rs(12);
+      crossSpacing = context.rp(12);
+      aspect       = context.forTier(
+          base: 1.0, compact: 0.90, small: 0.95, large: 1.05);
+    } else {
+      crossCount   = 4;
+      mainSpacing  = context.rs(10);
+      crossSpacing = context.rp(10);
+      final gapCount = crossCount - 1;
+      final screenW  = context.sw;
+      final hPad     = context.hPad * 2;
+      final spacing  = crossSpacing * gapCount;
+      final cardW    = (screenW - hPad - spacing) / crossCount;
+      aspect         = (cardW / 130).clamp(1.0, 2.2);
+    }
+
+    return GridView.count(
+      crossAxisCount:   crossCount,
+      shrinkWrap:       true,
+      physics:          const NeverScrollableScrollPhysics(),
+      mainAxisSpacing:  mainSpacing,
+      crossAxisSpacing: crossSpacing,
+      childAspectRatio: aspect,
+      children: children,
+    );
+  }
+
+  // QUICK STATS GRID — delegates layout to _buildStatsGrid
   Widget _buildQuickStatsGrid(
     BuildContext context, {
     required double totalDriveHrs,
     required int    alertsLast24h,
     required int    safetyStreak,
     required double avgAlertness,
-  }) {
-    final isPortrait =
-        MediaQuery.orientationOf(context) == Orientation.portrait;
-
-    // Portrait: original 2-column layout with original spacing & aspect ratio.
-    // Landscape: 4-column single row with dynamic compact aspect ratio.
-    final int    crossCount;
-    final double mainSpacing;
-    final double crossSpacing;
-    final double aspect;
-
-    if (isPortrait) {
-      crossCount   = 2;
-      mainSpacing  = context.rs(12);
-      crossSpacing = context.rp(12);
-      aspect       = context.forTier(
-          base: 1.0, compact: 0.90, small: 0.95, large: 1.05);
-    } else {
-      crossCount   = 4;
-      mainSpacing  = context.rs(10);
-      crossSpacing = context.rp(10);
-      final gapCount = crossCount - 1;
-      final screenW  = context.sw;
-      final hPad     = context.hPad * 2;
-      final spacing  = crossSpacing * gapCount;
-      final cardW    = (screenW - hPad - spacing) / crossCount;
-      // Match Analytics _SummaryCards landscape aspect ratio
-      aspect         = (cardW / 130).clamp(1.0, 2.2);
-    }
-
-    return GridView.count(
-      crossAxisCount:   crossCount,
-      shrinkWrap:       true,
-      physics:          const NeverScrollableScrollPhysics(),
-      mainAxisSpacing:  mainSpacing,
-      crossAxisSpacing: crossSpacing,
-      childAspectRatio: aspect,
-      children: [
+  }) =>
+      _buildStatsGrid(context, children: [
         _StatCard(
-          icon:    Icons.access_time_outlined,
-          label:   'Total Drive Time',
-          value:   '${totalDriveHrs.toStringAsFixed(1)} hrs',
-          subtext: 'Last 30 days',
-          accent:  false,
+          icon: Icons.access_time_outlined, label: 'Total Drive Time',
+          value: '${totalDriveHrs.toStringAsFixed(1)} hrs',
+          subtext: 'Last 30 days', accent: false,
         ),
         _StatCard(
-          icon:    Icons.shield_outlined,
-          label:   'Alert Triggered',
-          value:   '$alertsLast24h',
-          subtext: 'Last 24 hours',
-          accent:  alertsLast24h > 0,
+          icon: Icons.shield_outlined, label: 'Alert Triggered',
+          value: '$alertsLast24h',
+          subtext: 'Last 24 hours', accent: alertsLast24h > 0,
         ),
         _StatCard(
-          icon:    Icons.local_fire_department_outlined,
-          label:   'Safety Streak',
-          value:   '$safetyStreak days',
+          icon: Icons.local_fire_department_outlined, label: 'Safety Streak',
+          value: '$safetyStreak days',
           subtext: safetyStreak > 0 ? 'Keep it up!' : 'Stay alert!',
-          accent:  false,
+          accent: false,
         ),
         _StatCard(
-          icon:    Icons.trending_up,
-          label:   'Avg Alertness',
-          value:   '${avgAlertness.toStringAsFixed(0)}%',
-          subtext: 'Last 7 days',
-          accent:  false,
+          icon: Icons.trending_up, label: 'Avg Alertness',
+          value: '${avgAlertness.toStringAsFixed(0)}%',
+          subtext: 'Last 7 days', accent: false,
         ),
-      ],
-    );
-  }
+      ]);
 
-
-  Widget _buildEmptyStatsGrid(BuildContext context) {
-    final isPortrait =
-        MediaQuery.orientationOf(context) == Orientation.portrait;
-
-    // Portrait: original 2-column layout with original spacing & aspect ratio.
-    // Landscape: 4-column single row with dynamic compact aspect ratio.
-    final int    crossCount;
-    final double mainSpacing;
-    final double crossSpacing;
-    final double aspect;
-
-    if (isPortrait) {
-      crossCount   = 2;
-      mainSpacing  = context.rs(12);
-      crossSpacing = context.rp(12);
-      aspect       = context.forTier(
-          base: 1.0, compact: 0.90, small: 0.95, large: 1.05);
-    } else {
-      crossCount   = 4;
-      mainSpacing  = context.rs(10);
-      crossSpacing = context.rp(10);
-      final gapCount = crossCount - 1;
-      final screenW  = context.sw;
-      final hPad     = context.hPad * 2;
-      final spacing  = crossSpacing * gapCount;
-      final cardW    = (screenW - hPad - spacing) / crossCount;
-      // Match Analytics _SummaryCards landscape aspect ratio
-      aspect         = (cardW / 130).clamp(1.0, 2.2);
-    }
-
-    return GridView.count(
-      crossAxisCount:   crossCount,
-      shrinkWrap:       true,
-      physics:          const NeverScrollableScrollPhysics(),
-      mainAxisSpacing:  mainSpacing,
-      crossAxisSpacing: crossSpacing,
-      childAspectRatio: aspect,
-      children: const [
-        _EmptyStatCard(icon: Icons.access_time_outlined, label: 'Total Drive Time'),
-        _EmptyStatCard(icon: Icons.shield_outlined,      label: 'Alert Triggered'),
+  // EMPTY STATS GRID — delegates layout to _buildStatsGrid
+  Widget _buildEmptyStatsGrid(BuildContext context) =>
+      _buildStatsGrid(context, children: const [
+        _EmptyStatCard(icon: Icons.access_time_outlined,           label: 'Total Drive Time'),
+        _EmptyStatCard(icon: Icons.shield_outlined,                label: 'Alert Triggered'),
         _EmptyStatCard(icon: Icons.local_fire_department_outlined, label: 'Safety Streak'),
-        _EmptyStatCard(icon: Icons.trending_up,          label: 'Avg Alertness'),
-      ],
-    );
-  }
+        _EmptyStatCard(icon: Icons.trending_up,                    label: 'Avg Alertness'),
+      ]);
 
-  // SAFETY SCORE HISTORY 
+  // SAFETY SCORE HISTORY
   Widget _buildSafetyScoreHistory(
     BuildContext context,
     List<Map<String, dynamic>> dailyScores,
@@ -424,7 +373,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     return Container(
       decoration: BoxDecoration(
         color:        const Color(0xFF0f172a),
-        // FIX: was Responsive.responsiveBorderRadius(mobile:20)
         borderRadius: BorderRadius.circular(context.rp(20)),
         border: Border.all(color: const Color(0xFF1E2D45), width: 1),
       ),
@@ -479,7 +427,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           _buildEmptyChartState(context)
         else
           SizedBox(
-            // FIX: was hardcoded 245 — now scales with screen height
             height: context.rs(context.isSmallPhone ? 210 : 240),
             child: _SafetyScoreChartInner(
                 spots: spots, xLabels: xLabels),
@@ -499,7 +446,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       child: Center(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.show_chart_rounded,
-              // FIX: was hardcoded 48
               color: const Color(0xFF1e293b), size: context.ri(44)),
           SizedBox(height: context.rs(12)),
           Text('No drive history yet',
@@ -534,11 +480,7 @@ class _SafetyScoreChartInner extends StatefulWidget {
 class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
   final ScrollController _sc = ScrollController();
 
-  // FIX: point spacing and y-axis width now use responsive helpers
-  // so charts on compact phones don't cram labels together
   static const double _chartMin = 0.0;
-  // FIX: was 105.0 — when score is near 100% the dot+stroke was clipped.
-  // 112.0 gives ~12 units breathing room above 100 so high scores show fully.
   static const double _chartMax = 112.0;
 
   @override
@@ -546,8 +488,6 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_sc.hasClients && _sc.position.maxScrollExtent > 0) {
-        // Jump to absolute end so the last date label is fully visible.
-        // Using maxScrollExtent directly ensures all right padding is shown.
         _sc.jumpTo(_sc.position.maxScrollExtent);
       }
     });
@@ -571,11 +511,10 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
       maxX   = 1.5;
     } else {
       spots  = widget.spots;
-      labels = widget.xLabels;  // ← back to original, NO phantom
-      maxX   = (widget.spots.length - 1).toDouble() + 0.4; 
+      labels = widget.xLabels;
+      maxX   = (widget.spots.length - 1).toDouble() + 0.4;
     }
 
-    // FIX: point spacing and y-axis width responsive
     final pointSpacing = context.rp(46);
     final yAxisWidth   = context.rp(40);
     final rightPad     = context.rp(40);
@@ -599,8 +538,6 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
             titlesData: FlTitlesData(
               rightTitles: const AxisTitles(
                   sideTitles: SideTitles(showTitles: false)),
-              // FIX: add top reserved space so the 100% dot is never clipped
-              // at the top edge of the chart area
               topTitles: AxisTitles(
                 sideTitles: SideTitles(
                   showTitles:   false,
@@ -610,19 +547,13 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
               bottomTitles: AxisTitles(
                 sideTitles: SideTitles(
                   showTitles:   true,
-                  // FIX: was hardcoded 36
                   reservedSize: context.rs(34),
                   interval:     1,
                   getTitlesWidget: (value, meta) {
-                    // fl_chart calls getTitlesWidget at maxX even when it is
-                    // not integer-aligned (e.g. 6.3).  value.toInt() would map
-                    // that to the same index as the real last point at 6.0,
-                    // drawing the label twice.  Skip any non-integer value.
                     if ((value - value.roundToDouble()).abs() > 0.01) {
                       return const SizedBox.shrink();
                     }
                     final idx = value.toInt();
-                    // skip if out of real data range
                     if (idx < 0 || idx >= widget.xLabels.length) {
                       return const SizedBox.shrink();
                     }
@@ -644,7 +575,6 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
                   reservedSize: yAxisWidth,
                   getTitlesWidget: (value, meta) {
                     final v = value.toInt();
-                    // FIX: only show 0,20,40,60,80,100 
                     if (v < 0 || v > 100 || v % 20 != 0) {
                       return const SizedBox.shrink();
                     }
@@ -694,10 +624,6 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
                 tooltipBorderRadius: BorderRadius.circular(context.rp(12)),
                 tooltipPadding: EdgeInsets.symmetric(
                     horizontal: context.rp(12), vertical: context.rs(8)),
-                // FIX: Always keep tooltip inside the chart drawing area.
-                // Without these, tooltip is clipped on Samsung/Xiaomi when
-                // score is near 100% (tooltip goes above the top boundary)
-                // or when the last point is near the right edge.
                 fitInsideHorizontally: true,
                 fitInsideVertically:   true,
                 getTooltipItems: (touchedSpots) =>
@@ -741,7 +667,6 @@ class _StatCard extends StatelessWidget {
     required this.accent,
   });
 
-  @override
   @override
   Widget build(BuildContext context) {
     return AnimatedContainer(
@@ -811,7 +736,7 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-// EMPTY STAT CARD 
+// ── EMPTY STAT CARD ───────────────────────────────────────────────────────────
 class _EmptyStatCard extends StatelessWidget {
   final IconData icon;
   final String   label;
@@ -819,7 +744,6 @@ class _EmptyStatCard extends StatelessWidget {
   const _EmptyStatCard({required this.icon, required this.label});
 
   @override
-    @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(

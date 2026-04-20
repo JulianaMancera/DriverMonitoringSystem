@@ -1,6 +1,3 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// tflite_service.dart — DMS-HybridNet V3 (Float32)
-//
 // PURPOSE:
 //   Runs DMS-HybridNet V3 single-file dual-input inference on every camera frame.
 //   Produces an InferenceResult with the driver's current state.
@@ -25,18 +22,16 @@
 //   Input 0: temporal_input [1, 30, 12]      Float32 raw feature values
 //   Input 1: spatial_input  [1, 224, 224, 3] Float32 range [-1.0, 1.0]
 //   Output 0: output_0      [1, 12]           Float32 logits → softmax
-// ─────────────────────────────────────────────────────────────────────────────
-
 import 'dart:math' as math;
 // dart:typed_data removed — Float32List provided by flutter/foundation.dart
 import 'package:flutter/foundation.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:camera/camera.dart';
 
-// ── Model asset path ──────────────────────────────────────────────────────────
+// Model asset path 
 const String _kModelAsset = 'assets/models/dms_hybridnet_v3_float32.tflite';
 
-// ── 12-class names (index = model output index, per integration spec) ─────────
+// 12-class names (index = model output index, per integration spec)
 const List<String> kClassNames = [
   'safe_driving',        // 0  → NEUTRAL
   'talking_passenger',   // 1  → DISTRACTED
@@ -52,11 +47,11 @@ const List<String> kClassNames = [
   'drowsy_microsleep',   // 11 → DROWSY
 ];
 
-// ── Model source enum — single model now, kept for monitor_screen log compat ──
+// Model source enum — single model now, kept for monitor_screen log compat 
 enum ModelSource { v3 }
 String modelSourceLabel(ModelSource src) => 'V3 HybridNet';
 
-// ── Alert debounce thresholds ────────────────────────────────────────────────
+// Alert debounce thresholds ─
 // Tuned from logcat analysis:
 // • When safe: distracted group ~75% spread across many classes (each 15-25%)
 // • True detection: ONE class dominates at 45%+, group > 70%
@@ -64,18 +59,16 @@ String modelSourceLabel(ModelSource src) => 'V3 HybridNet';
 const double _kConfidenceThreshold  = 0.30; // kept for soft debounce decay
 const int    _kConsecutiveThreshold = 5;    // 5 frames to confirm
 
-// ── Temporal buffer constants ─────────────────────────────────────────────────
+// Temporal buffer constants
 const int _kSeqLen  = 30; // 30-frame rolling window
 const int _kNumFeat = 12; // 12 features per frame
 
-// ── 12 temporal feature order (from integration spec feature_cols) ────────────
+// 12 temporal feature order (from integration spec feature_cols) 
 // Index: [ear_l(0), ear_r(1), ear_avg(2), ear_min(3), mar(4),
 //         pitch(5), yaw(6), roll(7),
 //         gaze_l_x(8), gaze_l_y(9), gaze_r_x(10), gaze_r_y(11)]
 
-// ─────────────────────────────────────────────────────────────────────────────
 // InferenceResult
-// ─────────────────────────────────────────────────────────────────────────────
 class InferenceResult {
   final String state;        // 'neutral' | 'drowsy' | 'distracted'
   final String subclass;     // specific class name from kClassNames
@@ -106,9 +99,7 @@ class InferenceResult {
   });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // TfliteService — singleton, V3 single-file dual-input
-// ─────────────────────────────────────────────────────────────────────────────
 class TfliteService {
   static final TfliteService instance = TfliteService._init();
   TfliteService._init();
@@ -122,17 +113,17 @@ class TfliteService {
   // Minimum gap between inference calls (~5 FPS on mid-range phones)
   static const int _kMinInferenceGapMs = 300; // ~3 FPS — stable on mid-range
 
-  // ── Pre-allocated nested spatial input [1][224][224][3] ─────────────────
+  // Pre-allocated nested spatial input [1][224][224][3] 
   // runForMultipleInputs infers tensor shape from List nesting depth.
   // A flat Float32List is treated as 1D [150528] → causes dims!=4 error.
   // Nested 4-level list correctly maps to [1, 224, 224, 3].
   // Allocated once in initialize(), filled in-place each frame.
   List<List<List<List<double>>>>? _spatialNested;
 
-  // ── Output buffer [1][12] ─────────────────────────────────────────────────
+  // Output buffer [1][12] 
   final List<List<double>> _outputBuf = [List<double>.filled(12, 0.0)];
 
-  // ── Temporal FIFO buffer [30][12] ────────────────────────────────────────
+  // Temporal FIFO buffer [30][12]
   final List<List<double>> _temporalBuf = List.generate(
     _kSeqLen,
     (_) => List<double>.filled(_kNumFeat, 0.0),
@@ -140,8 +131,7 @@ class TfliteService {
   );
   int _bufFill = 0;
 
-  // ── Initialize ────────────────────────────────────────────────────────────
-
+  // Initialize
   Future<bool> initialize() async {
     if (_isInitialized) return true;
     try {
@@ -191,8 +181,7 @@ class TfliteService {
     debugPrint('[TfliteService] disposed');
   }
 
-  // ── Main inference entry point ────────────────────────────────────────────
-
+  // Main inference entry point
   Future<InferenceResult?> runInference(CameraImage image) async {
     if (!_isInitialized || _interpreter == null) return null;
     if (_isRunning) return null;
@@ -202,7 +191,7 @@ class TfliteService {
 
     _isRunning = true;
     try {
-      // ── Step 1: Preprocess in background isolate ──────────────────────────
+      // Step 1: Preprocess in background isolate 
       // Note: CameraImage on Android always delivers in sensor orientation
       // (width = wider dimension). The resize handles any aspect ratio correctly.
       final prep = await compute(
@@ -222,7 +211,7 @@ class TfliteService {
       if (prep == null) return null;
       _lastInferenceMs = nowMs;
 
-      // ── Step 2: Fill nested spatial tensor in-place [1][224][224][3] ────────
+      // Step 2: Fill nested spatial tensor in-place [1][224][224][3]
       // tflite_flutter infers shape from List nesting — must be 4 levels deep.
       const h = 224, w = 224;
       final flat = prep.rgbNormalized;
@@ -237,14 +226,14 @@ class TfliteService {
         }
       }
 
-      // ── Step 3: Update temporal FIFO buffer ───────────────────────────────
+      // Step 3: Update temporal FIFO buffer
       _updateTemporalBuf(prep.features);
 
-      // ── Step 4: Wrap temporal as nested [1][30][12] ───────────────────────
+      // Step 4: Wrap temporal as nested [1][30][12]
       // tflite_flutter needs 3-level nesting for [1, 30, 12] shape.
       final temporalNested = [_temporalBuf]; // [1][30][12]
 
-      // ── Step 5: Run dual-input inference ─────────────────────────────────
+      // Step 5: Run dual-input inference
       // Input index order verified by binary inspection of model file:
       //   Index 0 → temporal_input [1, 30, 12]     (byte 164 in flatbuffer)
       //   Index 1 → spatial_input  [1, 224, 224, 3] (byte 196 in flatbuffer)
@@ -255,7 +244,7 @@ class TfliteService {
         <int, Object>{0: _outputBuf},
       );
 
-      // ── Step 6: Softmax check per spec ────────────────────────────────────
+      // Step 6: Softmax check per spec
       final rawOut = List<double>.from(_outputBuf[0]);
       final sum    = rawOut.fold(0.0, (a, b) => a + b);
       final probs  = (sum - 1.0).abs() > 0.01 ? _softmax(rawOut) : rawOut;
@@ -268,7 +257,7 @@ class TfliteService {
         '${kClassNames[indexed[1].key]}=${(indexed[1].value*100).toStringAsFixed(1)}% | '
         '${kClassNames[indexed[2].key]}=${(indexed[2].value*100).toStringAsFixed(1)}%');
 
-      // ── Step 7: Build result ──────────────────────────────────────────────
+      // Step 7: Build result
       return _buildResult(probs, prep.features[2]);
 
     } catch (e) {
@@ -279,8 +268,7 @@ class TfliteService {
     }
   }
 
-  // ── Temporal FIFO update ─────────────────────────────────────────────────
-
+  // Temporal FIFO update 
   void _updateTemporalBuf(List<double> features) {
     for (int i = 0; i < _kSeqLen - 1; i++) {
       for (int j = 0; j < _kNumFeat; j++) {
@@ -293,10 +281,9 @@ class TfliteService {
     if (_bufFill < _kSeqLen) _bufFill++;
   }
 
-  // ── Build InferenceResult ─────────────────────────────────────────────────
-
+  // Build InferenceResult 
   InferenceResult _buildResult(List<double> probs, double earAvg) {
-    // ── Aggregate group scores ────────────────────────────────────────────
+    // Aggregate group scores 
     // Log analysis shows: when sitting still, the model spreads ~80% across
     // ALL distracted classes (reaching 25%, radio 20%, smoking 15% etc.)
     // with no single winner. True distraction concentrates one class at >40%.
@@ -325,7 +312,7 @@ class TfliteService {
       }
     }
 
-    // ── Decision rules (tuned from logcat analysis) ──────────────────────
+    // Decision rules (tuned from logcat analysis)
     // When safe/neutral: model spreads ~80% across ALL distracted classes,
     // each getting 15-25% with no dominant winner.
     // True DROWSY:     3 classes pool → group easily hits 45%+
@@ -347,7 +334,7 @@ class TfliteService {
       bestIdx  = 0;
     }
 
-    // ── Debounce: soft decay ──────────────────────────────────────────────
+    // Debounce: soft decay 
     if (rawState != 'neutral') {
       _consecutiveUnsafe++;
     } else {
@@ -386,10 +373,7 @@ class TfliteService {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // BACKGROUND ISOLATE DATA CLASSES
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _PlaneData {
   final Uint8List bytes;
   final int       bytesPerRow;
@@ -427,10 +411,7 @@ class _PrepOutputV3 {
   });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // TOP-LEVEL PREPROCESSING — runs in compute() isolate
-// ─────────────────────────────────────────────────────────────────────────────
-
 _PrepOutputV3? _preprocessFrameV3(_PrepInput input) {
   try {
     final w = input.width;
@@ -443,7 +424,7 @@ _PrepOutputV3? _preprocessFrameV3(_PrepInput input) {
     final uvStride = input.planes[1].bytesPerRow;
     final uvPixel  = input.planes[1].bytesPerPixel;
 
-    // ── A: YUV420 → RGB (BT.601 integer math) ────────────────────────────────
+    // A: YUV420 → RGB (BT.601 integer math) 
     final rgb    = Uint8List(w * h * 3);
     int   outIdx = 0;
     for (int row = 0; row < h; row++) {
@@ -458,7 +439,7 @@ _PrepOutputV3? _preprocessFrameV3(_PrepInput input) {
       }
     }
 
-    // ── B: Resize to 224×224 + normalize to [-1.0, 1.0] ─────────────────────
+    //  B: Resize to 224×224 + normalize to [-1.0, 1.0] 
     // CRITICAL (per spec): (pixel / 127.5) - 1.0
     // Feeding raw [0,255] values will cause silent model failure.
     const dstW = 224, dstH = 224;
@@ -477,7 +458,7 @@ _PrepOutputV3? _preprocessFrameV3(_PrepInput input) {
       }
     }
 
-    // ── C: Extract 12 temporal features ──────────────────────────────────────
+    // C: Extract 12 temporal features
     final features = _extractFeaturesV3(normalized, dstW, dstH);
 
     return _PrepOutputV3(rgbNormalized: normalized, features: features);
@@ -487,114 +468,17 @@ _PrepOutputV3? _preprocessFrameV3(_PrepInput input) {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 12-FEATURE EXTRACTION
-// Features: [ear_l, ear_r, ear_avg, ear_min, mar, pitch, yaw, roll,
-//            gaze_l_x, gaze_l_y, gaze_r_x, gaze_r_y]
+// 12-FEATURE EXTRACTION — all-neutral baseline
 //
-// These are luminance-based PROXY values (no MediaPipe).
-// The 30-frame temporal buffer smooths single-frame noise.
-// Replace with real MediaPipe output for higher accuracy.
-// ─────────────────────────────────────────────────────────────────────────────
+// Luminance-based proxy values for EAR/MAR/pose/gaze introduced high noise
+// that the model misread as distraction (head turning, looking away) even on
+// a steady forward-facing driver due to uneven cabin lighting.
+//
+// Fix: feed neutral (0.0) for all 12 features. This matches the "resting
+// neutral driver looking straight ahead" in the training data and lets the
+// spatial branch (camera image) drive all detections without temporal noise.
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TEMPORAL FEATURE STRATEGY
-//
-// The model was trained with real MediaPipe landmarks. Luminance-based proxy
-// features for yaw/pitch/gaze introduce high noise that the model interprets
-// as distraction (head turning, looking away). This causes false positives
-// even when the driver is steady and looking forward.
-//
-// Strategy: Use neutral baseline values for pose/gaze features (0.0) so the
-// temporal branch stays quiet, and rely on the spatial branch (camera image)
-// for detection. EAR is retained as a proxy since it's more reliable.
-// This matches how a "resting" neutral driver looks in the training data.
-// ─────────────────────────────────────────────────────────────────────────────
+// ignore: avoid_unused_parameters
 List<double> _extractFeaturesV3(Float32List rgb, int w, int h) {
-  final midX  = w ~/ 2;
-  final pad   = w ~/ 8;
-  final eyeY0 = (h * 0.28).toInt();
-  final eyeY1 = (h * 0.48).toInt();
-
-  // EAR proxy — retained, relatively reliable from luminance
-  final leftBright  = _regionLumV3(rgb, pad,        eyeY0, midX - pad, eyeY1, w);
-  final rightBright = _regionLumV3(rgb, midX + pad, eyeY0, w - pad,    eyeY1, w);
-  final earL   = (leftBright  * 0.30 + 0.15).clamp(0.15, 0.45);
-  final earR   = (rightBright * 0.30 + 0.15).clamp(0.15, 0.45);
-  final earAvg = (earL + earR) / 2.0;
-  final earMin = math.min(earL, earR);
-
-  // MAR proxy — retained, mouth brightness is reasonably stable
-  final mouthBright = _regionLumV3(
-    rgb,
-    (w * 0.30).toInt(), (h * 0.62).toInt(),
-    (w * 0.70).toInt(), (h * 0.82).toInt(),
-    w,
-  );
-  final mar = ((1.0 - mouthBright) * 1.2).clamp(0.2, 1.0);
-
-  // Head pose and gaze: feed neutral (0.0) instead of noisy luminance proxy.
-  // Brightness asymmetry causes false yaw/pitch values (±10-20°) on a steady
-  // forward-facing driver due to uneven cabin lighting. The model treats this
-  // as head-turning distraction. Neutral (0.0) = looking straight ahead,
-  // which is correct for a seated driver in front of a dashboard-mounted camera.
-  const pitch  = 0.0;
-  const yaw    = 0.0;
-  const roll   = 0.0;
-  const gazeLx = 0.0;
-  const gazeLy = 0.0;
-  const gazeRx = 0.0;
-  const gazeRy = 0.0;
-
-  return [
-    earL, earR, earAvg, earMin,      // 0–3: eye openness (proxy)
-    mar,                              // 4:   mouth openness (proxy)
-    pitch, yaw, roll,                 // 5–7: head pose (neutral baseline)
-    gazeLx, gazeLy, gazeRx, gazeRy,  // 8–11: gaze direction (neutral baseline)
-  ];
-}
-
-// ── Luminance helpers (rgb is [-1,1] range) ───────────────────────────────────
-
-double _lumV3(Float32List rgb, int x, int y, int w) {
-  final i = (y * w + x) * 3;
-  // Shift [-1,1] → [0,1] before computing luminance
-  final r = (rgb[i]     + 1.0) / 2.0;
-  final g = (rgb[i + 1] + 1.0) / 2.0;
-  final b = (rgb[i + 2] + 1.0) / 2.0;
-  return 0.299 * r + 0.587 * g + 0.114 * b;
-}
-
-double _regionLumV3(Float32List rgb, int x0, int y0, int x1, int y1, int w) {
-  double sum   = 0;
-  int    count = 0;
-  for (int y = y0; y < y1; y += 2) {
-    for (int x = x0; x < x1; x += 2) {
-      sum += _lumV3(rgb, x, y, w);
-      count++;
-    }
-  }
-  return count > 0 ? sum / count : 0.5;
-}
-
-/// Brightness-weighted center of mass → approximate gaze direction.
-/// Returns (x, y) normalized to [-1.0, 1.0] within the eye region.
-(double, double) _gazeProxy(
-  Float32List rgb,
-  int x0, int y0, int x1, int y1,
-  int w,
-) {
-  double sumX = 0, sumY = 0, sumW = 0;
-  for (int y = y0; y < y1; y += 2) {
-    for (int x = x0; x < x1; x += 2) {
-      final lum = _lumV3(rgb, x, y, w);
-      sumX += x * lum;
-      sumY += y * lum;
-      sumW += lum;
-    }
-  }
-  if (sumW < 1e-8) return (0.0, 0.0);
-  final cx = (sumX / sumW - x0) / ((x1 - x0).toDouble()) * 2.0 - 1.0;
-  final cy = (sumY / sumW - y0) / ((y1 - y0).toDouble()) * 2.0 - 1.0;
-  return (cx.clamp(-1.0, 1.0), cy.clamp(-1.0, 1.0));
+  return List<double>.filled(_kNumFeat, 0.0);
 }

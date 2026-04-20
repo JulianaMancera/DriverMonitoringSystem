@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../utils/responsive.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:bantaydrive/core/preference/preference_helper.dart';
 
 /// Shows only on the very first app launch.
 /// Call [OnboardingScreen.markSeen] after the user completes it.
@@ -9,16 +9,13 @@ class OnboardingScreen extends StatefulWidget {
 
   const OnboardingScreen({super.key, required this.onComplete});
 
-  static const _prefKey = 'onboarding_complete';
 
   static Future<bool> hasBeenSeen() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_prefKey) ?? false;
+    return await PreferencesHelper.instance.getOnboardingSeen();
   }
 
   static Future<void> markSeen() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_prefKey, true);
+    await PreferencesHelper.instance.setOnboardingSeen(true);
   }
 
   @override
@@ -304,7 +301,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
   }
 }
 
-// ── Individual page data ───────────────────────────────────────────────────────
+// Individual page data 
 class _OnboardingPage {
   final IconData icon;
   final String title;
@@ -319,7 +316,7 @@ class _OnboardingPage {
   });
 }
 
-// ── Individual page widget ─────────────────────────────────────────────────────
+// Individual page widget 
 class _OnboardingPageWidget extends StatefulWidget {
   final _OnboardingPage page;
   const _OnboardingPageWidget({required this.page});
@@ -503,7 +500,7 @@ class _OnboardingPageWidgetState extends State<_OnboardingPageWidget>
   }
 }
 
-// ── Background grid painter ────────────────────────────────────────────────────
+// Background grid painter 
 class _OBGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {

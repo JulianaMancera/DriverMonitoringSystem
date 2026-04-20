@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 class SplashScreen extends StatefulWidget {
   final VoidCallback onComplete;
@@ -27,6 +28,9 @@ class _SplashScreenState extends State<SplashScreen>
   late Animation<double> _taglineOpacity;
   late Animation<double> _progressValue;
   late Animation<double> _exitOpacity;
+
+  // FIX: dynamic version field — fallback while PackageInfo loads
+  String _appVersion = 'v1.0.0';
 
   @override
   void initState() {
@@ -92,6 +96,11 @@ class _SplashScreenState extends State<SplashScreen>
       CurvedAnimation(parent: _exitCtrl, curve: Curves.easeIn),
     );
 
+    // FIX: load real version from pubspec before sequence starts
+    PackageInfo.fromPlatform().then((info) {
+      if (mounted) setState(() => _appVersion = 'v${info.version}');
+    });
+
     _runSequence();
   }
 
@@ -156,12 +165,12 @@ class _SplashScreenState extends State<SplashScreen>
               ),
             ),
 
-            // Main content 
+            // Main content
             Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Logo 
+                  // Logo
                   SlideTransition(
                     position: _logoSlide,
                     child: FadeTransition(
@@ -180,7 +189,7 @@ class _SplashScreenState extends State<SplashScreen>
                               color:         const Color(0xFF0D1627),
                               borderRadius:  BorderRadius.circular(16),
                               border: Border.all(
-                                color: const Color(0xFF00D4FF).withValues(alpha: 0.2), // Ln 187
+                                color: const Color(0xFF00D4FF).withValues(alpha: 0.2),
                                 width: 1,
                               ),
                             ),
@@ -238,7 +247,7 @@ class _SplashScreenState extends State<SplashScreen>
                             child: Text(
                               'DRIVE AWARE.  ARRIVE SAFE',
                               style: TextStyle(
-                                color:         Colors.white.withValues(alpha: 0.38), 
+                                color:         Colors.white.withValues(alpha: 0.38),
                                 fontSize:      11,
                                 fontWeight:    FontWeight.w500,
                                 letterSpacing: 3.5,
@@ -266,7 +275,7 @@ class _SplashScreenState extends State<SplashScreen>
                               child: LinearProgressIndicator(
                                 value:           _progressValue.value,
                                 minHeight:       2,
-                                backgroundColor: Colors.white.withValues(alpha: 0.08), 
+                                backgroundColor: Colors.white.withValues(alpha: 0.08),
                                 valueColor:
                                     const AlwaysStoppedAnimation<Color>(
                                         Color(0xFF00D4FF)),
@@ -277,7 +286,7 @@ class _SplashScreenState extends State<SplashScreen>
                           Text(
                             'Initializing systems...',
                             style: TextStyle(
-                              color:         Colors.white.withValues(alpha: 0.22), // Ln 284
+                              color:         Colors.white.withValues(alpha: 0.22),
                               fontSize:      11,
                               letterSpacing: 0.5,
                             ),
@@ -290,7 +299,6 @@ class _SplashScreenState extends State<SplashScreen>
               ),
             ),
 
-            // Version stamp
             Positioned(
               bottom: 14,
               left:   0,
@@ -298,7 +306,7 @@ class _SplashScreenState extends State<SplashScreen>
               child: FadeTransition(
                 opacity: _taglineOpacity,
                 child: Text(
-                  'v1.0.0',
+                  _appVersion,   // ← populated by PackageInfo, fallback 'v1.0.0'
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color:         Colors.white.withValues(alpha: 0.12),
@@ -320,7 +328,7 @@ class _GridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color       = Colors.white.withValues(alpha: 0.025) 
+      ..color       = Colors.white.withValues(alpha: 0.025)
       ..strokeWidth = 0.5;
     const spacing = 40.0;
     for (double x = 0; x < size.width; x += spacing) {

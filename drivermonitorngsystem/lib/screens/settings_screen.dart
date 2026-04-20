@@ -26,12 +26,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   static const Color _red           = Color(0xFFFF4757);
   static const Color _divider       = Color(0xFF1E2D45);
 
-  bool   _isLoading        = true;
-  double _alertVolume      = 0.8;
-  int    _alertSensitivity = 1;
-  bool   _autoStartEnabled = false;
-  String _retentionPeriod  = '30 days';
-  String _appVersion       = '';
+  bool   _isLoading           = true;
+  double _alertVolume         = 0.8;
+  int    _alertSensitivity    = 1;
+  bool   _autoStartEnabled    = false;
+  bool   _showSessionSummary  = true;
+  String _retentionPeriod     = '30 days';
+  String _appVersion          = '';
 
   StreamSubscription<double>? _volumeSubscription;
   final ScrollController _scrollController = ScrollController();
@@ -66,6 +67,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final prefs        = PreferencesHelper.instance;
     final sensitivity  = await prefs.getAlertSensitivity();
     final autoStart    = await prefs.getAutoStart();
+    final showSummary  = await prefs.getShowSessionSummary();
     final retention    = await prefs.getRetention();
     final systemVolume = await VolumeController.instance.getVolume();
     String version     = 'v1.0.0';
@@ -75,37 +77,37 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     } catch (_) {}
     if (mounted) {
       setState(() {
-        _alertVolume      = systemVolume;
-        _alertSensitivity = sensitivity;
-        _autoStartEnabled = autoStart;
-        _retentionPeriod  = retention;
-        _appVersion       = version;
-        _isLoading        = false;
+        _alertVolume        = systemVolume;
+        _alertSensitivity   = sensitivity;
+        _autoStartEnabled   = autoStart;
+        _showSessionSummary = showSummary;
+        _retentionPeriod    = retention;
+        _appVersion         = version;
+        _isLoading          = false;
       });
     }
   }
 
-    void _onAuthorsExpanded(bool expanded) {
-      if (!expanded) return;
-      final ctx = _authorsKey.currentContext;
-      if (ctx == null) return;
+  void _onAuthorsExpanded(bool expanded) {
+    if (!expanded) return;
+    final ctx = _authorsKey.currentContext;
+    if (ctx == null) return;
 
-      final renderBox = ctx.findRenderObject() as RenderBox?;
-      if (renderBox == null) return;
+    final renderBox = ctx.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
 
-      Future.delayed(const Duration(milliseconds: 320), () {
-        if (!mounted) return;
-        final renderObj = _authorsKey.currentContext?.findRenderObject() as RenderBox?;
-        if (renderObj == null) return;
-        final offset = renderObj.localToGlobal(Offset.zero);
-        _scrollController.animateTo(
-          _scrollController.offset + offset.dy - 100,
-          duration: const Duration(milliseconds: 400),
-          curve: Curves.easeInOut,
-        );
-      });
-    }
-
+    Future.delayed(const Duration(milliseconds: 320), () {
+      if (!mounted) return;
+      final renderObj = _authorsKey.currentContext?.findRenderObject() as RenderBox?;
+      if (renderObj == null) return;
+      final offset = renderObj.localToGlobal(Offset.zero);
+      _scrollController.animateTo(
+        _scrollController.offset + offset.dy - 100,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeInOut,
+      );
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -116,7 +118,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       );
     }
 
-    // Responsive horizontal padding — tighter on compact phones
     final hPad = context.rp(16).clamp(12.0, 20.0);
     final vPad = context.rs(12).clamp(8.0, 16.0);
 
@@ -153,6 +154,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ]),
           SizedBox(height: context.rs(24)),
+
           _sectionLabel('MONITORING SETTINGS'),
           _buildCard([
             _toggleTile(
@@ -165,8 +167,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 PreferencesHelper.instance.setAutoStart(v);
               },
             ),
+            _dividerLine(),
+            _toggleTile(
+              icon: Icons.summarize_rounded, iconColor: _cyan,
+              title: 'Show Session Summary',
+              subtitle: 'Display a summary after each drive session ends',
+              value: _showSessionSummary,
+              onChanged: (v) {
+                setState(() => _showSessionSummary = v);
+                PreferencesHelper.instance.setShowSessionSummary(v);
+              },
+            ),
           ]),
           SizedBox(height: context.rs(24)),
+
           _sectionLabel('DATA & PRIVACY'),
           _buildCard([
             _dropdownTile(
@@ -196,6 +210,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ]),
           SizedBox(height: context.rs(24)),
+
           _sectionLabel('ABOUT'),
           _buildCard([
             _infoTile(icon: Icons.school_rounded,
@@ -593,7 +608,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               Navigator.pop(dialogCtx);
               await DatabaseHelper.instance.clearAllData();
               ref.read(dbChangeCounterProvider.notifier).increment();
-              await PreferencesHelper.instance.setClearGlasses(false);
               if (context.mounted) {
                 _showSnackbar(context, 'All history cleared.', isError: false);
               }
