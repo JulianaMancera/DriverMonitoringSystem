@@ -11,7 +11,9 @@ import '../core/inference/tflite_service.dart';
 import '../core/providers.dart';
 import '../core/services/notifications.dart';
 import '../core/services/pip_service.dart';
+import '../core/services/head_pose_service.dart';
 import '../core/session_state.dart';
+import '../widgets/head_pose_indicator.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import '../utils/responsive.dart';
@@ -75,7 +77,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   bool _modelLoaded = false;
 
-  // LIFECYCLE 
+  // HEAD POSE — (roll in degrees, hasFace)
+  final ValueNotifier<(double, bool)> _headPose =
+      ValueNotifier((0.0, false));
+  CameraImage? _latestFrame;
+  Timer?       _headPoseTimer;
+  bool         _isHeadPoseRunning = false;
+
+  // LIFECYCLE
   @override
   void initState() {
     super.initState();
@@ -138,6 +147,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _warningController.dispose();
     _notifController?.dispose();
     _pipSubscription?.cancel();
+
+    _headPoseTimer?.cancel();
+    _headPoseTimer = null;
+    HeadPoseService.instance.dispose();
+    _headPose.dispose();
 
     _camDisposing = true;
     try {
@@ -276,6 +290,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   Future<void> _pauseCameraStream() async {
+    _stopHeadPoseUpdates();
     if (_cameraController == null || _camDisposing) return;
     try {
       if (_cameraController!.value.isStreamingImages) {
@@ -443,6 +458,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       if (!mounted || _camDisposing) return;
       setState(() { _cameraInitialized = true; _cameraError = null; });
 
+      HeadPoseService.instance.init(cam.sensorOrientation);
+      _startHeadPoseUpdates();
+
       _cameraController!.addListener(_onCameraValueChanged);
 
       if (_prefAutoStart) {
@@ -510,6 +528,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   // SESSION
   Future<void> _startRecording() async {
+    // Show camera-alignment guide on first use
+    final guideSeen = await PreferencesHelper.instance.getCameraGuideSeen();
+    if (!guideSeen && mounted) {
+      final proceed = await _showCameraGuide();
+      if (!proceed || !mounted) return;
+    }
+
     _currentSessionId      = await DatabaseHelper.instance.insertSession();
     await DatabaseHelper.instance.insertStateCount(_currentSessionId!);
     _sessionStartTime      = DateTime.now();
@@ -671,18 +696,61 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // INFERENCE
   bool _isInferring = false;
 
-  Future<void> _onCameraFrame(CameraImage frame) async {
-    if (_camDisposing) return;
-    if (_isInferring) return;
+  // Non-async so the camera system isn't blocked waiting for inference to finish.
+  void _onCameraFrame(CameraImage frame) {
+    _latestFrame = frame;
+    if (_camDisposing || _isInferring) return;
     if (!mounted || !ref.read(isRecordingProvider)) return;
     _isInferring = true;
-    try {
-      final result = await TfliteService.instance.runInference(frame);
-      if (result == null) return;
-      if (mounted && ref.read(isRecordingProvider)) onModelOutput(result);
-    } finally {
+    TfliteService.instance.runInference(frame).then((result) {
       _isInferring = false;
+      if (result != null && mounted && ref.read(isRecordingProvider)) {
+        onModelOutput(result);
+      }
+    }).catchError((_) { _isInferring = false; });
+  }
+
+  // HEAD POSE UPDATES ──────────────────────────────────────────────────────────
+
+  void _startHeadPoseUpdates() {
+    _headPoseTimer?.cancel();
+    _headPoseTimer = Timer.periodic(const Duration(milliseconds: 1000), (_) async {
+      final frame = _latestFrame;
+      if (frame == null || _isInferring || _isHeadPoseRunning || _camDisposing) return;
+      _isHeadPoseRunning = true;
+      try {
+        final result = await HeadPoseService.instance.detectPose(frame);
+        if (mounted) {
+          _headPose.value = (result?.roll ?? 0.0, result != null);
+        }
+      } finally {
+        _isHeadPoseRunning = false;
+      }
+    });
+  }
+
+  void _stopHeadPoseUpdates() {
+    _headPoseTimer?.cancel();
+    _headPoseTimer = null;
+    if (mounted) _headPose.value = (0.0, false);
+  }
+
+  bool _isInRedZone(double rollDeg, bool hasFace) {
+    if (!hasFace) return false;
+    return rollDeg.abs() >= 45.0;
+  }
+
+  Future<bool> _showCameraGuide() async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black54,
+      barrierDismissible: false,
+      builder: (_) => _CameraGuideDialog(headPose: _headPose),
+    );
+    if (result == true) {
+      await PreferencesHelper.instance.setCameraGuideSeen(true);
     }
+    return result == true;
   }
 
   void onModelOutput(InferenceResult r) {
@@ -1078,6 +1146,51 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                             color: Colors.white, fontSize: context.sp(9),
                             fontWeight: FontWeight.bold, letterSpacing: 0.8)),
                   ]),
+                ),
+              ),
+
+            // Head pose indicator — always visible when camera is active
+            if (!ref.watch(isInPipProvider) && _cameraInitialized && !_camDisposing)
+              Positioned(
+                bottom: context.rs(58),
+                right: context.rp(10),
+                child: ValueListenableBuilder<(double, bool)>(
+                  valueListenable: _headPose,
+                  builder: (_, pose, __) {
+                    final roll    = pose.$1;
+                    final hasFace = pose.$2;
+                    final inRed   = _isInRedZone(roll, hasFace);
+                    return Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        if (inRed)
+                          Container(
+                            margin: EdgeInsets.only(bottom: context.rs(4)),
+                            padding: EdgeInsets.symmetric(
+                                horizontal: context.rp(6), vertical: context.rs(3)),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFef4444).withValues(alpha: 0.92),
+                              borderRadius: BorderRadius.circular(context.rp(6)),
+                            ),
+                            child: Text(
+                              'Camera position not\nsuitable for detection',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: context.sp(8),
+                                  fontWeight: FontWeight.w600,
+                                  height: 1.3),
+                            ),
+                          ),
+                        HeadPoseIndicator(
+                          roll:    roll,
+                          hasFace: hasFace,
+                          size:    75,
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ),
 
@@ -1957,6 +2070,98 @@ class _AlertChip extends StatelessWidget {
                   fontSize: 14, fontWeight: FontWeight.w700)),
         ])),
       ]),
+    );
+  }
+}
+
+// ── Camera-alignment guide dialog ─────────────────────────────────────────────
+
+class _CameraGuideDialog extends StatelessWidget {
+  final ValueNotifier<(double, bool)> headPose;
+  const _CameraGuideDialog({required this.headPose});
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Align(
+            alignment: Alignment.topRight,
+            child: GestureDetector(
+              onTap: () => Navigator.of(context).pop(false),
+              child: Container(
+                width: 40, height: 40,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFe2e8f0), shape: BoxShape.circle),
+                child: const Icon(Icons.close, size: 20, color: Color(0xFF1e293b)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // Live tilt indicator
+          ValueListenableBuilder<(double, bool)>(
+            valueListenable: headPose,
+            builder: (_, pose, __) => HeadPoseIndicator(
+              roll:    pose.$1,
+              hasFace: pose.$2,
+              size:    170,
+            ),
+          ),
+          const SizedBox(height: 20),
+          // Guide card — border turns green when tilt is in green zone
+          ValueListenableBuilder<(double, bool)>(
+            valueListenable: headPose,
+            builder: (_, pose, __) {
+              final inGreen = pose.$2 && pose.$1.abs() < 20.0;
+              return Container(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: inGreen
+                        ? const Color(0xFF22c55e)
+                        : const Color(0xFFe2e8f0),
+                    width: 2.5,
+                  ),
+                ),
+                child: Column(children: [
+                  const Text(
+                    'Hold your phone upright and tilt it left or right '
+                    'until the camera icon is centered in the green zone.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Color(0xFF1e293b),
+                      height: 1.45,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF22c55e),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(24)),
+                      ),
+                      child: const Text('OK',
+                          style: TextStyle(
+                              fontSize: 15, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ]),
+              );
+            },
+          ),
+        ],
+      ),
     );
   }
 }

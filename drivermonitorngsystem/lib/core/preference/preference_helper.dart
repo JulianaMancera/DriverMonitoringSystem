@@ -35,6 +35,7 @@ class PreferencesHelper {
   static const String _keyClearGlasses       = 'clear_glasses';
   static const String _keyOnboardingSeen     = 'onboarding_seen';
   static const String _keyShowSessionSummary = 'show_session_summary';
+  static const String _keyCameraGuideSeen    = 'camera_guide_seen';
 
   // ALERT SETTINGS
 
@@ -141,6 +142,12 @@ class PreferencesHelper {
 
   Future<void> setOnboardingSeen(bool value) async =>
       (await _prefs()).setBool(_keyOnboardingSeen, value);
+
+  Future<bool> getCameraGuideSeen() async =>
+      (await _prefs()).getBool(_keyCameraGuideSeen) ?? false;
+
+  Future<void> setCameraGuideSeen(bool value) async =>
+      (await _prefs()).setBool(_keyCameraGuideSeen, value);
 
   // UTILITY
 
