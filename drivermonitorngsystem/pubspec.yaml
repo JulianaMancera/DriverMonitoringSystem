@@ -39,8 +39,7 @@ dependencies:
   # ML inference (TFLite — Android)
   tflite_flutter: ^0.12.1
 
-  # Notifications / Background
-  flutter_local_notifications: ^21.0.0
+  # Background task
   flutter_foreground_task: ^9.2.2
 
   # Device info

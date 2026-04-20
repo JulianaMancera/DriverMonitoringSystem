@@ -56,8 +56,7 @@ String modelSourceLabel(ModelSource src) => 'V3 HybridNet';
 // • When safe: distracted group ~75% spread across many classes (each 15-25%)
 // • True detection: ONE class dominates at 45%+, group > 70%
 // • Consecutive frames required: 5 to filter single-frame flickers
-const double _kConfidenceThreshold  = 0.30; // kept for soft debounce decay
-const int    _kConsecutiveThreshold = 5;    // 5 frames to confirm
+const int _kConsecutiveThreshold = 5; // 5 frames to confirm
 
 // Temporal buffer constants
 const int _kSeqLen  = 30; // 30-frame rolling window
