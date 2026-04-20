@@ -233,34 +233,6 @@ distributionUrl=https\://services.gradle.org/distributions/gradle-8.13-all.zip
 
 ---
 
-## 🔧 Android Permissions
-
-```xml
-<uses-permission android:name="android.permission.CAMERA"/>
-<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA"/>
-<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-    android:maxSdkVersion="29"/>
-<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-    android:maxSdkVersion="32"/>
-```
-
----
-
-## 🔮 Pending — 11-Class Model Integration
-
-When the final DMS-HybridNet model with 11 outputs is ready, activate the subclass UI by uncommenting **4 sections** in `monitor_screen.dart`:
-
-1. `activeSubclassProvider` — Riverpod provider for active subclass label
-2. Subclass mapping block in `onModelOutput()` — maps model index → subclass string
-3. `GestureDetector` wrappers on the Drowsiness and Distraction gauges — makes them tappable
-4. `_showSubclassModal()` method — bottom sheet showing active subclass + full subclass list
-
-Also update `tflite_service.dart` output shape from `[1, 3]` → `[1, 11]` and add the index-to-subclass mapping.
-
----
-
 ## 🎓 Thesis Context
 
 This app implements the mobile inference pipeline for **DMS-HybridNet**, a hybrid deep learning architecture combining:
@@ -284,8 +256,8 @@ This app implements the mobile inference pipeline for **DMS-HybridNet**, a hybri
 
 | Name | Role |
 |------|------|
-| Pia Katleya V. Macalanda | Model Training, Dataset Preparation, UI/UX Design, Researcher |
-| Juliana R. Mancera | System Developer, Model Integration, Testing & Deployment, Researcher |
+| Pia Katleya V. Macalanda | Machine Learning Engineer, Dataset Preparation, UI/UX Design, Researcher |
+| Juliana R. Mancera | Mobile App Developer, Model Integration, Testing & Deployment, Researcher |
 
 **Institution:** New Era University, College of Informatics and Computing Studies  
 **Program:** Bachelor of Science in Computer Science  
