@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
+import '../core/providers.dart';
 import '../utils/responsive.dart';
 
 // PROVIDER
@@ -69,16 +70,19 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 
   Widget _buildContent(BuildContext context, Map<String, dynamic> data) {
-    final safetyScore   = (data['safety_score']      as double? ?? 100.0)
+    final safetyScore       = (data['safety_score']      as double? ?? 100.0)
         .clamp(0.0, 100.0);
-    final totalDriveHrs = data['total_drive_hrs']    as double? ?? 0.0;
-    final alertsLast24h = data['alerts_last_24h']    as int?    ?? 0;
-    final safetyStreak  = data['safety_streak_days'] as int?    ?? 0;
-    final avgAlertness  = (data['avg_alertness_pct'] as double? ?? 100.0)
+    final totalDriveHrs     = data['total_drive_hrs']    as double? ?? 0.0;
+    final alertsLast24h     = data['alerts_last_24h']    as int?    ?? 0;
+    final safetyStreak      = data['safety_streak_days'] as int?    ?? 0;
+    final avgAlertness      = (data['avg_alertness_pct'] as double? ?? 100.0)
         .clamp(0.0, 100.0);
-    final dailyScores   = (data['daily_safety_scores'] as List?)
+    final dailyScores       = (data['daily_safety_scores'] as List?)
+        ?.cast<Map<String, dynamic>>() ?? [];
+    final alertnessSnapshots = (data['alertness_snapshots'] as List?)
         ?.cast<Map<String, dynamic>>() ?? [];
 
+    final bool isRecording    = ref.watch(isRecordingProvider);
     final bool hasAnySessions = dailyScores.isNotEmpty;
 
     String scoreLabel = 'EXCELLENT';
@@ -115,7 +119,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           ]),
 
           SizedBox(height: context.rs(24)),
-          _buildSafetyScoreHistory(context, dailyScores, hasAnySessions),
+          _buildSafetyScoreHistory(
+              context, dailyScores, hasAnySessions,
+              isRecording: isRecording,
+              alertnessSnapshots: alertnessSnapshots),
           SizedBox(height: context.rs(20)),
         ]),
       ),
@@ -346,8 +353,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Widget _buildSafetyScoreHistory(
     BuildContext context,
     List<Map<String, dynamic>> dailyScores,
-    bool hasAnySessions,
-  ) {
+    bool hasAnySessions, {
+    bool isRecording = false,
+    List<Map<String, dynamic>> alertnessSnapshots = const [],
+  }) {
     final List<FlSpot> spots   = [];
     final List<String> xLabels = [];
 
@@ -416,14 +425,21 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         Text(
           hasAnySessions
               ? 'Avg safety score per drive day · swipe to explore'
-              : 'Start your first session to begin tracking',
+              : isRecording
+                  ? 'Alertness % · updates every 5 s'
+                  : 'Start your first session to begin tracking',
           style: TextStyle(
               color: const Color(0xFF475569), fontSize: context.sp(12)),
         ),
 
         SizedBox(height: context.rs(16)),
 
-        if (!hasAnySessions)
+        if (!hasAnySessions && isRecording && alertnessSnapshots.isNotEmpty)
+          SizedBox(
+            height: context.rs(context.isSmallPhone ? 210 : 240),
+            child: _AlertnessSparkline(snapshots: alertnessSnapshots),
+          )
+        else if (!hasAnySessions)
           _buildEmptyChartState(context)
         else
           SizedBox(
@@ -652,6 +668,104 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
         ),
       ),
     );
+  }
+}
+
+// ── LIVE ALERTNESS SPARKLINE ──────────────────────────────────────────────────
+class _AlertnessSparkline extends StatelessWidget {
+  final List<Map<String, dynamic>> snapshots;
+  const _AlertnessSparkline({required this.snapshots});
+
+  @override
+  Widget build(BuildContext context) {
+    final spots = <FlSpot>[];
+    for (int i = 0; i < snapshots.length; i++) {
+      final v = (snapshots[i]['alertness_pct'] as num?)?.toDouble() ?? 0.0;
+      spots.add(FlSpot(i.toDouble(), v.clamp(0.0, 100.0)));
+    }
+
+    if (spots.isEmpty) return const SizedBox.shrink();
+
+    final maxX = (spots.length - 1).toDouble().clamp(1.0, double.infinity);
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Container(
+          width: 8, height: 8,
+          decoration: const BoxDecoration(
+              color: Color(0xFF10b981), shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 6),
+        Text('Live — current session  (${snapshots.length} snapshots)',
+            style: TextStyle(
+                color: const Color(0xFF10b981),
+                fontSize: context.sp(11),
+                fontWeight: FontWeight.w500)),
+      ]),
+      const SizedBox(height: 8),
+      Expanded(
+        child: LineChart(
+          LineChartData(
+            gridData: FlGridData(
+              show: true, drawVerticalLine: false,
+              horizontalInterval: 20,
+              getDrawingHorizontalLine: (_) => const FlLine(
+                  color: Color(0xFF1e293b), strokeWidth: 1),
+            ),
+            titlesData: FlTitlesData(
+              rightTitles:
+                  const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              topTitles:
+                  const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              bottomTitles:
+                  const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              leftTitles: AxisTitles(
+                sideTitles: SideTitles(
+                  showTitles: true,
+                  interval: 20,
+                  reservedSize: context.rp(36),
+                  getTitlesWidget: (value, _) {
+                    final v = value.toInt();
+                    if (v < 0 || v > 100 || v % 20 != 0) {
+                      return const SizedBox.shrink();
+                    }
+                    return Text('$v',
+                        style: TextStyle(
+                            color: const Color(0xFF64748b),
+                            fontSize: context.sp(10)));
+                  },
+                ),
+              ),
+            ),
+            borderData: FlBorderData(show: false),
+            minX: 0, maxX: maxX,
+            minY: 0, maxY: 112,
+            lineBarsData: [
+              LineChartBarData(
+                spots: spots,
+                isCurved: spots.length > 2,
+                curveSmoothness: 0.3,
+                color: const Color(0xFF10b981),
+                barWidth: 2.0,
+                isStrokeCapRound: true,
+                dotData: const FlDotData(show: false),
+                belowBarData: BarAreaData(
+                  show: true,
+                  gradient: LinearGradient(
+                    colors: [
+                      const Color(0xFF10b981).withValues(alpha: 0.20),
+                      const Color(0xFF10b981).withValues(alpha: 0.0),
+                    ],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ]);
   }
 }
 

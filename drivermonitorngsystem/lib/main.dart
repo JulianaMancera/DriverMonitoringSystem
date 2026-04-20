@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'core/database/database_helper.dart';
+import 'core/providers.dart';
 import 'core/services/notifications.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/monitor_screen.dart';

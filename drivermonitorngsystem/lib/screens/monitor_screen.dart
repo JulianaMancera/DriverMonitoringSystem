@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:camera/camera.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
 import '../core/inference/tflite_service.dart';
+import '../core/providers.dart';
 import '../core/services/notifications.dart';
 import '../core/services/pip_service.dart';
 import '../core/session_state.dart';
@@ -16,68 +18,6 @@ import '../utils/responsive.dart';
 
 // GLOBAL — allows stop from notification even during PiP
 _MonitorScreenState? _activeMonitorState;
-
-// PROVIDERS
-class _StringNotifier extends Notifier<String> {
-  final String _initial;
-  _StringNotifier(this._initial);
-  @override
-  String build() => _initial;
-  void set(String v) => state = v;
-}
-
-class _DoubleNotifier extends Notifier<double> {
-  final double _initial;
-  _DoubleNotifier(this._initial);
-  @override
-  double build() => _initial;
-  void set(double v) => state = v;
-}
-
-class _BoolNotifier extends Notifier<bool> {
-  final bool _initial;
-  _BoolNotifier(this._initial);
-  @override
-  bool build() => _initial;
-  void set(bool v) => state = v;
-  void toggle() => state = !state;
-}
-
-class _NullableStringNotifier extends Notifier<String?> {
-  @override
-  String? build() => null;
-  void set(String? v) => state = v;
-}
-
-class _IntNotifier extends Notifier<int> {
-  final int _initial;
-  _IntNotifier(this._initial);
-  @override
-  int build() => _initial;
-  void set(int v) => state = v;
-}
-
-final driverStateProvider = NotifierProvider<_StringNotifier, String>(
-    () => _StringNotifier('neutral'));
-final alertnessPctProvider = NotifierProvider<_DoubleNotifier, double>(
-    () => _DoubleNotifier(100.0));
-final drowsinessPctProvider = NotifierProvider<_DoubleNotifier, double>(
-    () => _DoubleNotifier(0.0));
-final distractionPctProvider = NotifierProvider<_DoubleNotifier, double>(
-    () => _DoubleNotifier(0.0));
-final isRecordingProvider = NotifierProvider<_BoolNotifier, bool>(
-    () => _BoolNotifier(false));
-final showAlertBannerProvider = NotifierProvider<_BoolNotifier, bool>(
-    () => _BoolNotifier(false));
-final alertBannerTypeProvider = NotifierProvider<_StringNotifier, String>(
-    () => _StringNotifier('DROWSY'));
-final isInPipProvider = NotifierProvider<_BoolNotifier, bool>(
-    () => _BoolNotifier(false));
-final activeSubclassProvider =
-    NotifierProvider<_NullableStringNotifier, String?>(
-        _NullableStringNotifier.new);
-final activeSubclassIndexProvider = NotifierProvider<_IntNotifier, int>(
-    () => _IntNotifier(0));
 
 // MONITOR SCREEN 
 class MonitorScreen extends ConsumerStatefulWidget {
@@ -133,9 +73,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     2: [2,  4,  6],
   };
 
-  bool     _modelLoaded  = false;
-  DateTime _lastInferTs  = DateTime.fromMillisecondsSinceEpoch(0);
-  static const int _kInferThrottleMs = 200;
+  bool _modelLoaded = false;
 
   // LIFECYCLE 
   @override
@@ -392,7 +330,90 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _prefAutoStart        = await prefs.getAutoStart();
     final success = await TfliteService.instance.initialize();
     if (mounted) setState(() => _modelLoaded = success);
+    if (!await _ensureCameraPermission()) return;
     await _initCamera();
+  }
+
+  Future<bool> _ensureCameraPermission() async {
+    var status = await Permission.camera.status;
+    if (status.isGranted) return true;
+
+    if (status.isPermanentlyDenied) {
+      if (mounted) _showPermDeniedDialog();
+      return false;
+    }
+
+    if (mounted) {
+      final proceed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          backgroundColor: const Color(0xFF0f172a),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16)),
+          title: const Text('Camera Access Needed',
+              style: TextStyle(color: Colors.white)),
+          content: const Text(
+            'Bantay Drive uses your camera to monitor driver alertness in real time. '
+            'Please grant camera access on the next screen.',
+            style: TextStyle(color: Color(0xFF94a3b8)),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Not Now',
+                  style: TextStyle(color: Color(0xFF64748b))),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Continue',
+                  style: TextStyle(color: Color(0xFF22d3ee))),
+            ),
+          ],
+        ),
+      );
+      if (proceed != true) return false;
+    }
+
+    status = await Permission.camera.request();
+    if (status.isGranted) return true;
+    if ((status.isDenied || status.isPermanentlyDenied) && mounted) {
+      _showPermDeniedDialog();
+    }
+    return false;
+  }
+
+  void _showPermDeniedDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF0f172a),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16)),
+        title: const Text('Camera Permission Required',
+            style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'Camera access was denied. Open Settings and enable the camera '
+          'permission for Bantay Drive to use monitoring.',
+          style: TextStyle(color: Color(0xFF94a3b8)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel',
+                style: TextStyle(color: Color(0xFF64748b))),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              openAppSettings();
+            },
+            child: const Text('Open Settings',
+                style: TextStyle(color: Color(0xFF22d3ee))),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _initCamera() async {
@@ -554,18 +575,23 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     final alerts =
         await DatabaseHelper.instance.getAlertsBySession(_currentSessionId!);
-    double penalty = 0.0;
+    double totalPenalty = 0.0;
     for (final a in alerts) {
       final level = (a['alert_level'] as int?) ?? 1;
       if (level == 1) {
-        penalty += 2.0;
+        totalPenalty += 2.0;
       } else if (level == 2) {
-        penalty += 4.0;
+        totalPenalty += 4.0;
       } else {
-        penalty += 8.0;
+        totalPenalty += 8.0;
       }
     }
-    final safetyScore = (alertness - penalty).clamp(0.0, 100.0);
+    // Normalise penalty by session length so short/long sessions are comparable.
+    const double normalizationFactor = 10.0;
+    final durationMin = durationSec > 0 ? durationSec / 60.0 : 1.0;
+    final penaltyPerMinute = totalPenalty / durationMin;
+    final safetyScore =
+        (100.0 - penaltyPerMinute * normalizationFactor).clamp(0.0, 100.0);
 
     await DatabaseHelper.instance.endSession(
       sessionId:    _currentSessionId!,
@@ -648,9 +674,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   Future<void> _onCameraFrame(CameraImage frame) async {
     if (_camDisposing) return;
     if (_isInferring) return;
-    final now = DateTime.now();
-    if (now.difference(_lastInferTs).inMilliseconds < _kInferThrottleMs) return;
-    _lastInferTs = now;
     if (!mounted || !ref.read(isRecordingProvider)) return;
     _isInferring = true;
     try {
@@ -765,6 +788,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     await DatabaseHelper.instance.insertAlertnessSnapshot(
         sessionId:    _currentSessionId!,
         alertnessPct: ref.read(alertnessPctProvider).clamp(0.0, 100.0));
+    if (mounted) ref.read(dbChangeCounterProvider.notifier).increment();
   }
 
   // BUILD

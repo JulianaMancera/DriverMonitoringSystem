@@ -52,7 +52,7 @@ class DatabaseHelper {
     final path = join(dbPath, fileName);
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _createTables,
       onUpgrade: _migrateDB,
     );
@@ -123,15 +123,29 @@ class DatabaseHelper {
         FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
       )
     ''');
+
+    // Indexes on timestamp columns to speed up date-range queries used by
+    // Analytics and Dashboard screens as session history grows.
+    await db.execute(
+        'CREATE INDEX idx_sessions_started ON sessions(started_at)');
+    await db.execute(
+        'CREATE INDEX idx_alerts_triggered ON alert_events(triggered_at)');
   }
 
   Future<void> _migrateDB(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      // Schema v2 added trip_label to sessions.
-      // Using try/catch because some devices may have already added this column
-      // manually during development.
       try {
         await db.execute("ALTER TABLE sessions ADD COLUMN trip_label TEXT");
+      } catch (_) {}
+    }
+    if (oldVersion < 3) {
+      try {
+        await db.execute(
+            'CREATE INDEX idx_sessions_started ON sessions(started_at)');
+      } catch (_) {}
+      try {
+        await db.execute(
+            'CREATE INDEX idx_alerts_triggered ON alert_events(triggered_at)');
       } catch (_) {}
     }
   }
