@@ -438,22 +438,36 @@ _PrepOutputV3? _preprocessFrameV3(_PrepInput input) {
       }
     }
 
-    //  B: Resize to 224×224 + normalize to [-1.0, 1.0] 
+    //  B: Resize to 224×224 (bilinear) + normalize to [-1.0, 1.0]
     // CRITICAL (per spec): (pixel / 127.5) - 1.0
     // Feeding raw [0,255] values will cause silent model failure.
     const dstW = 224, dstH = 224;
     final normalized = Float32List(dstW * dstH * 3);
-    final xScale     = w / dstW;
-    final yScale     = h / dstH;
+    final xScale     = (w - 1) / (dstW - 1);
+    final yScale     = (h - 1) / (dstH - 1);
     int   nIdx       = 0;
     for (int dr = 0; dr < dstH; dr++) {
-      final sr = (dr * yScale).toInt().clamp(0, h - 1);
+      final sy  = dr * yScale;
+      final sy0 = sy.toInt().clamp(0, h - 2);
+      final sy1 = sy0 + 1;
+      final fy  = sy - sy0;
+      final fy1 = 1.0 - fy;
       for (int dc = 0; dc < dstW; dc++) {
-        final sc  = (dc * xScale).toInt().clamp(0, w - 1);
-        final src = (sr * w + sc) * 3;
-        normalized[nIdx++] = (rgb[src    ] / 127.5) - 1.0;
-        normalized[nIdx++] = (rgb[src + 1] / 127.5) - 1.0;
-        normalized[nIdx++] = (rgb[src + 2] / 127.5) - 1.0;
+        final sx  = dc * xScale;
+        final sx0 = sx.toInt().clamp(0, w - 2);
+        final sx1 = sx0 + 1;
+        final fx  = sx - sx0;
+        final fx1 = 1.0 - fx;
+        // four corner indices in the flat rgb buffer
+        final i00 = (sy0 * w + sx0) * 3;
+        final i10 = (sy0 * w + sx1) * 3;
+        final i01 = (sy1 * w + sx0) * 3;
+        final i11 = (sy1 * w + sx1) * 3;
+        for (int c = 0; c < 3; c++) {
+          final v = fy1 * (fx1 * rgb[i00 + c] + fx * rgb[i10 + c]) +
+                    fy  * (fx1 * rgb[i01 + c] + fx * rgb[i11 + c]);
+          normalized[nIdx++] = (v / 127.5) - 1.0;
+        }
       }
     }
 
