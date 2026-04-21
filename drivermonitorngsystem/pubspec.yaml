@@ -45,6 +45,9 @@ dependencies:
   # Background task
   flutter_foreground_task: ^9.2.2
 
+  # Accelerometer (phone-tilt for camera-guide dialog)
+  sensors_plus: ^4.0.0
+
   # Device info
   device_info_plus: ^13.0.0
   url_launcher: ^6.3.0
@@ -67,3 +70,4 @@ flutter:
     - assets/L3_critical_alert.wav
     - assets/bantay_drive_logo.png
     - assets/models/dms_hybridnet_v3_float32.tflite
+    - assets/norm_params.json

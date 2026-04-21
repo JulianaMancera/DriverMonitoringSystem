@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,6 +17,7 @@ import '../core/session_state.dart';
 import '../widgets/head_pose_indicator.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:sensors_plus/sensors_plus.dart';
 import '../utils/responsive.dart';
 
 // GLOBAL — allows stop from notification even during PiP
@@ -83,6 +85,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   CameraImage? _latestFrame;
   Timer?       _headPoseTimer;
   bool         _isHeadPoseRunning = false;
+
+  // PHONE TILT — sensor-based roll for camera-guide dialog
+  final ValueNotifier<double> _phoneTilt = ValueNotifier(0.0);
+  StreamSubscription<AccelerometerEvent>? _accelSub;
 
   // LIFECYCLE
   @override
@@ -152,6 +158,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _headPoseTimer = null;
     HeadPoseService.instance.dispose();
     _headPose.dispose();
+    _accelSub?.cancel();
+    _accelSub = null;
+    _phoneTilt.dispose();
 
     _camDisposing = true;
     try {
@@ -461,6 +470,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       HeadPoseService.instance.init(cam.sensorOrientation);
       _startHeadPoseUpdates();
 
+      _accelSub?.cancel();
+      _accelSub = accelerometerEventStream().listen((event) {
+        final roll = math.atan2(event.x, event.z) * 180 / math.pi;
+        if (mounted) _phoneTilt.value = roll;
+      });
+
       _cameraController!.addListener(_onCameraValueChanged);
 
       if (_prefAutoStart) {
@@ -720,6 +735,24 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       _isHeadPoseRunning = true;
       try {
         final result = await HeadPoseService.instance.detectPose(frame);
+        if (result != null) {
+          debugPrint('[HeadPose] pitch=${result.pitch.toStringAsFixed(1)}° '
+              'yaw=${result.yaw.toStringAsFixed(1)}° '
+              'roll=${result.roll.toStringAsFixed(1)}° '
+              'earL=${result.earL.toStringAsFixed(3)} '
+              'earR=${result.earR.toStringAsFixed(3)} '
+              'mar=${result.mar.toStringAsFixed(3)}');
+          TfliteService.instance.updateFaceData(
+            earL:        result.earL,
+            earR:        result.earR,
+            mar:         result.mar,
+            pitch:       result.pitch,
+            yaw:         result.yaw,
+            rollEulerZ:  result.rawEulerZ,
+          );
+        } else {
+          debugPrint('[HeadPose] hasFace=false — no face detected');
+        }
         if (mounted) {
           _headPose.value = (result?.roll ?? 0.0, result != null);
         }
@@ -745,7 +778,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       context: context,
       barrierColor: Colors.black54,
       barrierDismissible: false,
-      builder: (_) => _CameraGuideDialog(headPose: _headPose),
+      builder: (_) => _CameraGuideDialog(phoneTilt: _phoneTilt),
     );
     if (result == true) {
       await PreferencesHelper.instance.setCameraGuideSeen(true);
@@ -2077,8 +2110,8 @@ class _AlertChip extends StatelessWidget {
 // ── Camera-alignment guide dialog ─────────────────────────────────────────────
 
 class _CameraGuideDialog extends StatelessWidget {
-  final ValueNotifier<(double, bool)> headPose;
-  const _CameraGuideDialog({required this.headPose});
+  final ValueNotifier<double> phoneTilt;
+  const _CameraGuideDialog({required this.phoneTilt});
 
   @override
   Widget build(BuildContext context) {
@@ -2101,21 +2134,21 @@ class _CameraGuideDialog extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          // Live tilt indicator
-          ValueListenableBuilder<(double, bool)>(
-            valueListenable: headPose,
-            builder: (_, pose, __) => HeadPoseIndicator(
-              roll:    pose.$1,
-              hasFace: pose.$2,
+          // Live tilt indicator — driven by accelerometer, not face roll
+          ValueListenableBuilder<double>(
+            valueListenable: phoneTilt,
+            builder: (_, roll, __) => HeadPoseIndicator(
+              roll:    roll,
+              hasFace: true,
               size:    170,
             ),
           ),
           const SizedBox(height: 20),
           // Guide card — border turns green when tilt is in green zone
-          ValueListenableBuilder<(double, bool)>(
-            valueListenable: headPose,
-            builder: (_, pose, __) {
-              final inGreen = pose.$2 && pose.$1.abs() < 20.0;
+          ValueListenableBuilder<double>(
+            valueListenable: phoneTilt,
+            builder: (_, roll, __) {
+              final inGreen = roll.abs() < 20.0;
               return Container(
                 padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
                 decoration: BoxDecoration(
