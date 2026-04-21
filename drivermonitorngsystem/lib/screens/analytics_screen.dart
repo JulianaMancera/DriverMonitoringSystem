@@ -630,7 +630,7 @@ class _BarCard extends StatelessWidget {
 }
 
 // ── STAT CARD ─────────────────────────────────────────────────────────────────
-class _StatCard extends StatefulWidget {
+class _StatCard extends StatelessWidget {
   final IconData icon;
   final String   label, value;
   final bool     positive;
@@ -640,15 +640,11 @@ class _StatCard extends StatefulWidget {
     required this.value, required this.positive,
     this.accentColor,
   });
-  @override
-  State<_StatCard> createState() => _StatCardState();
-}
 
-class _StatCardState extends State<_StatCard> {
   @override
   Widget build(BuildContext context) {
-    final dot = widget.accentColor ??
-        (widget.positive ? const Color(0xFF10b981) : const Color(0xFFfbbf24));
+    final dot = accentColor ??
+        (positive ? const Color(0xFF10b981) : const Color(0xFFfbbf24));
 
     return Container(
         clipBehavior: Clip.antiAlias,
@@ -668,7 +664,7 @@ class _StatCardState extends State<_StatCard> {
                 decoration: BoxDecoration(
                     color: const Color(0xFF1e293b),
                     borderRadius: BorderRadius.circular(context.rp(8))),
-                child: Icon(widget.icon,
+                child: Icon(icon,
                     size: context.ri(17),
                     color: const Color(0xFF22d3ee)),
               ),
@@ -685,13 +681,13 @@ class _StatCardState extends State<_StatCard> {
               ),
             ]),
             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(widget.value, style: TextStyle(
+              Text(value, style: TextStyle(
                 fontSize: context.sp(22),
                 fontWeight: FontWeight.bold,
                 color: const Color(0xFFe2e8f0),
               )),
               SizedBox(height: context.rs(3)),
-              Text(widget.label, style: TextStyle(
+              Text(label, style: TextStyle(
                 fontSize: context.sp(10),
                 color: const Color(0xFF64748b),
               ), maxLines: 2, overflow: TextOverflow.ellipsis),

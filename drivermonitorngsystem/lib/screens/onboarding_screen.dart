@@ -160,7 +160,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                                     text: 'BANTAY ',
                                     style: TextStyle(
                                       color: Colors.white,
-                                      fontSize: Responsive.responsiveFont(context, mobile: 13, tablet: 14, desktop: 15),
+                                      fontSize: context.sp(13),
                                       fontWeight: FontWeight.w700,
                                       letterSpacing: 2,
                                     ),
@@ -169,7 +169,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                                     text: 'DRIVE',
                                     style: TextStyle(
                                       color: Color(0xFF00D4FF),
-                                      fontSize: Responsive.responsiveFont(context, mobile: 13, tablet: 14, desktop: 15),
+                                      fontSize: context.sp(13),
                                       fontWeight: FontWeight.w700,
                                       letterSpacing: 2,
                                     ),
@@ -186,7 +186,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                               'Skip',
                               style: TextStyle(
                                 color: Colors.white.withValues(alpha: 0.35),
-                                fontSize: Responsive.responsiveFont(context, mobile: 14, tablet: 15, desktop: 16),
+                                fontSize: context.sp(14),
                                 letterSpacing: 0.5,
                               ),
                             ),
@@ -208,13 +208,8 @@ class _OnboardingScreenState extends State<OnboardingScreen>
 
                   // Dots + button
                   Builder(builder: (context) {
-                    const double bottomPad  = 40.0;
-                    const double btnHeight  = 54.0;
-                    const double dotSpacing = 28.0;
-                    const double btnWidth   = double.infinity;
-
                     return Padding(
-                      padding: EdgeInsets.fromLTRB(MediaQuery.of(context).size.width * 0.08, 0, MediaQuery.of(context).size.width * 0.08, bottomPad),
+                      padding: EdgeInsets.fromLTRB(MediaQuery.of(context).size.width * 0.08, 0, MediaQuery.of(context).size.width * 0.08, 40.0),
                       child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -237,10 +232,10 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                                     ),
                                   ),
                                 ),
-                                SizedBox(height: dotSpacing),
+                                const SizedBox(height: 28.0),
                                 SizedBox(
-                                  width:  btnWidth,
-                                  height: btnHeight,
+                                  width:  double.infinity,
+                                  height: 54.0,
                                   child: GestureDetector(
                                     onTap: _nextPage,
                                     child: AnimatedContainer(
@@ -268,7 +263,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                                                   : 'Get Started',
                                               style: TextStyle(
                                                 color: Color(0xFF080E1A),
-                                                fontSize: Responsive.responsiveFont(context, mobile: 16, tablet: 17, desktop: 18),
+                                                fontSize: context.sp(16),
                                                 fontWeight: FontWeight.w700,
                                                 letterSpacing: 0.5,
                                               ),
