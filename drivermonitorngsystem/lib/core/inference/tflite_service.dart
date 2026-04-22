@@ -5,13 +5,29 @@
 // PIPELINE:
 //   CameraImage (YUV420)
 //     → compute() isolate: YUV→RGB → resize → normalize [-1,1] → float32
-//     → Extract 20 base features (sentinel -999.0 until MediaPipe integrated)
+//     → Extract 20 base features from HeadPoseService data
 //     → Update 30-frame FIFO temporal buffer
 //     → Compute 5 window stats from buffer
 //     → Normalize all 25 features via norm_params.json
 //     → runForMultipleInputs (indices looked up by name, not hardcoded)
 //     → 3 outputs: behavior[1,13], parent[1,3], gaze[1,8]
-//     → debounce → InferenceResult
+//     → separate drowsy/distracted debounce → InferenceResult
+//
+// FIXES APPLIED (vs original):
+//   FIX 1 — Sentinel normalization: sentinel -999.0 values now map to 0.0
+//            (feature mean) instead of being normalized to extreme outliers
+//            like -83.0, which were the primary cause of false positives.
+//   FIX 2 — ear_min (feature index 3) is now populated from min(earL, earR).
+//            Previously left as sentinel, which degraded ear_avg_min window
+//            stat and therefore drowsy detection.
+//   FIX 3 — Separate drowsy/distracted debounce counters. Previously shared
+//            counter meant distracted signals (98.5% recall) constantly
+//            overwrote and reset drowsy accumulation (30.4% recall).
+//   FIX 4 — Lower drowsy debounce threshold (3 frames vs 5) to compensate
+//            for the model's weak drowsy recall per the integration guide.
+//   FIX 5 — Tighter decision thresholds: distraction requires bestDistScore
+//            >= 40% (was 30%) to prevent a single noisy class from triggering.
+//            Drowsy requires group >= 40% AND best class >= 20%.
 //
 // MODEL TENSORS (DMS-HybridNet V3.0):
 //   Input  "serving_default_temporal_input:0" [1, 30, 25]  float32
@@ -26,7 +42,7 @@ import 'package:flutter/services.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:camera/camera.dart';
 
-const String _kModelAsset     = 'assets/models/dms_hybridnet_v3_float32.tflite';
+const String _kModelAsset      = 'assets/models/dms_hybridnet_v3_float32.tflite';
 const String _kNormParamsAsset = 'assets/norm_params.json';
 
 // 13 behavior class names (index = model output index)
@@ -61,12 +77,17 @@ const double kMarYawnThresh = 0.5;
 enum ModelSource { v3 }
 String modelSourceLabel(ModelSource src) => 'V3 HybridNet';
 
-// Alert debounce: 5 consecutive unsafe frames required before alerting
-const int _kConsecutiveThreshold = 5;
+// Separate debounce thresholds for drowsy vs distracted.
+// Drowsy uses a lower threshold (3) to compensate for the model's weak
+// 30.4% recall — per the integration guide recommendation.
+// Distracted uses a higher threshold (5) because its 98.5% recall means
+// it fires easily, and we want more confirmation before alerting.
+const int _kDrowsyThreshold     = 3;
+const int _kDistractedThreshold = 5;
 
 // Temporal buffer dimensions
 const int _kSeqLen      = 30; // rolling window length
-const int _kNumBaseFeat = 20; // raw MediaPipe features per frame
+const int _kNumBaseFeat = 20; // raw face/pose features per frame
 const int _kNumFeat     = 25; // total features sent to model (20 base + 5 stats)
 
 // InferenceResult
@@ -111,10 +132,16 @@ class TfliteService {
   TfliteService._init();
 
   Interpreter? _interpreter;
-  bool _isInitialized    = false;
-  bool _isRunning        = false;
-  int  _lastInferenceMs  = 0;
-  int  _consecutiveUnsafe = 0;
+  bool _isInitialized   = false;
+  bool _isRunning       = false;
+  int  _lastInferenceMs = 0;
+
+  // FIX 3: Separate counters for drowsy and distracted debounce.
+  // Previously a single _consecutiveUnsafe counter meant high-recall
+  // distraction detections constantly reset the counter before drowsy
+  // could accumulate enough frames to confirm.
+  int _consecutiveDrowsy     = 0;
+  int _consecutiveDistracted = 0;
 
   // Input tensor indices — resolved by name in initialize(), never hardcoded.
   // Android TFLite runtime does NOT guarantee index order matches model file order.
@@ -134,11 +161,11 @@ class TfliteService {
   List<double> _normScale = [];
 
   // Latest face metrics from HeadPoseService — updated via updateFaceData().
-  double _faceEarL     = 0.0;
-  double _faceEarR     = 0.0;
-  double _faceMar      = 0.0;
-  double _facePitch    = 0.0;
-  double _faceYaw      = 0.0;
+  double _faceEarL       = 0.0;
+  double _faceEarR       = 0.0;
+  double _faceMar        = 0.0;
+  double _facePitch      = 0.0;
+  double _faceYaw        = 0.0;
   double _faceRollEulerZ = 0.0;
 
   void updateFaceData({
@@ -186,8 +213,8 @@ class TfliteService {
     if (_isInitialized) return true;
     try {
       // Load normalization parameters
-      final jsonStr   = await rootBundle.loadString(_kNormParamsAsset);
-      final normData  = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final jsonStr  = await rootBundle.loadString(_kNormParamsAsset);
+      final normData = jsonDecode(jsonStr) as Map<String, dynamic>;
       _normMean  = (normData['mean']  as List).map((v) => (v as num).toDouble()).toList();
       _normScale = (normData['scale'] as List).map((v) => (v as num).toDouble()).toList();
 
@@ -249,12 +276,13 @@ class TfliteService {
 
   void dispose() {
     _interpreter?.close();
-    _interpreter        = null;
-    _isInitialized      = false;
-    _isRunning          = false;
-    _bufFill            = 0;
-    _consecutiveUnsafe  = 0;
-    _lastInferenceMs    = 0;
+    _interpreter           = null;
+    _isInitialized         = false;
+    _isRunning             = false;
+    _bufFill               = 0;
+    _consecutiveDrowsy     = 0;
+    _consecutiveDistracted = 0;
+    _lastInferenceMs       = 0;
     debugPrint('[TfliteService] disposed');
   }
 
@@ -370,6 +398,11 @@ class TfliteService {
   // Build normalized [1][30][25] tensor from current buffer.
   // Window stats (features 20–24) are computed from the 30-frame window
   // and broadcast to every frame row before normalization.
+  //
+  // FIX 1: Sentinel values (-999.0) are now mapped to 0.0 (which equals
+  // the normalized feature mean) rather than being normalized through the
+  // formula, which would produce extreme outliers (e.g. -83.4 for pitch)
+  // that push the model strongly toward distraction classes.
   List<List<List<double>>> _buildTemporalInput() {
     final stats = _computeWindowStats(); // [earMean, earMin, marMax, marAbove, earTrend]
 
@@ -384,12 +417,21 @@ class TfliteService {
     return [
       List.generate(_kSeqLen, (t) {
         final frame = List<double>.filled(_kNumFeat, 0.0);
-        // Normalize 20 base features: (raw - mean) / (scale + ε)
+
+        // FIX 1: Normalize 20 base features, but map sentinel → 0.0.
+        // 0.0 is the z-score of the feature mean, so it represents
+        // "no information / average value" rather than a wild outlier.
         for (int f = 0; f < _kNumBaseFeat; f++) {
-          frame[f] = (_temporalBuf[t][f] - _normMean[f]) /
-              (_normScale[f] + 1e-8);
+          final raw = _temporalBuf[t][f];
+          if (raw == kSentinel) {
+            frame[f] = 0.0; // neutral / "missing data"
+          } else {
+            frame[f] = (raw - _normMean[f]) / (_normScale[f] + 1e-8);
+          }
         }
-        // Normalize 5 window stats (same value for every frame in the sequence)
+
+        // Normalize 5 window stats (same value for every frame in the sequence).
+        // Stats are computed only from non-sentinel values so they are always valid.
         for (int f = 0; f < 5; f++) {
           frame[_kNumBaseFeat + f] =
               (stats[f] - _normMean[_kNumBaseFeat + f]) /
@@ -468,7 +510,17 @@ class TfliteService {
     if (_bufFill < _kSeqLen) _bufFill++;
   }
 
-  // Build InferenceResult with debounce
+  // Build InferenceResult with separate debounce per state.
+  //
+  // FIX 3+4: Separate _consecutiveDrowsy and _consecutiveDistracted counters
+  // with different thresholds (3 vs 5). Previously one shared counter meant
+  // that distracted (98.5% recall) constantly won and drowsy could never
+  // accumulate enough consecutive frames to be confirmed.
+  //
+  // FIX 5: Tighter decision thresholds per the integration guide:
+  //   - Drowsy:     group >= 40% AND best class >= 20%
+  //   - Distracted: group >= 60% AND best class >= 40%
+  // (Old: drowsy >= 30% no per-class check; distracted >= 55% && best >= 30%)
   InferenceResult _buildResult(
     List<double> probs,
     double earAvg,
@@ -497,31 +549,68 @@ class TfliteService {
       }
     }
 
-    // Decision thresholds — strict to minimise false positives in demo context.
-    // DROWSY recall is low (30.4%); threshold intentionally kept at 45% group.
+    // FIX 5: Tighter decision thresholds.
+    //
+    // DROWSY: The integration guide explicitly warns that drowsy recall is 30.4%.
+    // We use group >= 40% AND best-class >= 20% to avoid purely noisy triggers,
+    // while still being sensitive enough that the weak model can fire.
+    //
+    // DISTRACTED: High recall (98.5%) means it fires easily. Raising bestDistScore
+    // to >= 40% ensures a single class genuinely dominates before we alert, which
+    // eliminates false positives where probability is split evenly across classes.
     String rawState;
-    int    bestIdx;
-    if (drowsyPct >= 30.0) {
-      rawState = 'drowsy';
-      bestIdx  = bestDrowsyIdx;
-    } else if (distractedPct >= 55.0 && bestDistScore >= 30.0) {
-      rawState = 'distracted';
-      bestIdx  = bestDistIdx;
+    int    rawBestIdx;
+    if (drowsyPct >= 40.0 && bestDrowsyScore >= 20.0) {
+      rawState   = 'drowsy';
+      rawBestIdx = bestDrowsyIdx;
+    } else if (distractedPct >= 60.0 && bestDistScore >= 40.0) {
+      rawState   = 'distracted';
+      rawBestIdx = bestDistIdx;
     } else {
-      rawState = 'neutral';
-      bestIdx  = 0;
+      rawState   = 'neutral';
+      rawBestIdx = 0;
     }
 
-    // Soft-decay debounce
-    if (rawState != 'neutral') {
-      _consecutiveUnsafe++;
+    // FIX 3: Update separate counters — each state accumulates independently.
+    // A drowsy frame no longer resets the distracted counter and vice versa.
+    // Neutral frames soft-decay both counters by 1 each.
+    if (rawState == 'drowsy') {
+      _consecutiveDrowsy++;
+      _consecutiveDistracted = (_consecutiveDistracted - 1).clamp(0, 9999);
+    } else if (rawState == 'distracted') {
+      _consecutiveDistracted++;
+      _consecutiveDrowsy = (_consecutiveDrowsy - 1).clamp(0, 9999);
     } else {
-      _consecutiveUnsafe = (_consecutiveUnsafe - 1).clamp(0, 9999);
+      // Neutral: decay both
+      _consecutiveDrowsy     = (_consecutiveDrowsy     - 1).clamp(0, 9999);
+      _consecutiveDistracted = (_consecutiveDistracted - 1).clamp(0, 9999);
     }
 
-    final confirmed   = _consecutiveUnsafe >= _kConsecutiveThreshold;
-    final outputState = confirmed ? rawState : 'neutral';
-    final outputIdx   = confirmed ? bestIdx  : 0;
+    // FIX 4: Apply separate thresholds.
+    // Drowsy threshold is intentionally lower (3) because the model struggles
+    // to produce sustained drowsy signals — we need to confirm sooner.
+    final bool drowsyConfirmed     = _consecutiveDrowsy     >= _kDrowsyThreshold;
+    final bool distractedConfirmed = _consecutiveDistracted >= _kDistractedThreshold;
+
+    // When both are confirmed simultaneously (rare edge case), drowsy takes
+    // priority because it is the more critical safety risk.
+    String outputState;
+    int    outputIdx;
+    if (rawState == 'drowsy' && drowsyConfirmed) {
+      outputState = 'drowsy';
+      outputIdx   = rawBestIdx;
+    } else if (rawState == 'distracted' && distractedConfirmed) {
+      outputState = 'distracted';
+      outputIdx   = rawBestIdx;
+    } else {
+      outputState = 'neutral';
+      outputIdx   = 0;
+    }
+
+    debugPrint('[Debounce] '
+        'drowsy=$_consecutiveDrowsy/$_kDrowsyThreshold '
+        'distracted=$_consecutiveDistracted/$_kDistractedThreshold '
+        'raw=$rawState → out=$outputState');
 
     return InferenceResult(
       state:         outputState,
@@ -594,7 +683,11 @@ class _PrepOutputV3 {
   final Float32List rgbNormalized;
 
   // 20 raw base features [ear_l … mouth_occluded].
-  // Indices 0–17: kSentinel (-999.0) until MediaPipe is integrated.
+  // Indices using sentinel (-999.0): gaze_l_x/y, gaze_r_x/y, wrist positions,
+  // shoulder positions — not available from ML Kit alone.
+  // Indices 0–3 (ear_l, ear_r, ear_avg, ear_min): populated from HeadPoseService.
+  // Index 4 (mar): populated from HeadPoseService.
+  // Indices 10–12 (pitch, yaw, roll): populated from HeadPoseService.
   // Indices 18 (hand_near_face) and 19 (mouth_occluded): always 0.0.
   final List<double> features;
 
@@ -675,22 +768,39 @@ _PrepOutputV3? _preprocessFrameV3(_PrepInput input) {
 }
 
 // 20-FEATURE EXTRACTION
-// Populates features from HeadPoseService data passed through _PrepInput.
-// Indices 3, 5-9, 13-17 remain sentinel — not available without MediaPipe body pose.
-// Indices 18-19 (hand_near_face, mouth_occluded) always 0.0.
+//
+// Populates as many features as possible from HeadPoseService data.
+// Unavailable features (gaze iris, wrist positions, shoulder) remain as
+// sentinel (-999.0) — these are safely handled in _buildTemporalInput()
+// by mapping to 0.0 instead of normalizing to extreme outliers.
+//
+// FIX 2: ear_min (index 3) is now populated as min(earL, earR).
+// Previously it was left as sentinel, which degraded the ear_avg_min
+// window stat (feature 21) — the primary per-window drowsy signal.
 List<double> _extractFeaturesV3(_PrepInput input) {
   final features = List<double>.filled(20, kSentinel);
-  features[18] = 0.0; // hand_near_face
-  features[19] = 0.0; // mouth_occluded
+  features[18] = 0.0; // hand_near_face — always 0 (no MediaPipe Hands)
+  features[19] = 0.0; // mouth_occluded — always 0 (no MediaPipe Hands)
 
   final earAvg = (input.earL + input.earR) / 2.0;
-  features[0]  = input.earL;       // ear_l
-  features[1]  = input.earR;       // ear_r
-  features[2]  = earAvg;           // ear_avg
-  features[4]  = input.mar;        // mar
-  features[10] = input.pitch;      // pitch
-  features[11] = input.yaw;        // yaw
-  features[12] = input.rollEulerZ; // roll
+
+  features[0]  = input.earL;                         // ear_l
+  features[1]  = input.earR;                         // ear_r
+  features[2]  = earAvg;                             // ear_avg
+  features[3]  = math.min(input.earL, input.earR);  // FIX 2: ear_min — was sentinel
+  features[4]  = input.mar;                          // mar
+
+  // Head pose angles from ML Kit eulerAngle — mapped to training feature order:
+  //   index 5 → pitch  (eulerAngleX: + = looking down)
+  //   index 6 → yaw    (eulerAngleY: + = turning right)
+  //   index 7 → roll   (eulerAngleZ, raw value fed to model)
+  features[5]  = input.pitch;      // pitch
+  features[6]  = input.yaw;        // yaw
+  features[7]  = input.rollEulerZ; // roll
+
+  // Features 8–9   (gaze_l_x, gaze_l_y):   sentinel — no iris tracking
+  // Features 10–11 (gaze_r_x, gaze_r_y):   sentinel — no iris tracking
+  // Features 12–17 (wrist x/y, shoulder):  sentinel — no MediaPipe Pose
 
   return features;
 }

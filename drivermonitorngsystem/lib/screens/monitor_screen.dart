@@ -23,7 +23,7 @@ import '../utils/responsive.dart';
 // GLOBAL — allows stop from notification even during PiP
 _MonitorScreenState? _activeMonitorState;
 
-// MONITOR SCREEN 
+// MONITOR SCREEN
 class MonitorScreen extends ConsumerStatefulWidget {
   const MonitorScreen({super.key});
   @override
@@ -80,13 +80,23 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   bool _modelLoaded = false;
 
   // HEAD POSE — (roll in degrees, hasFace)
+  // roll here is the driver's face/head roll for the indicator gauge only.
+  // It is NOT used for the camera-position warning (see FIX 6 below).
   final ValueNotifier<(double, bool)> _headPose =
       ValueNotifier((0.0, false));
   CameraImage? _latestFrame;
   Timer?       _headPoseTimer;
   bool         _isHeadPoseRunning = false;
 
-  // PHONE TILT — sensor-based roll for camera-guide dialog
+  // PHONE TILT — accelerometer-based roll for camera-guide dialog AND
+  // the camera-position warning overlay.
+  //
+  // FIX 6: Previously _isInRedZone() used the face/head roll from HeadPoseService
+  // to decide whether to show "Camera position not suitable for detection".
+  // This caused the warning to appear whenever the driver simply tilted their
+  // head (e.g. checking mirrors), which is normal driving behaviour.
+  // The phone's physical tilt is the correct signal for camera positioning —
+  // if the phone itself is tilted > 45°, it's mounted poorly.
   final ValueNotifier<double> _phoneTilt = ValueNotifier(0.0);
   StreamSubscription<AccelerometerEvent>? _accelSub;
 
@@ -472,6 +482,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
       _accelSub?.cancel();
       _accelSub = accelerometerEventStream().listen((event) {
+        // Compute phone physical roll from accelerometer.
+        // atan2(x, z) gives roll angle: 0° = portrait upright,
+        // ±90° = landscape, ±180° = upside down.
         final roll = math.atan2(event.x, event.z) * 180 / math.pi;
         if (mounted) _phoneTilt.value = roll;
       });
@@ -725,8 +738,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }).catchError((_) { _isInferring = false; });
   }
 
-  // HEAD POSE UPDATES ──────────────────────────────────────────────────────────
-
+  // HEAD POSE UPDATES
   void _startHeadPoseUpdates() {
     _headPoseTimer?.cancel();
     _headPoseTimer = Timer.periodic(const Duration(milliseconds: 1000), (_) async {
@@ -743,12 +755,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               'earR=${result.earR.toStringAsFixed(3)} '
               'mar=${result.mar.toStringAsFixed(3)}');
           TfliteService.instance.updateFaceData(
-            earL:        result.earL,
-            earR:        result.earR,
-            mar:         result.mar,
-            pitch:       result.pitch,
-            yaw:         result.yaw,
-            rollEulerZ:  result.rawEulerZ,
+            earL:       result.earL,
+            earR:       result.earR,
+            mar:        result.mar,
+            pitch:      result.pitch,
+            yaw:        result.yaw,
+            rollEulerZ: result.rawEulerZ,
           );
         } else {
           debugPrint('[HeadPose] hasFace=false — no face detected');
@@ -768,9 +780,20 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (mounted) _headPose.value = (0.0, false);
   }
 
+  // FIX 6: _isInRedZone is now only used for the HeadPoseIndicator gauge
+  // colour (to tint it red when face roll is extreme). It is NO LONGER used
+  // for the "Camera position not suitable" warning banner — that banner is now
+  // driven by _phoneTilt (phone physical tilt from accelerometer), not face roll.
   bool _isInRedZone(double rollDeg, bool hasFace) {
     if (!hasFace) return false;
     return rollDeg.abs() >= 45.0;
+  }
+
+  // Returns true when the phone is physically tilted badly for camera mounting.
+  // Threshold: > 45° from portrait-upright means the camera will have a very
+  // skewed view of the driver's face, degrading landmark detection.
+  bool _isCameraAngleBad(double phoneTiltDeg) {
+    return phoneTiltDeg.abs() >= 45.0;
   }
 
   Future<bool> _showCameraGuide() async {
@@ -1064,7 +1087,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       },
     );
 
-  // CAMERA CHILD — ML Kit face box overlay removed
+  // CAMERA CHILD
   Widget _buildCameraChild(double camW, double camH) {
     final ctrl = _cameraController;
     final canShow = _cameraInitialized &&
@@ -1182,46 +1205,69 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 ),
               ),
 
-            // Head pose indicator — always visible when camera is active
+            // ─── HEAD POSE INDICATOR + CAMERA POSITION WARNING ────────────
+            //
+            // FIX 6: The camera-position warning ("Camera position not suitable
+            // for detection") is now driven by _phoneTilt (the phone's physical
+            // tilt from the accelerometer) rather than the driver's head/face roll.
+            //
+            // Previously, _isInRedZone() used face roll, so the warning fired
+            // every time the driver tilted their head to check mirrors or look
+            // sideways — normal driving behaviour that should NOT trigger a warning.
+            //
+            // The HeadPoseIndicator gauge still shows face roll (so the driver
+            // can see their head angle), but the warning text only appears when
+            // the phone itself is physically tilted beyond 45°, which means the
+            // camera is genuinely poorly positioned.
             if (!ref.watch(isInPipProvider) && _cameraInitialized && !_camDisposing)
               Positioned(
                 bottom: context.rs(58),
                 right: context.rp(10),
-                child: ValueListenableBuilder<(double, bool)>(
-                  valueListenable: _headPose,
-                  builder: (_, pose, __) {
-                    final roll    = pose.$1;
-                    final hasFace = pose.$2;
-                    final inRed   = _isInRedZone(roll, hasFace);
-                    return Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        if (inRed)
-                          Container(
-                            margin: EdgeInsets.only(bottom: context.rs(4)),
-                            padding: EdgeInsets.symmetric(
-                                horizontal: context.rp(6), vertical: context.rs(3)),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFef4444).withValues(alpha: 0.92),
-                              borderRadius: BorderRadius.circular(context.rp(6)),
+                child: ValueListenableBuilder<double>(
+                  // Outer builder: phone physical tilt → drives the warning banner
+                  valueListenable: _phoneTilt,
+                  builder: (_, phoneTiltDeg, __) {
+                    final badCameraAngle = _isCameraAngleBad(phoneTiltDeg);
+                    return ValueListenableBuilder<(double, bool)>(
+                      // Inner builder: face roll → drives the gauge indicator only
+                      valueListenable: _headPose,
+                      builder: (_, pose, __) {
+                        final faceRoll = pose.$1;
+                        final hasFace  = pose.$2;
+                        return Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            // Warning shown when PHONE is badly tilted,
+                            // not when driver tilts head.
+                            if (badCameraAngle)
+                              Container(
+                                margin: EdgeInsets.only(bottom: context.rs(4)),
+                                padding: EdgeInsets.symmetric(
+                                    horizontal: context.rp(6), vertical: context.rs(3)),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFef4444).withValues(alpha: 0.92),
+                                  borderRadius: BorderRadius.circular(context.rp(6)),
+                                ),
+                                child: Text(
+                                  'Camera position not\nsuitable for detection',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: context.sp(8),
+                                      fontWeight: FontWeight.w600,
+                                      height: 1.3),
+                                ),
+                              ),
+                            // Gauge shows face roll as before
+                            HeadPoseIndicator(
+                              roll:    faceRoll,
+                              hasFace: hasFace,
+                              size:    75,
                             ),
-                            child: Text(
-                              'Camera position not\nsuitable for detection',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: context.sp(8),
-                                  fontWeight: FontWeight.w600,
-                                  height: 1.3),
-                            ),
-                          ),
-                        HeadPoseIndicator(
-                          roll:    roll,
-                          hasFace: hasFace,
-                          size:    75,
-                        ),
-                      ],
+                          ],
+                        );
+                      },
                     );
                   },
                 ),
@@ -2134,7 +2180,7 @@ class _CameraGuideDialog extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          // Live tilt indicator — driven by accelerometer, not face roll
+          // Live tilt indicator — driven by accelerometer (phone tilt, not face roll)
           ValueListenableBuilder<double>(
             valueListenable: phoneTilt,
             builder: (_, roll, __) => HeadPoseIndicator(
