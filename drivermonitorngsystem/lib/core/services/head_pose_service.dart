@@ -4,18 +4,38 @@ import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 
+// ── HeadPoseResult ─────────────────────────────────────────────────────────────
+// Extended with real EAR and MAR for drowsiness detection.
+//
+// EAR (Eye Aspect Ratio) — derived from ML Kit eye open probability:
+//   earL/earR = prob × 0.35 + 0.05
+//   Wide open (prob=1.0): EAR ≈ 0.40
+//   Drowsy    (prob=0.5): EAR ≈ 0.225
+//   Closed    (prob=0.0): EAR ≈ 0.05
+//
+// MAR (Mouth Aspect Ratio) — from mouth landmarks:
+//   Normal closed: MAR < 0.3
+//   Yawning:       MAR > 0.5
+//
 class HeadPoseResult {
-  final double normalizedX; // -1 (left) to +1 (right) — face center offset in frame
-  final double normalizedY; // -1 (top)  to +1 (bottom)
-  final double pitch;       // eulerX: + = looking down
-  final double yaw;         // eulerY: + = turning right
-  final double roll;        // eulerZ (degrees): + = face tilts right / camera tilts left
+  final double normalizedX;
+  final double normalizedY;
+  final double pitch;
+  final double yaw;
+  final double roll;
+  final double earL;
+  final double earR;
+  final double mar;
+
   const HeadPoseResult({
     required this.normalizedX,
     required this.normalizedY,
     required this.pitch,
     required this.yaw,
     required this.roll,
+    required this.earL,
+    required this.earR,
+    required this.mar,
   });
 }
 
@@ -27,9 +47,8 @@ class HeadPoseService {
   bool _isRunning = false;
   InputImageRotation _rotation = InputImageRotation.rotation270deg;
 
-  // EMA smoothing — reduces jitter so the indicator stays consistent
   double _smoothedRoll = 0.0;
-  static const double _alpha = 0.5; // 0 = frozen, 1 = raw. 0.5 = fast enough for camera tilt
+  static const double _alpha = 0.5;
 
   void init(int sensorOrientation) {
     _smoothedRoll = 0.0;
@@ -37,10 +56,10 @@ class HeadPoseService {
     _detector?.close();
     _detector = FaceDetector(
       options: FaceDetectorOptions(
-        performanceMode: FaceDetectorMode.fast,
-        enableClassification: false,
-        enableLandmarks: true,
-        enableTracking: false,
+        performanceMode:      FaceDetectorMode.fast,
+        enableClassification: true,  // REQUIRED for leftEyeOpenProbability/rightEyeOpenProbability
+        enableLandmarks:      true,  // REQUIRED for mouth landmarks (MAR)
+        enableTracking:       false,
       ),
     );
   }
@@ -56,11 +75,11 @@ class HeadPoseService {
     _isRunning = true;
     try {
       final nv21 = await compute(_toNv21, _Nv21Input(
-        yBytes:       image.planes[0].bytes,
-        uBytes:       image.planes[1].bytes,
-        vBytes:       image.planes[2].bytes,
-        yRowStride:   image.planes[0].bytesPerRow,
-        uvRowStride:  image.planes[1].bytesPerRow,
+        yBytes:        image.planes[0].bytes,
+        uBytes:        image.planes[1].bytes,
+        vBytes:        image.planes[2].bytes,
+        yRowStride:    image.planes[0].bytesPerRow,
+        uvRowStride:   image.planes[1].bytesPerRow,
         uvPixelStride: image.planes[1].bytesPerPixel ?? 1,
         width:  image.width,
         height: image.height,
@@ -69,9 +88,9 @@ class HeadPoseService {
       final inputImage = InputImage.fromBytes(
         bytes: nv21,
         metadata: InputImageMetadata(
-          size:       Size(image.width.toDouble(), image.height.toDouble()),
-          rotation:   _rotation,
-          format:     InputImageFormat.nv21,
+          size:        Size(image.width.toDouble(), image.height.toDouble()),
+          rotation:    _rotation,
+          format:      InputImageFormat.nv21,
           bytesPerRow: image.width,
         ),
       );
@@ -79,28 +98,68 @@ class HeadPoseService {
       final faces = await _detector!.processImage(inputImage);
       if (faces.isEmpty) return null;
 
-      final face   = faces.first;
-      final box    = face.boundingBox;
-      final cx     = box.left + box.width  / 2;
-      final cy     = box.top  + box.height / 2;
-      // Normalize to [-1, 1] relative to frame center
-      final nx = ((cx / image.width)  * 2 - 1).clamp(-1.0, 1.0);
-      final ny = ((cy / image.height) * 2 - 1).clamp(-1.0, 1.0);
+      final face = faces.first;
+      final box  = face.boundingBox;
+      final cx   = box.left + box.width  / 2;
+      final cy   = box.top  + box.height / 2;
+      final nx   = ((cx / image.width)  * 2 - 1).clamp(-1.0, 1.0);
+      final ny   = ((cy / image.height) * 2 - 1).clamp(-1.0, 1.0);
 
-      // Prefer eye-landmark geometry — eulerAngleZ in fast mode is unreliable.
-      // In ML Kit's corrected image space, dy/dx between eyes directly gives tilt.
+      // ── Roll from eye landmark geometry ────────────────────────────────────
       final leftEye  = face.landmarks[FaceLandmarkType.leftEye];
       final rightEye = face.landmarks[FaceLandmarkType.rightEye];
       double rawRoll;
       if (leftEye != null && rightEye != null) {
         final dx = (rightEye.position.x - leftEye.position.x).toDouble();
         final dy = (rightEye.position.y - leftEye.position.y).toDouble();
-        // Image y-axis points down, so negate dy for standard angle convention.
         rawRoll = math.atan2(-dy, dx) * 180 / math.pi;
       } else {
         rawRoll = face.headEulerAngleZ ?? 0.0;
       }
       _smoothedRoll = _alpha * rawRoll + (1 - _alpha) * _smoothedRoll;
+
+      // ── EAR from eye open probability ──────────────────────────────────────
+      // enableClassification=true gives us leftEyeOpenProbability and
+      // rightEyeOpenProbability (range 0.0 closed → 1.0 open).
+      // Map to EAR scale: EAR = prob × 0.35 + 0.05
+      //   Wide open (1.0) → 0.40   Drowsy (0.5) → 0.225   Closed (0.0) → 0.05
+      final leftProb  = (face.leftEyeOpenProbability  ?? 1.0).clamp(0.0, 1.0);
+      final rightProb = (face.rightEyeOpenProbability ?? 1.0).clamp(0.0, 1.0);
+      final earL = leftProb  * 0.35 + 0.05;
+      final earR = rightProb * 0.35 + 0.05;
+
+      // ── MAR from mouth landmarks ───────────────────────────────────────────
+      // ML Kit provides MOUTH_LEFT, MOUTH_RIGHT, BOTTOM_MOUTH, NOSE_BASE.
+      // MAR = vertical_opening / horizontal_width
+      // Closed mouth: MAR < 0.3 | Yawning: MAR > 0.5
+      double mar = 0.0;
+      final mouthLeft   = face.landmarks[FaceLandmarkType.leftMouth];
+      final mouthRight  = face.landmarks[FaceLandmarkType.rightMouth];
+      final mouthBottom = face.landmarks[FaceLandmarkType.bottomMouth];
+      final noseBase    = face.landmarks[FaceLandmarkType.noseBase];
+
+      if (mouthLeft != null && mouthRight != null && mouthBottom != null) {
+        final mouthW = (mouthRight.position.x - mouthLeft.position.x).abs().toDouble();
+        if (mouthW > 1.0) {
+          final mouthMidY = (mouthLeft.position.y + mouthRight.position.y) / 2.0;
+          double upperY;
+          if (noseBase != null) {
+            // Use midpoint between nose base and mouth corners as upper anchor
+            upperY = (noseBase.position.y.toDouble() + mouthMidY) / 2.0;
+          } else {
+            // Fallback: use mouth corners midpoint directly
+            upperY = mouthMidY;
+          }
+          final vertical = (mouthBottom.position.y.toDouble() - upperY).abs();
+          mar = (vertical / mouthW).clamp(0.0, 2.0);
+        }
+      }
+
+      debugPrint('[HeadPose] '
+          'yaw=${face.headEulerAngleY?.toStringAsFixed(1)}° '
+          'roll=${_smoothedRoll.toStringAsFixed(1)}° '
+          'earL=${earL.toStringAsFixed(3)} earR=${earR.toStringAsFixed(3)} '
+          'mar=${mar.toStringAsFixed(3)}');
 
       return HeadPoseResult(
         normalizedX: nx,
@@ -108,6 +167,9 @@ class HeadPoseService {
         pitch: face.headEulerAngleX ?? 0.0,
         yaw:   face.headEulerAngleY ?? 0.0,
         roll:  _smoothedRoll,
+        earL:  earL,
+        earR:  earR,
+        mar:   mar,
       );
     } catch (e) {
       debugPrint('[HeadPoseService] $e');
@@ -148,12 +210,10 @@ Uint8List _toNv21(_Nv21Input i) {
   final w = i.width, h = i.height;
   final nv21 = Uint8List(w * h * 3 ~/ 2);
 
-  // Y plane — copy row by row to skip padding
   for (int row = 0; row < h; row++) {
     nv21.setRange(row * w, (row + 1) * w, i.yBytes, row * i.yRowStride);
   }
 
-  // VU interleaved (NV21 = Y + V/U pairs)
   int offset = w * h;
   for (int row = 0; row < h ~/ 2; row++) {
     for (int col = 0; col < w ~/ 2; col++) {

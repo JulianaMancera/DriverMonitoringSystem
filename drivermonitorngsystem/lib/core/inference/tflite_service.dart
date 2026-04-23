@@ -3,42 +3,32 @@
 //   Produces an InferenceResult with the driver's current state.
 //
 // CAMERA MOUNT GEOMETRY:
-//   Phone is mounted to the RIGHT of the driver, front camera faces left
-//   toward the driver. From ML Kit's perspective the driver's face is
-//   turned RIGHTWARD (toward camera) → positive eulerAngleY.
-//   Therefore kSideMountYawOffset = +30.0 (was -30.0 — sign was inverted).
+//   Phone mounted to the RIGHT of the driver at 30–45° angle.
+//   Front camera faces left toward the driver's face.
+//   At this angle ML Kit eulerAngleY (yaw) ≈ +30° to +45° for a driver
+//   looking straight ahead at the road.
+//   kSideMountYawOffset = +35.0 (midpoint of 30–45° range).
 //
-// FIXES IN THIS VERSION (on top of previous fixes):
-//   FIX A — kSideMountYawOffset changed from -30.0 to +30.0.
-//            The old -30 meant "expect face at -30° yaw (turned LEFT)".
-//            For a right-side-mounted camera the face is actually turned
-//            RIGHT (+30°), so the offset sign was backwards. This was the
-//            primary cause of the wiper indicator being on the wrong side
-//            and of the yaw-based safe-zone gate mis-classifying normal
-//            forward-facing driving as distracted.
+// ROOT CAUSE OF "DETECTION NOT WORKING" (all screenshots showed 0%):
+//   The previous version had gates that were TOO STRICT:
+//   - _kDistractedThreshold = 22 frames × 200 ms = 4.4 seconds continuous
+//   - _kStableSubclassMin   = 12 frames = same class for 2.4 s before counting
+//   - distractedPct gate    = 78% (model rarely outputs this high from side angle)
+//   - farLeftVeto at -20°   was vetoing all normal forward-driving detections
+//   These combined made detection practically impossible.
 //
-//   FIX B — driverLookingAtRoad threshold widened from ±20° to ±30°.
-//            Since the driver naturally has ~30° yaw deviation even when
-//            looking at the road, the old ±20° window was almost never
-//            satisfied, defeating the safe-zone gate entirely.
-//
-//   FIX C — _kDistractedThreshold raised from 12 to 16.
-//            More consecutive frames required before confirming distraction.
-//            This, combined with FIX A, should stop nonstop false positives.
-//
-//   FIX D — _kStableSubclassMin raised from 6 to 8.
-//            More frames of the SAME subclass required before confirming.
-//
-//   FIX E — Per-class thresholds tuned for right-side mount.
-//            Classes that were most prone to false positives from the
-//            rotated camera angle now require higher individual scores.
-//
-//   FIX F — Head pose indicator disappearing on re-record.
-//            HeadPoseService.instance.dispose() was called in widget dispose
-//            but the indicator was only started on camera init, not on each
-//            _startRecording(). The fix is in monitor_screen.dart which now
-//            always calls _startHeadPoseUpdates() when starting a session.
-//            The TfliteService itself now also resets face data in resetSession().
+// STRATEGY FOR RIGHT-SIDE MOUNT (30–45°):
+//   1. The roll angle (eulerZ) affects the CIRCLE UI only — NOT detection logic.
+//      Detection is based on yaw (face left/right) and the model's class probs.
+//   2. Drowsy: EAR/MAR are angle-invariant → keep sensitive, fast response.
+//   3. Distracted: Use a 2-stage approach:
+//      Stage 1 — high confidence, triggers quickly (15 frames / ~3 s)
+//      Stage 2 — moderate confidence, requires more stability (20 frames / ~4 s)
+//   4. Yaw compensation: subtract mount offset so the model sees ~0 for
+//      driver looking straight, negative for looking left, positive for right.
+//   5. Remove the aggressive far-left veto — at 35° mount, the driver's face
+//      pointing at the road IS slightly to the left of camera center, and that
+//      is EXACTLY when we need to detect eyes-closed / yawning / phone use.
 
 import 'dart:math' as math;
 import 'dart:convert';
@@ -47,125 +37,167 @@ import 'package:flutter/services.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:camera/camera.dart';
 
-const String _kModelAsset = 'assets/models/dms_hybridnet_v3_float32.tflite';
-const String _kNormParamsAsset = 'assets/norm_params.json';
+const String _kModelAsset       = 'assets/models/dms_hybridnet_v3_float32.tflite';
+const String _kNormParamsAsset  = 'assets/norm_params.json';
 
 // 13 behavior class names (index = model output index)
 const List<String> kClassNames = [
-  'safe_driving', // 0  → NATURAL
-  'talking_passenger', // 1  → NATURAL
-  'distracted_texting', // 2  → DISTRACTED
-  'distracted_phone', // 3  → DISTRACTED
-  'distracted_radio', // 4  → DISTRACTED
-  'distracted_drinking', // 5  → DISTRACTED
-  'distracted_body', // 6  → DISTRACTED
-  'distracted_grooming', // 7  → DISTRACTED
-  'distracted_smoking', // 8  → DISTRACTED
-  'drowsy_yawning', // 9  → DROWSY
-  'drowsy_yawning_occluded', // 10 → DROWSY
-  'drowsy_fatigue', // 11 → DROWSY
-  'drowsy_microsleep', // 12 → DROWSY
+  'safe_driving',             // 0  → NATURAL
+  'talking_passenger',        // 1  → NATURAL
+  'distracted_texting',       // 2  → DISTRACTED
+  'distracted_phone',         // 3  → DISTRACTED
+  'distracted_radio',         // 4  → DISTRACTED
+  'distracted_drinking',      // 5  → DISTRACTED
+  'distracted_body',          // 6  → DISTRACTED
+  'distracted_grooming',      // 7  → DISTRACTED
+  'distracted_smoking',       // 8  → DISTRACTED
+  'drowsy_yawning',           // 9  → DROWSY
+  'drowsy_yawning_occluded',  // 10 → DROWSY
+  'drowsy_fatigue',           // 11 → DROWSY
+  'drowsy_microsleep',        // 12 → DROWSY
 ];
 
 const List<String> kParentNames = ['NATURAL', 'DISTRACTED', 'DROWSY'];
 
 const List<String> kGazeZones = [
-  'ROAD',
-  'LAP',
-  'LEFT',
-  'LEFT_MIRROR',
-  'RIGHT',
-  'RIGHT_MIRROR',
-  'STEERING',
-  'NOT_VALID',
+  'ROAD', 'LAP', 'LEFT', 'LEFT_MIRROR',
+  'RIGHT', 'RIGHT_MIRROR', 'STEERING', 'NOT_VALID',
 ];
 
-const double kSentinel = -999.0;
+const double kSentinel      = -999.0;
 const double kMarYawnThresh = 0.5;
 
 enum ModelSource { v3 }
-
 String modelSourceLabel(ModelSource src) => 'V3 HybridNet';
 
-const int _kDrowsyThreshold = 3;
-// FIX C: Raised from 12 to 16 — require more consecutive frames before
-// confirming distraction. Combined with the corrected yaw offset this
-// eliminates the nonstop false distraction alerts.
-const int _kDistractedThreshold = 16;
+// ══════════════════════════════════════════════════════════════════════════════
+// TUNED CONSTANTS — RIGHT SIDE MOUNT 30–45°
+// ══════════════════════════════════════════════════════════════════════════════
 
-// ─── DATASET-SPECIFIC THRESHOLDS ───────────────────────────────────────────
-// These thresholds are hardcoded based on behavioral patterns from:
-//   - Drowsy: MRL Eye, YawDD, UTA-RLDD datasets
-//   - Distracted: State Farm Distracted Driver Detection dataset
+// Mount offset: midpoint of 30–45° range. Compensated yaw ≈ 0 when
+// driver looks straight ahead. Negative = looking left (toward road center).
+// Positive = looking right (toward window, likely distracted).
+const double kSideMountYawOffset = 35.0;
+
+// Yaw gate: driver is "on road" if |compensatedYaw| ≤ this value.
+// At 35° mount, normal driving yaw variance is ±15°, so ±25° gives headroom.
+const double _kOnRoadYawGate = 25.0;
+
+// ── Drowsy thresholds ────────────────────────────────────────────────────────
+// NOW WITH REAL EAR/MAR from head_pose_service.dart (enableClassification=true).
 //
-// Each value represents the minimum model confidence (as %) for that specific
-// behavior class to be considered a valid detection.
+// EAR values:  wide open=0.40, normal=0.25-0.35, drowsy=0.15-0.22, closed=0.05
+// MAR values:  closed=0.0-0.3, yawning=0.5-1.2
+//
+// With real EAR, the model's temporal buffer will show EAR DECREASING over
+// time when driver gets drowsy — the earTrend feature becomes meaningful.
+// Lower the gates to catch early drowsiness signals.
+//
+// 4 frames × 200ms = 0.8s — fast response for safety.
+const int    _kDrowsyThreshold  = 4;
+const double _kDrowsyPctGate    = 18.0; // lower — real EAR gives stronger signal
+const double _kDrowsyBestScore  =  8.0;
+
+// ── Distracted thresholds — THREE-STAGE (calibrated to session 109 output) ───
+//
+// ROOT CAUSE OF CONTINUED FAILURE (session 109):
+//   distPct peaked at only 46–56% even for obvious actions (grooming 41–48%).
+//   Gates of 65% (stage 2) and 85% (stage 1) are NEVER reachable for this model
+//   from the 35° side-mount angle.
+//
+// ACTUAL MODEL OUTPUT RANGES (from session 109 logs):
+//   Normal driving:     distPct  5–15%,  bestClass  2–9%
+//   Mild distraction:   distPct 15–35%,  bestClass 10–24%
+//   Clear distraction:  distPct 35–56%,  bestClass 25–48%
+//
+// THREE-STAGE based on actual signal levels:
+//   Stage 1 HIGH    distPct ≥ 40%,  bestClass ≥ 25% →  6 frames (~1.2s)
+//   Stage 2 MOD     distPct ≥ 22%,  bestClass ≥ 12% → 12 frames (~2.4s)
+//   Stage 3 LOW     distPct ≥ 15%,  bestClass ≥  8% → 22 frames (~4.4s)
+//
+// Stage 1 fires without parent model agreement (model is clearly confident).
+// Stages 2 and 3 require parent model agreement.
+//
+const double _kDistPctHigh    = 40.0;
+const double _kDistBestHigh   = 25.0;
+const int    _kDistThreshHigh =  6;   // 1.2s
+
+const double _kDistPctMod     = 22.0;
+const double _kDistBestMod    = 12.0;
+const int    _kDistThreshMod  = 12;   // 2.4s
+
+const double _kDistPctLow     = 15.0;
+const double _kDistBestLow    =  8.0;
+const int    _kDistThreshLow  = 22;   // 4.4s
+
+// Subclass stability: 2 frames of same class before counting starts.
+// With lower gates, brief noise spikes are handled by the consecutive counter.
+const int _kStableSubclassMin = 2;
+
+// ── Per-class minimum confidence thresholds ──────────────────────────────────
+//
+// GROOMING FALSE POSITIVE FIX (session 111/112 analysis):
+//   distracted_grooming fires constantly during safe driving:
+//   - Normal driving baseline: grooming 2–27% (very wide noise floor!)
+//   - Actual grooming action:  grooming 40–97%
+//
+//   ROOT CAUSE: From 35° side mount, glasses + hair partially occlude the face,
+//   making it look like "hand near face" to the model — same visual signature as
+//   grooming. This is a geometry artifact of the side-mount angle.
+//
+//   FIX 1: Raise grooming threshold from 8% → 35%.
+//     Observed false-positive baseline peaks at ~27%. Real grooming peaks at 40%+.
+//     Setting 35% puts us above the noise but below real detections.
+//
+//   FIX 2: Add grooming dominance check in detection logic (see below).
+//     If grooming wins but radio/texting are within 15% of it, it's likely noise.
+//     Real grooming dominates clearly (60–100% vs others <10%).
+//
+// Other classes tuned from session logs:
+//   radio:   noise ~8–18% during side-mount normal driving → raise to 25%
+//   texting: noise ~5–15% → raise to 20%
+//   phone:   noise ~5–10% → raise to 15%
+//
 const Map<int, double> _kBehaviorClassThresholds = {
-  // Neutral classes (no detection needed)
-  0: 50.0, // safe_driving
-  1: 40.0, // talking_passenger
+  // Neutral
+  0:  40.0, // safe_driving
+  1:  15.0, // talking_passenger
 
-  // Distracted classes (State Farm dataset)
-  2: 50.0, // distracted_texting (was 55, phone glances are high confidence)
-  3: 35.0, // distracted_phone (was 30, raised to distinguish from talking)
-  4: 45.0, // distracted_radio (was 50, lower for quick glances)
-  5: 35.0, // distracted_drinking (was 30, hand-near-face key signal)
-  6: 70.0, // distracted_body (was 75, catch-all FP class - keep high)
-  7: 55.0, // distracted_grooming (was 60, hand-to-face rapid movements)
-  8: 30.0, // distracted_smoking (was 35, distinctive hand-to-mouth pattern)
+  // Distracted — thresholds set well above observed noise floor
+  2:  20.0, // distracted_texting      ↑ from 5  — noise ~5–15%
+  3:  15.0, // distracted_phone        ↑ from 5  — noise ~5–10%
+  4:  25.0, // distracted_radio        ↑ from 8  — noise ~8–18%
+  5:   5.0, // distracted_drinking     — very distinctive, almost no noise
+  6:  50.0, // distracted_body         — catch-all, keep high
+  7:  35.0, // distracted_grooming     ↑ from 8  — noise ~2–27%, real ~40%+
+  8:   5.0, // distracted_smoking      — hand-to-mouth, almost no noise
 
-  // Drowsy classes (MRL Eye, YawDD, UTA-RLDD datasets)
-  9: 25.0, // drowsy_yawning (MAR spike - distinctive)
-  10: 30.0, // drowsy_yawning_occluded (harder to detect - higher threshold)
-  11: 20.0, // drowsy_fatigue (EAR trend gradual - lower threshold)
-  12: 35.0, // drowsy_microsleep (PERCLOS >= 80% - most critical)
+  // Drowsy — EAR/MAR carry the weight after head_pose_service fix
+  9:   6.0, // drowsy_yawning
+  10:  8.0, // drowsy_yawning_occluded
+  11:  5.0, // drowsy_fatigue
+  12: 12.0, // drowsy_microsleep
 };
 
-const int _kSeqLen = 30;
-const int _kNumBaseFeat = 20;
-const int _kNumFeat = 25;
+// Inference gap: 200ms = 5fps inference, camera preview unaffected.
+const int _kMinInferenceGapMs = 200;
 
-// FIX A: Changed from -30.0 to +30.0.
-//
-// GEOMETRY EXPLANATION:
-//   The phone is mounted to the RIGHT of the driver. The front-facing camera
-//   looks LEFT toward the driver's face. From the camera's perspective, the
-//   driver's face is ROTATED RIGHTWARD (toward the camera), which ML Kit
-//   reports as a POSITIVE eulerAngleY (yaw).
-//
-//   With the phone at ~30–35° to the right:
-//     - Driver looking straight ahead → ML Kit yaw ≈ +30°
-//     - Driver looking left (away from cam) → yaw decreases toward 0° or negative
-//     - Driver looking right (toward cam) → yaw increases above +30°
-//
-//   Setting offset = +30.0 means:
-//     compensatedYaw = yaw - 30.0
-//     → 0 when driver looks straight (correct neutral baseline)
-//     → negative when driver looks left (away from cam)
-//     → positive when driver looks right (toward cam / distracted)
-//
-//   The old value of -30.0 was computing:
-//     compensatedYaw = yaw - (-30.0) = yaw + 30.0
-//     → +60 when driver looks straight → always flagged as distracted!
-const double kSideMountYawOffset = 30.0; // FIX A: was -30.0
-
-// Old FIX E is now superseded by _kBehaviorClassThresholds above.
-// Keeping comment for git history: Per-class thresholds now unified in single map.
+// ══════════════════════════════════════════════════════════════════════════════
 
 // InferenceResult
 class InferenceResult {
   final String state;
   final String subclass;
-  final int subclassIndex;
+  final int    subclassIndex;
 
   final double neutralPct;
   final double drowsyPct;
   final double distractedPct;
 
   final List<double> fullProbs;
-  final ModelSource modelSource;
-  final double earAvg;
-  final bool t02Active;
+  final ModelSource  modelSource;
+  final double       earAvg;
+  final bool         t02Active;
 
   final int parentClass;
   final int gazeZone;
@@ -188,41 +220,42 @@ class InferenceResult {
   });
 }
 
+// TfliteService ───────────────────────────────────────────────────────────────
 class TfliteService {
   static final TfliteService instance = TfliteService._init();
   TfliteService._init();
 
   Interpreter? _interpreter;
-  bool _isInitialized = false;
-  bool _isRunning = false;
-  int _lastInferenceMs = 0;
+  bool _isInitialized    = false;
+  bool _isRunning        = false;
+  int  _lastInferenceMs  = 0;
 
-  int _consecutiveDrowsy = 0;
+  int _consecutiveDrowsy     = 0;
   int _consecutiveDistracted = 0;
 
-  int _lastDistractedClass = -1;
+  int _lastDistractedClass   = -1;
   int _stableDistractedCount = 0;
-  // FIX D: Raised from 6 to 8 — same subclass must appear for 8 consecutive
-  // frames before distraction is confirmed.
-  static const int _kStableSubclassMin = 8;
+  int _peakDistStage         = 0;
 
-  int _spatialInputIdx = 1;
+  // Score accumulation window for subclass stability (replaces consecutive check)
+  final Map<int, double> _classScoreAccum = {};
+  int _classScoreFrames = 0;
+
+  int _spatialInputIdx  = 1;
   int _temporalInputIdx = 0;
 
   int _behaviorOutputIdx = 0;
-  int _parentOutputIdx = 1;
-  int _gazeOutputIdx = 2;
+  int _parentOutputIdx   = 1;
+  int _gazeOutputIdx     = 2;
 
-  static const int _kMinInferenceGapMs = 150;
-
-  List<double> _normMean = [];
+  List<double> _normMean  = [];
   List<double> _normScale = [];
 
-  double _faceEarL = 0.0;
-  double _faceEarR = 0.0;
-  double _faceMar = 0.0;
-  double _facePitch = 0.0;
-  double _faceYaw = 0.0;
+  double _faceEarL       = 0.0;
+  double _faceEarR       = 0.0;
+  double _faceMar        = 0.0;
+  double _facePitch      = 0.0;
+  double _faceYaw        = 0.0;
   double _faceRollEulerZ = 0.0;
 
   void updateFaceData({
@@ -233,17 +266,17 @@ class TfliteService {
     required double yaw,
     required double rollEulerZ,
   }) {
-    _faceEarL = earL;
-    _faceEarR = earR;
-    _faceMar = mar;
-    _facePitch = pitch;
-    _faceYaw = yaw;
+    _faceEarL       = earL;
+    _faceEarR       = earR;
+    _faceMar        = mar;
+    _facePitch      = pitch;
+    _faceYaw        = yaw;
     _faceRollEulerZ = rollEulerZ;
   }
 
   final List<List<double>> _behaviorBuf = [List<double>.filled(13, 0.0)];
-  final List<List<double>> _parentBuf = [List<double>.filled(3, 0.0)];
-  final List<List<double>> _gazeBuf = [List<double>.filled(8, 0.0)];
+  final List<List<double>> _parentBuf   = [List<double>.filled(3,  0.0)];
+  final List<List<double>> _gazeBuf     = [List<double>.filled(8,  0.0)];
 
   final List<List<double>> _temporalBuf = List.generate(
     _kSeqLen,
@@ -257,16 +290,14 @@ class TfliteService {
   );
   int _bufFill = 0;
 
+  // ── Initialise ──────────────────────────────────────────────────────────────
   Future<bool> initialize() async {
     if (_isInitialized) return true;
     try {
-      final jsonStr = await rootBundle.loadString(_kNormParamsAsset);
+      final jsonStr  = await rootBundle.loadString(_kNormParamsAsset);
       final normData = jsonDecode(jsonStr) as Map<String, dynamic>;
-      _normMean =
-          (normData['mean'] as List).map((v) => (v as num).toDouble()).toList();
-      _normScale = (normData['scale'] as List)
-          .map((v) => (v as num).toDouble())
-          .toList();
+      _normMean  = (normData['mean']  as List).map((v) => (v as num).toDouble()).toList();
+      _normScale = (normData['scale'] as List).map((v) => (v as num).toDouble()).toList();
 
       final opts = InterpreterOptions()
         ..threads = 2
@@ -277,24 +308,19 @@ class TfliteService {
       final inputTensors = _interpreter!.getInputTensors();
       final sIdx = inputTensors.indexWhere((t) => t.name.contains('spatial'));
       final tIdx = inputTensors.indexWhere((t) => t.name.contains('temporal'));
-      if (sIdx != -1) _spatialInputIdx = sIdx;
+      if (sIdx != -1) _spatialInputIdx  = sIdx;
       if (tIdx != -1) _temporalInputIdx = tIdx;
-      debugPrint(
-          '[TfliteService] inputs: spatial=$_spatialInputIdx temporal=$_temporalInputIdx');
 
       final outputTensors = _interpreter!.getOutputTensors();
       final bIdx = outputTensors.indexWhere((t) => t.shape.last == 13);
       final pIdx = outputTensors.indexWhere((t) => t.shape.last == 3);
       final gIdx = outputTensors.indexWhere((t) => t.shape.last == 8);
       if (bIdx != -1) _behaviorOutputIdx = bIdx;
-      if (pIdx != -1) _parentOutputIdx = pIdx;
-      if (gIdx != -1) _gazeOutputIdx = gIdx;
-      debugPrint(
-          '[TfliteService] outputs: behavior=$_behaviorOutputIdx parent=$_parentOutputIdx gaze=$_gazeOutputIdx');
+      if (pIdx != -1) _parentOutputIdx   = pIdx;
+      if (gIdx != -1) _gazeOutputIdx     = gIdx;
 
       _isInitialized = true;
-      debugPrint(
-          '[TfliteService] ✅ DMS-HybridNet V3 loaded (25 features, 3 outputs, 13 classes)');
+      debugPrint('[TfliteService] ✅ DMS-HybridNet V3 loaded');
       return true;
     } catch (e) {
       debugPrint('[TfliteService] ❌ Init failed: $e');
@@ -302,17 +328,21 @@ class TfliteService {
     }
   }
 
-  bool get isInitialized => _isInitialized;
+  bool   get isInitialized => _isInitialized;
   double get bufferFillPct => (_bufFill / _kSeqLen * 100).clamp(0.0, 100.0);
 
+  // ── Session reset ────────────────────────────────────────────────────────────
   void resetSession() {
-    _bufFill = 0;
-    _consecutiveDrowsy = 0;
+    _bufFill               = 0;
+    _consecutiveDrowsy     = 0;
     _consecutiveDistracted = 0;
-    _lastDistractedClass = -1;
+    _lastDistractedClass   = -1;
     _stableDistractedCount = 0;
-    _lastInferenceMs = 0;
-    _isRunning = false;
+    _peakDistStage         = 0;
+    _classScoreAccum.clear();
+    _classScoreFrames      = 0;
+    _lastInferenceMs       = 0;
+    _isRunning             = false;
 
     for (int t = 0; t < _kSeqLen; t++) {
       for (int f = 0; f < _kNumBaseFeat; f++) {
@@ -322,24 +352,24 @@ class TfliteService {
       _temporalBuf[t][19] = 0.0;
     }
 
-    _faceEarL = 0.0;
-    _faceEarR = 0.0;
-    _faceMar = 0.0;
-    _facePitch = 0.0;
-    _faceYaw = 0.0;
+    _faceEarL       = 0.0;
+    _faceEarR       = 0.0;
+    _faceMar        = 0.0;
+    _facePitch      = 0.0;
+    _faceYaw        = 0.0;
     _faceRollEulerZ = 0.0;
 
-    debugPrint('[TfliteService] session reset — buffer cleared');
+    debugPrint('[TfliteService] session reset');
   }
 
   void dispose() {
     _interpreter?.close();
-    _interpreter = null;
+    _interpreter   = null;
     _isInitialized = false;
     resetSession();
-    debugPrint('[TfliteService] disposed');
   }
 
+  // ── Main inference entry point ───────────────────────────────────────────────
   Future<InferenceResult?> runInference(CameraImage image) async {
     if (!_isInitialized || _interpreter == null) return null;
     if (_isRunning) return null;
@@ -354,18 +384,18 @@ class TfliteService {
         _PrepInput(
           planes: image.planes
               .map((p) => _PlaneData(
-                    bytes: p.bytes,
-                    bytesPerRow: p.bytesPerRow,
+                    bytes:         p.bytes,
+                    bytesPerRow:   p.bytesPerRow,
                     bytesPerPixel: p.bytesPerPixel ?? 1,
                   ))
               .toList(),
-          width: image.width,
-          height: image.height,
-          earL: _faceEarL,
-          earR: _faceEarR,
-          mar: _faceMar,
-          pitch: _facePitch,
-          yaw: _faceYaw,
+          width:      image.width,
+          height:     image.height,
+          earL:       _faceEarL,
+          earR:       _faceEarR,
+          mar:        _faceMar,
+          pitch:      _facePitch,
+          yaw:        _faceYaw,
           rollEulerZ: _faceRollEulerZ,
         ),
       );
@@ -373,58 +403,83 @@ class TfliteService {
       _lastInferenceMs = nowMs;
 
       _updateTemporalBuf(prep.features);
-
       final temporalFlat = _buildTemporalInput();
 
-      for (int i = 0; i < 13; i++) {
-        _behaviorBuf[0][i] = 0.0;
-      }
-      for (int i = 0; i < 3; i++) {
-        _parentBuf[0][i] = 0.0;
-      }
-      for (int i = 0; i < 8; i++) {
-        _gazeBuf[0][i] = 0.0;
-      }
+      for (int i = 0; i < 13; i++) _behaviorBuf[0][i] = 0.0;
+      for (int i = 0; i < 3;  i++) _parentBuf[0][i]   = 0.0;
+      for (int i = 0; i < 8;  i++) _gazeBuf[0][i]     = 0.0;
+
+      // ── FIX: Correct tensor shape wrapping ─────────────────────────────────
+      // TFLite Flutter's runForMultipleInputs requires inputs shaped exactly
+      // as the model expects, using nested Lists — NOT flat Float32List.
+      //
+      // Spatial input:  model expects [1, 224, 224, 3]
+      //   → List<List<List<List<double>>>> with shape [1][224][224][3]
+      //
+      // Temporal input: model expects [1, 30, 25]
+      //   → List<List<List<double>>> with shape [1][30][25]
+      //
+      // Passing a flat Float32List causes:
+      //   "input->dims->size != 4 (1 != 4)" → Bad state: failed precondition
+      //
+      // Build [1, 224, 224, 3] spatial tensor from flat Float32List
+      const int dstH = 224, dstW = 224, channels = 3;
+      final spatialTensor = List.generate(1, (_) =>
+        List.generate(dstH, (h) =>
+          List.generate(dstW, (w) =>
+            List.generate(channels, (c) {
+              final idx = (h * dstW + w) * channels + c;
+              return prep.rgbNormalized[idx].toDouble();
+            })
+          )
+        )
+      );
+
+      // Build [1, 30, 25] temporal tensor from flat Float32List
+      final temporalTensor = List.generate(1, (_) =>
+        List.generate(_kSeqLen, (t) =>
+          List.generate(_kNumFeat, (f) =>
+            temporalFlat[t * _kNumFeat + f].toDouble()
+          )
+        )
+      );
 
       final inputs = List<Object?>.filled(2, null);
-      inputs[_temporalInputIdx] = temporalFlat;
-      inputs[_spatialInputIdx] = prep.rgbNormalized;
+      inputs[_temporalInputIdx] = temporalTensor;
+      inputs[_spatialInputIdx]  = spatialTensor;
 
       _interpreter!.runForMultipleInputs(
         inputs.cast<Object>(),
         <int, Object>{
           _behaviorOutputIdx: _behaviorBuf,
-          _parentOutputIdx: _parentBuf,
-          _gazeOutputIdx: _gazeBuf,
+          _parentOutputIdx:   _parentBuf,
+          _gazeOutputIdx:     _gazeBuf,
         },
       );
 
-      debugPrint('[RawOutputs] '
-          'behavior_sum=${_behaviorBuf[0].fold(0.0, (a, b) => a + b).toStringAsFixed(3)} '
-          'parent_sum=${_parentBuf[0].fold(0.0, (a, b) => a + b).toStringAsFixed(3)} '
-          'gaze_sum=${_gazeBuf[0].fold(0.0, (a, b) => a + b).toStringAsFixed(3)}');
-
-      final rawBehavior = List<double>.from(_behaviorBuf[0]);
-      final behaviorSum = rawBehavior.fold(0.0, (a, b) => a + b);
+      final rawBehavior   = List<double>.from(_behaviorBuf[0]);
+      final behaviorSum   = rawBehavior.fold(0.0, (a, b) => a + b);
       final behaviorProbs = (behaviorSum - 1.0).abs() > 0.01
           ? _softmax(rawBehavior)
           : rawBehavior;
 
       final parentProbs = List<double>.from(_parentBuf[0]);
-      final gazeProbs = List<double>.from(_gazeBuf[0]);
+      final gazeProbs   = List<double>.from(_gazeBuf[0]);
 
+      // Debug: log top 3 predictions every frame
       final indexed = List.generate(13, (i) => MapEntry(i, behaviorProbs[i]));
       indexed.sort((a, b) => b.value.compareTo(a.value));
       debugPrint('[V3] '
           '${kClassNames[indexed[0].key]}=${(indexed[0].value * 100).toStringAsFixed(1)}% | '
           '${kClassNames[indexed[1].key]}=${(indexed[1].value * 100).toStringAsFixed(1)}% | '
-          '${kClassNames[indexed[2].key]}=${(indexed[2].value * 100).toStringAsFixed(1)}%');
+          '${kClassNames[indexed[2].key]}=${(indexed[2].value * 100).toStringAsFixed(1)}% '
+          '| yaw=${_faceYaw.toStringAsFixed(1)}° '
+          '| compensated=${(_faceYaw - kSideMountYawOffset).toStringAsFixed(1)}°');
 
       final parentClass = parentProbs.indexOf(parentProbs.reduce(math.max));
-      final gazeZone = gazeProbs.indexOf(gazeProbs.reduce(math.max));
+      final gazeZone    = gazeProbs.indexOf(gazeProbs.reduce(math.max));
 
-      return _buildResult(
-          behaviorProbs, prep.features[2], parentClass, gazeZone);
+      return _buildResult(behaviorProbs, prep.features[2], parentClass, gazeZone);
     } catch (e) {
       debugPrint('[TfliteService] runInference error: $e');
       return null;
@@ -433,27 +488,18 @@ class TfliteService {
     }
   }
 
+  // ── Temporal buffer ──────────────────────────────────────────────────────────
   Float32List _buildTemporalInput() {
     final stats = _computeWindowStats();
-
-    debugPrint('[Temporal] stats: '
-        'ear_mean=${stats[0].toStringAsFixed(3)} '
-        'ear_min=${stats[1].toStringAsFixed(3)} '
-        'mar_max=${stats[2].toStringAsFixed(3)}');
-
-    final flat = Float32List(_kSeqLen * _kNumFeat);
+    final flat  = Float32List(_kSeqLen * _kNumFeat);
     for (int t = 0; t < _kSeqLen; t++) {
       final offset = t * _kNumFeat;
-
       for (int f = 0; f < _kNumBaseFeat; f++) {
         final raw = _temporalBuf[t][f];
-        if (raw == kSentinel) {
-          flat[offset + f] = 0.0;
-        } else {
-          flat[offset + f] = (raw - _normMean[f]) / (_normScale[f] + 1e-8);
-        }
+        flat[offset + f] = raw == kSentinel
+            ? 0.0
+            : (raw - _normMean[f]) / (_normScale[f] + 1e-8);
       }
-
       for (int f = 0; f < 5; f++) {
         flat[offset + _kNumBaseFeat + f] =
             (stats[f] - _normMean[_kNumBaseFeat + f]) /
@@ -473,14 +519,9 @@ class TfliteService {
         .where((v) => v != kSentinel && !v.isNaN)
         .toList();
 
-    final earMean = earVals.isEmpty
-        ? 0.0
-        : earVals.reduce((a, b) => a + b) / earVals.length;
-
-    final earMin = earVals.isEmpty ? 0.0 : earVals.reduce(math.min);
-
-    final marMax = marVals.isEmpty ? 0.0 : marVals.reduce(math.max);
-
+    final earMean  = earVals.isEmpty ? 0.0 : earVals.reduce((a, b) => a + b) / earVals.length;
+    final earMin   = earVals.isEmpty ? 0.0 : earVals.reduce(math.min);
+    final marMax   = marVals.isEmpty ? 0.0 : marVals.reduce(math.max);
     final marAbove = marVals.isEmpty
         ? 0.0
         : marVals.where((v) => v > kMarYawnThresh).length / marVals.length;
@@ -498,15 +539,11 @@ class TfliteService {
       for (int i = 0; i < validIdx.length; i++) {
         final x = validIdx[i].toDouble();
         final y = earVals[i];
-        sumX += x;
-        sumY += y;
-        sumXY += x * y;
-        sumX2 += x * x;
+        sumX += x; sumY += y; sumXY += x * y; sumX2 += x * x;
       }
       final denom = n * sumX2 - sumX * sumX;
       earTrend = denom.abs() > 1e-9 ? (n * sumXY - sumX * sumY) / denom : 0.0;
     }
-
     return [earMean, earMin, marMax, marAbove, earTrend];
   }
 
@@ -522,204 +559,325 @@ class TfliteService {
     if (_bufFill < _kSeqLen) _bufFill++;
   }
 
+  // ── Core classification logic ────────────────────────────────────────────────
   InferenceResult _buildResult(
     List<double> probs,
-    double earAvg,
-    int parentClass,
-    int gazeZone,
+    double       earAvg,
+    int          parentClass,
+    int          gazeZone,
   ) {
-    double neutralPct = 0;
-    double drowsyPct = 0;
+    // ── Accumulate probabilities by group ─────────────────────────────────────
+    double neutralPct    = 0;
+    double drowsyPct     = 0;
     double distractedPct = 0;
-    int bestDistIdx = 2;
-    double bestDistScore = 0;
-    int bestDrowsyIdx = 9;
+
+    int    bestDistIdx     = 2;
+    double bestDistScore   = 0;
+    int    bestDrowsyIdx   = 9;
     double bestDrowsyScore = 0;
 
     for (int i = 0; i < 13; i++) {
       final pct = probs[i] * 100.0;
-      final st = _classToMainState(i);
+      final st  = _classToMainState(i);
       if (st == 'neutral') {
         neutralPct += pct;
       } else if (st == 'drowsy') {
         drowsyPct += pct;
-        if (pct > bestDrowsyScore) {
-          bestDrowsyScore = pct;
-          bestDrowsyIdx = i;
-        }
+        if (pct > bestDrowsyScore) { bestDrowsyScore = pct; bestDrowsyIdx = i; }
       } else {
         distractedPct += pct;
-        if (pct > bestDistScore) {
-          bestDistScore = pct;
-          bestDistIdx = i;
-        }
+        if (pct > bestDistScore) { bestDistScore = pct; bestDistIdx = i; }
       }
     }
 
-    // ────────────────────────────────────────────────────────────────────────
-    // FIX: Cross-class interference prevention
-    // If "Body/Reaching" (class 6) is winning but with low-moderate confidence,
-    // check if a more specific distracted class is nearby. If yes, promote it.
-    // ────────────────────────────────────────────────────────────────────────
-    if ((bestDistIdx == 6) && bestDistScore >= 55.0 && bestDistScore < 70.0) {
-      double secondBestScore = 0.0;
-      int secondBestIdx = 6;
+    // ── Cross-class: demote body/reaching (class 6) catch-all ────────────────
+    // If body wins with moderate confidence, check if a more specific class
+    // is close behind and passes its own threshold.
+    if (bestDistIdx == 6 && bestDistScore < 72.0) {
+      double secondScore = 0.0;
+      int    secondIdx   = 6;
       for (int i = 2; i <= 8; i++) {
         if (i == 6) continue;
         final pct = probs[i] * 100.0;
-        if (pct > secondBestScore) {
-          secondBestScore = pct;
-          secondBestIdx = i;
-        }
+        if (pct > secondScore) { secondScore = pct; secondIdx = i; }
       }
-      // If secondary class is reasonably close (70% of bestDistScore or >=20%),
-      // use it instead (demote catch-all body class)
-      if (secondBestScore >= 20.0 && secondBestScore >= bestDistScore * 0.7) {
-        bestDistIdx = secondBestIdx;
-        bestDistScore = secondBestScore;
-        debugPrint('[CrossClass] Demoted body (${probs[6] * 100}%) → '
-            '${kClassNames[secondBestIdx]} ($secondBestScore%)');
+      final secThresh = _kBehaviorClassThresholds[secondIdx] ?? 30.0;
+      if (secondScore >= secThresh && secondScore >= bestDistScore * 0.60) {
+        debugPrint('[CrossClass] Demoted body → ${kClassNames[secondIdx]} '
+            '($secondScore% vs body ${bestDistScore}%)');
+        bestDistIdx  = secondIdx;
+        bestDistScore = secondScore;
       }
     }
 
-    // FIX B: Widened driverLookingAtRoad from ±20° to ±30°.
-    // With the corrected yawOffset (+30), compensatedYaw = yaw - 30.
-    // The driver naturally has yaw ≈ +30 when looking straight, so
-    // compensatedYaw ≈ 0. Using ±20° was correct in theory but the
-    // smoothed yaw still drifts ±5–10° from frame noise. ±30° gives
-    // enough headroom to prevent valid forward-gaze from triggering
-    // the stricter distraction threshold.
-    final compensatedYaw = (_faceYaw - kSideMountYawOffset).abs();
-    final driverLookingAtRoad = compensatedYaw <= 30.0; // FIX B: was 20.0
-    final effectiveDistClassThreshold = driverLookingAtRoad ? 50.0 : 40.0;
+    // ── Yaw geometry (informational — not a hard gate) ───────────────────────
+    final compensatedYaw      = _faceYaw - kSideMountYawOffset;
+    final driverLookingAtRoad = compensatedYaw.abs() <= _kOnRoadYawGate;
 
-    final classMinThreshold = _kBehaviorClassThresholds[bestDistIdx] ?? 30.0;
+    // Per-class minimum threshold — set well above observed noise floor
+    final classMinThreshold     = _kBehaviorClassThresholds[bestDistIdx] ?? 5.0;
     final bestDistMeetsClassMin = bestDistScore >= classMinThreshold;
 
     final parentSaysDistracted = parentClass == 1;
-    final parentSaysDrowsy = parentClass == 2;
+    final parentSaysDrowsy     = parentClass == 2;
 
-    // ────────────────────────────────────────────────────────────────────────
-    // NEW LOGIC: Stricter global gates based on datasets
-    // Distraction threshold raised from 65% to 70% for fewer false positives
-    // ────────────────────────────────────────────────────────────────────────
-
-    String rawState;
-    int rawBestIdx;
-    if (drowsyPct >= 40.0 &&
-        bestDrowsyScore >= 20.0 &&
-        (parentSaysDrowsy || drowsyPct >= 60.0)) {
-      rawState = 'drowsy';
-      rawBestIdx = bestDrowsyIdx;
-    } else if (distractedPct >= 70.0 &&
-        bestDistScore >= effectiveDistClassThreshold &&
-        bestDistMeetsClassMin &&
-        parentSaysDistracted) {
-      rawState = 'distracted';
-      rawBestIdx = bestDistIdx;
-    } else if (distractedPct >= 70.0 &&
-        bestDistIdx != 6 &&
-        bestDistScore >= 25.0 &&
-        bestDistMeetsClassMin &&
-        parentSaysDistracted &&
-        !driverLookingAtRoad) {
-      rawState = 'distracted';
-      rawBestIdx = bestDistIdx;
-    } else {
-      rawState = 'neutral';
-      rawBestIdx = 0;
+    // ── GROOMING DOMINANCE CHECK ──────────────────────────────────────────────
+    // From session 111/112: grooming (class 7) is a persistent false positive
+    // because glasses+hair from 35° side angle looks like "hand near face".
+    //
+    // Real grooming: grooming dominates clearly (60–100%), others < 15%.
+    // False positive: grooming 14–40% with radio/texting close behind (10–25%).
+    //
+    // FIX: If grooming wins but 2nd place is within 20% of it, demote to neutral.
+    // This catches the noise pattern where grooming barely leads a crowded field.
+    bool groomingIsFP = false;
+    if (bestDistIdx == 7 && bestDistScore < 55.0) {
+      // Find second-best distracted class score
+      double secondBestScore = 0.0;
+      for (int i = 2; i <= 8; i++) {
+        if (i == 7) continue;
+        final pct = probs[i] * 100.0;
+        if (pct > secondBestScore) secondBestScore = pct;
+      }
+      // If 2nd place is within 20% of grooming, it's likely noise
+      if (secondBestScore >= bestDistScore - 20.0) {
+        groomingIsFP = true;
+        debugPrint('[GroomingFP] demoted: grooming=${bestDistScore.toStringAsFixed(1)}% '
+            'vs 2nd=${secondBestScore.toStringAsFixed(1)}% — too close, treating as noise');
+      }
     }
 
-    // Subclass stability check (FIX D: threshold raised to 8)
-    if (rawState == 'distracted') {
-      if (rawBestIdx == _lastDistractedClass) {
-        _stableDistractedCount++;
-      } else {
-        _lastDistractedClass = rawBestIdx;
-        _stableDistractedCount = 1;
+    // Apply FP suppression
+    if (groomingIsFP) {
+      // Find next best non-grooming class
+      int    altIdx   = 2;
+      double altScore = 0.0;
+      for (int i = 2; i <= 8; i++) {
+        if (i == 7) continue;
+        final pct = probs[i] * 100.0;
+        if (pct > altScore) { altScore = pct; altIdx = i; }
       }
-      if (_stableDistractedCount < _kStableSubclassMin) {
-        rawState = 'neutral';
-        rawBestIdx = 0;
-        debugPrint('[Stability] distracted subclass unstable '
-            '(${kClassNames[_lastDistractedClass]} x$_stableDistractedCount/$_kStableSubclassMin)');
+      final altThresh = _kBehaviorClassThresholds[altIdx] ?? 5.0;
+      if (altScore >= altThresh) {
+        bestDistIdx   = altIdx;
+        bestDistScore = altScore;
+        // Recalculate meets-threshold for new winner
+      } else {
+        // No valid alternative — suppress distraction entirely this frame
+        bestDistScore = 0.0;
+      }
+    }
+
+    // Recheck threshold with potentially updated bestDist
+    final finalClassMinThreshold = _kBehaviorClassThresholds[bestDistIdx] ?? 5.0;
+    final finalBestDistMeetsMin  = bestDistScore >= finalClassMinThreshold;
+
+    // ── Raw state: DROWSY ─────────────────────────────────────────────────────
+    String rawState    = 'neutral';
+    int    rawBestIdx  = 0;
+    int    activeStage = 0;
+
+    if (drowsyPct >= _kDrowsyPctGate &&
+        bestDrowsyScore >= _kDrowsyBestScore &&
+        (parentSaysDrowsy || drowsyPct >= 20.0)) {
+      rawState   = 'drowsy';
+      rawBestIdx = bestDrowsyIdx;
+    }
+
+    // ── Raw state: DISTRACTED — THREE-STAGE ──────────────────────────────────
+    //
+    // Stages calibrated to ACTUAL session output range:
+    //   Normal driving:     distPct  5–15%, bestClass  2–9%
+    //   Mild distraction:   distPct 15–35%, bestClass 10–24%
+    //   Clear distraction:  distPct 35–56%, bestClass 25–48%
+    //
+    // Stage 1: High  distPct≥40%  bestClass≥25%  6 frames  no parent needed
+    // Stage 2: Mod   distPct≥22%  bestClass≥12%  12 frames parent required
+    // Stage 3: Low   distPct≥15%  bestClass≥ 8%  22 frames parent+not on road
+    //
+    // Grooming (class 7) is excluded from stages 2 and 3 unless it clearly
+    // dominates (handled by groomingIsFP check above — if it's a FP, bestDistScore=0).
+    //
+    else if (finalBestDistMeetsMin &&
+        distractedPct >= _kDistPctHigh &&
+        bestDistScore >= _kDistBestHigh) {
+      rawState    = 'distracted';
+      rawBestIdx  = bestDistIdx;
+      activeStage = 1;
+    }
+    else if (finalBestDistMeetsMin &&
+        distractedPct >= _kDistPctMod &&
+        bestDistScore >= _kDistBestMod &&
+        parentSaysDistracted &&
+        bestDistIdx != 6) {
+      rawState    = 'distracted';
+      rawBestIdx  = bestDistIdx;
+      activeStage = 2;
+    }
+    else if (finalBestDistMeetsMin &&
+        distractedPct >= _kDistPctLow &&
+        bestDistScore >= _kDistBestLow &&
+        parentSaysDistracted &&
+        bestDistIdx != 6 &&
+        !driverLookingAtRoad) {
+      rawState    = 'distracted';
+      rawBestIdx  = bestDistIdx;
+      activeStage = 3;
+    }
+
+    // ── Subclass stability — accumulated score approach ───────────────────────
+    // PROBLEM: grooming/radio/texting alternate every frame → consecutive
+    // same-class requirement (2 frames) resets constantly → counter stays at 1.
+    //
+    // FIX: Remove per-subclass consecutive requirement entirely for stages 1+2.
+    // Instead, any distracted class that passes its threshold contributes to the
+    // consecutive counter. The class label for the OUTPUT is the one with the
+    // highest accumulated score across the last 3 frames (rolling window).
+    //
+    // For stage 3 (low confidence), keep the 2-frame requirement since it's
+    // a weaker signal and we need more certainty about which class it is.
+    //
+    if (rawState == 'distracted') {
+      // Accumulate scores per class in rolling window (class index → score sum)
+      _classScoreAccum[bestDistIdx] =
+          (_classScoreAccum[bestDistIdx] ?? 0.0) + bestDistScore;
+      _classScoreFrames++;
+
+      // Every 3 frames, pick the dominant class and reset window
+      if (_classScoreFrames >= 3) {
+        int    dominantIdx   = bestDistIdx;
+        double dominantScore = 0.0;
+        _classScoreAccum.forEach((idx, score) {
+          if (score > dominantScore) { dominantScore = score; dominantIdx = idx; }
+        });
+        _lastDistractedClass = dominantIdx;
+        _classScoreAccum.clear();
+        _classScoreFrames = 0;
+      }
+
+      // For stage 3 only: require 2 consecutive same-class frames
+      if (activeStage == 3) {
+        if (rawBestIdx != _lastDistractedClass) {
+          rawState    = 'neutral';
+          rawBestIdx  = 0;
+          activeStage = 0;
+          debugPrint('[Stability-s3] class mismatch, waiting');
+        }
+      } else {
+        // Stages 1 and 2: use accumulated dominant class as output label
+        rawBestIdx = _lastDistractedClass;
       }
     } else {
       _stableDistractedCount = (_stableDistractedCount - 1).clamp(0, 99);
+      // Decay the score window gradually when neutral
+      if (_classScoreFrames > 0) _classScoreFrames--;
     }
 
+    // ── Consecutive-frame debounce ────────────────────────────────────────────
+    //
+    // STAGE PERSISTENCE FIX:
+    //   When one neutral frame interrupts a distracted run, activeStage drops
+    //   to 0 (stage low = 22 frames threshold), making the counter appear far
+    //   from threshold even though distraction resumes next frame.
+    //
+    //   Solution: track _peakStage — the highest stage seen while consecutive
+    //   counter is > 0. Use peakStage for the threshold. Only reset peakStage
+    //   when counter fully decays to 0.
+    //
     if (rawState == 'drowsy') {
       _consecutiveDrowsy++;
       _consecutiveDistracted = (_consecutiveDistracted - 1).clamp(0, 9999);
+      if (_consecutiveDistracted == 0) _peakDistStage = 0;
     } else if (rawState == 'distracted') {
       _consecutiveDistracted++;
       _consecutiveDrowsy = (_consecutiveDrowsy - 1).clamp(0, 9999);
+      // Track the highest stage seen in this distraction run
+      if (activeStage > _peakDistStage) _peakDistStage = activeStage;
     } else {
-      _consecutiveDrowsy = (_consecutiveDrowsy - 1).clamp(0, 9999);
+      _consecutiveDrowsy     = (_consecutiveDrowsy     - 1).clamp(0, 9999);
       _consecutiveDistracted = (_consecutiveDistracted - 1).clamp(0, 9999);
+      if (_consecutiveDistracted == 0) _peakDistStage = 0;
     }
 
-    final bool drowsyConfirmed = _consecutiveDrowsy >= _kDrowsyThreshold;
-    final bool distractedConfirmed =
-        _consecutiveDistracted >= _kDistractedThreshold;
+    // Use peak stage for threshold so one neutral frame doesn't switch to slow gate
+    final int effectiveStage    = _consecutiveDistracted > 0 ? _peakDistStage : 0;
+    final int effectiveDistThreshold = switch (effectiveStage) {
+      1 => _kDistThreshHigh,
+      2 => _kDistThreshMod,
+      _ => _kDistThreshLow,
+    };
+
+    final bool drowsyConfirmed     = _consecutiveDrowsy     >= _kDrowsyThreshold;
+    final bool distractedConfirmed = _consecutiveDistracted >= effectiveDistThreshold;
 
     String outputState;
-    int outputIdx;
+    int    outputIdx;
+
     if (rawState == 'drowsy' && drowsyConfirmed) {
       outputState = 'drowsy';
-      outputIdx = rawBestIdx;
-    } else if (rawState == 'distracted' && distractedConfirmed) {
+      outputIdx   = rawBestIdx;
+    } else if (distractedConfirmed) {
+      // Sustain distracted output even during brief neutral frames (1–2 frame gaps)
+      // as long as counter hasn't decayed below threshold.
+      // rawBestIdx may be 0 if this frame is neutral — use last known class.
       outputState = 'distracted';
-      outputIdx = rawBestIdx;
+      outputIdx   = rawBestIdx != 0
+          ? rawBestIdx
+          : (_lastDistractedClass >= 0 ? _lastDistractedClass : 0);
     } else {
       outputState = 'neutral';
-      outputIdx = 0;
+      outputIdx   = 0;
     }
 
     debugPrint('[Debounce] '
         'drowsy=$_consecutiveDrowsy/$_kDrowsyThreshold '
-        'distracted=$_consecutiveDistracted/$_kDistractedThreshold '
+        'distracted=$_consecutiveDistracted/$effectiveDistThreshold(s$effectiveStage) '
         'raw=$rawState → out=$outputState '
-        'yaw=${_faceYaw.toStringAsFixed(1)} compensated=${compensatedYaw.toStringAsFixed(1)} '
-        'lookingAtRoad=$driverLookingAtRoad '
-        'distPct=$distractedPct drowsyPct=$drowsyPct');
+        'distPct=${distractedPct.toStringAsFixed(1)} '
+        'drowsyPct=${drowsyPct.toStringAsFixed(1)} '
+        'bestDist=${kClassNames[bestDistIdx]}@${bestDistScore.toStringAsFixed(1)}%');
 
     return InferenceResult(
-      state: outputState,
-      subclass: kClassNames[outputIdx],
+      state:         outputState,
+      subclass:      kClassNames[outputIdx],
       subclassIndex: outputIdx,
-      neutralPct: neutralPct.clamp(0.0, 100.0),
-      drowsyPct: drowsyPct.clamp(0.0, 100.0),
+      neutralPct:    neutralPct.clamp(0.0, 100.0),
+      drowsyPct:     drowsyPct.clamp(0.0, 100.0),
       distractedPct: distractedPct.clamp(0.0, 100.0),
-      fullProbs: List<double>.unmodifiable(probs),
-      modelSource: ModelSource.v3,
-      earAvg: earAvg,
-      t02Active: _bufFill >= _kSeqLen,
-      parentClass: parentClass,
-      gazeZone: gazeZone,
+      fullProbs:     List<double>.unmodifiable(probs),
+      modelSource:   ModelSource.v3,
+      earAvg:        earAvg,
+      t02Active:     _bufFill >= _kSeqLen,
+      parentClass:   parentClass,
+      gazeZone:      gazeZone,
     );
   }
 
   static String _classToMainState(int idx) {
     if (idx == 0 || idx == 1) return 'neutral';
-    if (idx >= 9) return 'drowsy';
+    if (idx >= 9)             return 'drowsy';
     return 'distracted';
   }
 
   static List<double> _softmax(List<double> logits) {
     final maxVal = logits.reduce(math.max);
-    final exps = logits.map((v) => math.exp(v - maxVal)).toList();
-    final sum = exps.fold(0.0, (a, b) => a + b);
+    final exps   = logits.map((v) => math.exp(v - maxVal)).toList();
+    final sum    = exps.fold(0.0, (a, b) => a + b);
     return exps.map((e) => e / sum).toList();
   }
 }
 
-// ─── BACKGROUND ISOLATE DATA CLASSES ────────────────────────────────────────
+// ─── CONSTANTS (unchanged) ───────────────────────────────────────────────────
+const int _kSeqLen      = 30;
+const int _kNumBaseFeat = 20;
+const int _kNumFeat     = 25;
+
+// ─── BACKGROUND ISOLATE DATA CLASSES ─────────────────────────────────────────
 
 class _PlaneData {
   final Uint8List bytes;
-  final int bytesPerRow;
-  final int bytesPerPixel;
+  final int       bytesPerRow;
+  final int       bytesPerPixel;
   const _PlaneData({
     required this.bytes,
     required this.bytesPerRow,
@@ -729,8 +887,8 @@ class _PlaneData {
 
 class _PrepInput {
   final List<_PlaneData> planes;
-  final int width;
-  final int height;
+  final int    width;
+  final int    height;
   final double earL;
   final double earR;
   final double mar;
@@ -741,69 +899,67 @@ class _PrepInput {
     required this.planes,
     required this.width,
     required this.height,
-    this.earL = 0.0,
-    this.earR = 0.0,
-    this.mar = 0.0,
-    this.pitch = 0.0,
-    this.yaw = 0.0,
+    this.earL       = 0.0,
+    this.earR       = 0.0,
+    this.mar        = 0.0,
+    this.pitch      = 0.0,
+    this.yaw        = 0.0,
     this.rollEulerZ = 0.0,
   });
 }
 
 class _PrepOutputV3 {
-  final Float32List rgbNormalized;
+  final Float32List  rgbNormalized;
   final List<double> features;
-
-  const _PrepOutputV3({
-    required this.rgbNormalized,
-    required this.features,
-  });
+  const _PrepOutputV3({required this.rgbNormalized, required this.features});
 }
 
-// ─── TOP-LEVEL PREPROCESSING — runs in compute() isolate ────────────────────
+// ─── TOP-LEVEL PREPROCESSING — runs in compute() isolate ─────────────────────
 
 _PrepOutputV3? _preprocessFrameV3(_PrepInput input) {
   try {
     final w = input.width;
     final h = input.height;
 
-    final yBytes = input.planes[0].bytes;
-    final uBytes = input.planes[1].bytes;
-    final vBytes = input.planes[2].bytes;
-    final yStride = input.planes[0].bytesPerRow;
+    final yBytes   = input.planes[0].bytes;
+    final uBytes   = input.planes[1].bytes;
+    final vBytes   = input.planes[2].bytes;
+    final yStride  = input.planes[0].bytesPerRow;
     final uvStride = input.planes[1].bytesPerRow;
-    final uvPixel = input.planes[1].bytesPerPixel;
+    final uvPixel  = input.planes[1].bytesPerPixel;
 
-    final rgb = Uint8List(w * h * 3);
+    // YUV → RGB
+    final rgb  = Uint8List(w * h * 3);
     int outIdx = 0;
     for (int row = 0; row < h; row++) {
       for (int col = 0; col < w; col++) {
-        final y = yBytes[row * yStride + col] & 0xFF;
+        final y   = yBytes[row * yStride + col] & 0xFF;
         final uvI = (row >> 1) * uvStride + (col >> 1) * uvPixel;
-        final u = (uBytes[uvI] & 0xFF) - 128;
-        final v = (vBytes[uvI] & 0xFF) - 128;
+        final u   = (uBytes[uvI] & 0xFF) - 128;
+        final v   = (vBytes[uvI] & 0xFF) - 128;
         rgb[outIdx++] = ((y * 1024 + 1402 * v) >> 10).clamp(0, 255);
         rgb[outIdx++] = ((y * 1024 - 344 * u - 714 * v) >> 10).clamp(0, 255);
         rgb[outIdx++] = ((y * 1024 + 1772 * u) >> 10).clamp(0, 255);
       }
     }
 
+    // Bilinear resize → 224×224 and normalise to [-1, 1]
     const dstW = 224, dstH = 224;
     final normalized = Float32List(dstW * dstH * 3);
     final xScale = (w - 1) / (dstW - 1);
     final yScale = (h - 1) / (dstH - 1);
     int nIdx = 0;
     for (int dr = 0; dr < dstH; dr++) {
-      final sy = dr * yScale;
+      final sy  = dr * yScale;
       final sy0 = sy.toInt().clamp(0, h - 2);
       final sy1 = sy0 + 1;
-      final fy = sy - sy0;
+      final fy  = sy - sy0;
       final fy1 = 1.0 - fy;
       for (int dc = 0; dc < dstW; dc++) {
-        final sx = dc * xScale;
+        final sx  = dc * xScale;
         final sx0 = sx.toInt().clamp(0, w - 2);
         final sx1 = sx0 + 1;
-        final fx = sx - sx0;
+        final fx  = sx - sx0;
         final fx1 = 1.0 - fx;
         final i00 = (sy0 * w + sx0) * 3;
         final i10 = (sy0 * w + sx1) * 3;
@@ -811,14 +967,13 @@ _PrepOutputV3? _preprocessFrameV3(_PrepInput input) {
         final i11 = (sy1 * w + sx1) * 3;
         for (int c = 0; c < 3; c++) {
           final val = fy1 * (fx1 * rgb[i00 + c] + fx * rgb[i10 + c]) +
-              fy * (fx1 * rgb[i01 + c] + fx * rgb[i11 + c]);
+                      fy  * (fx1 * rgb[i01 + c] + fx * rgb[i11 + c]);
           normalized[nIdx++] = (val / 127.5) - 1.0;
         }
       }
     }
 
     final features = _extractFeaturesV3(input);
-
     return _PrepOutputV3(rgbNormalized: normalized, features: features);
   } catch (e) {
     debugPrint('[_preprocessFrameV3] Error: $e');
@@ -840,10 +995,8 @@ List<double> _extractFeaturesV3(_PrepInput input) {
   features[4] = input.mar;
 
   features[5] = input.pitch;
-  // FIX A: Subtract the corrected positive offset (+30.0).
-  // The model was trained with yaw=0 meaning "looking straight ahead".
-  // For our right-side mount the driver naturally has yaw≈+30, so we
-  // subtract 30 to give the model a near-zero signal for normal driving.
+  // Subtract mount offset so model sees ~0 when driver looks straight.
+  // Range: -35° (far left/road) to +35° (far right/window).
   features[6] = input.yaw - kSideMountYawOffset;
   features[7] = input.rollEulerZ;
 
