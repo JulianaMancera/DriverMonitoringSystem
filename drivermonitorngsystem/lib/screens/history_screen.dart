@@ -1,9 +1,3 @@
-// history_screen.dart — fully responsive
-// All sizes use context.sp() / context.rp() / context.rs() / context.ri()
-// Search bar: fixed logical 44px → now context.rs(44).clamp(38,52)
-// Icon sizes: context.ri() so they scale on compact phones
-// Card heights: intrinsic (no fixed px) so content never clips
-
 import 'package:flutter/material.dart';
 import '../utils/responsive.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,8 +16,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   static const Color _surfaceAlt  = Color(0xFF1A2235);
   static const Color _cyan        = Color(0xFF00D4FF);
   static const Color _green       = Color(0xFF00FF88);
-  static const Color _drowsy      = Color(0xFFF59E0B);
-  static const Color _distracted  = Color(0xFFA855F7);
+  static const Color _drowsy      = Colors.red;
+  static const Color _distracted  = Color(0xFFfbbf24);
   static const Color _textPrimary = Color(0xFFEEF2FF);
   static const Color _textDim     = Color(0xFF6B7A99);
   static const Color _divider     = Color(0xFF1E2D45);
@@ -399,13 +393,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             padding: EdgeInsets.symmetric(
                 horizontal: context.rp(16), vertical: context.rs(12)),
             child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-              // Accent strip
-              Container(
-                width: context.rp(4), height: context.rs(44),
-                decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.7),
-                    borderRadius: BorderRadius.circular(context.rp(2)))),
-              SizedBox(width: context.rp(12)),
+
               // Status icon
               Container(
                 width: iconBoxSize, height: iconBoxSize,
@@ -535,8 +523,8 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
   static const Color _surfaceAlt = Color(0xFF1A2235);
   static const Color _cyan       = Color(0xFF00D4FF);
   static const Color _green      = Color(0xFF00FF88);
-  static const Color _drowsy     = Color(0xFFF59E0B);
-  static const Color _distracted = Color(0xFFA855F7);
+  static const Color _drowsy     = Colors.red;
+  static const Color _distracted = Color(0xFFfbbf24);
   static const Color _textPrimary= Color(0xFFEEF2FF);
   static const Color _textMuted  = Color(0xFF94A3B8);
   static const Color _textDim    = Color(0xFF6B7A99);
@@ -615,9 +603,11 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
 
   Color _logTypeColor(String type) {
     switch (type) {
-      case 'SUCCESS': return _green;
-      case 'WARNING': return _drowsy;
-      default:        return _textMuted;
+      case 'SUCCESS':            return _green;
+      case 'DROWSY_WARNING':     return _drowsy;      
+      case 'DISTRACTED_WARNING': return _distracted;   
+      case 'WARNING':            return _distracted;
+      default:                   return _textMuted;
     }
   }
 

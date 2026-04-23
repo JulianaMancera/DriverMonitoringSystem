@@ -9,21 +9,13 @@ class HeadPoseResult {
   final double normalizedY; // -1 (top)  to +1 (bottom)
   final double pitch;       // eulerX: + = looking down
   final double yaw;         // eulerY: + = turning right
-  final double roll;        // geometry-based roll for UI indicator
-  final double rawEulerZ;   // raw headEulerAngleZ fed to TFLite feature[7]
-  final double earL;        // left eye open probability × 0.35 (EAR proxy)
-  final double earR;        // right eye open probability × 0.35 (EAR proxy)
-  final double mar;         // mouth aspect ratio from landmarks
+  final double roll;        // eulerZ (degrees): + = face tilts right / camera tilts left
   const HeadPoseResult({
     required this.normalizedX,
     required this.normalizedY,
     required this.pitch,
     required this.yaw,
     required this.roll,
-    required this.rawEulerZ,
-    required this.earL,
-    required this.earR,
-    required this.mar,
   });
 }
 
@@ -45,8 +37,8 @@ class HeadPoseService {
     _detector?.close();
     _detector = FaceDetector(
       options: FaceDetectorOptions(
-        performanceMode: FaceDetectorMode.accurate,
-        enableClassification: true,
+        performanceMode: FaceDetectorMode.fast,
+        enableClassification: false,
         enableLandmarks: true,
         enableTracking: false,
       ),
@@ -103,40 +95,19 @@ class HeadPoseService {
       if (leftEye != null && rightEye != null) {
         final dx = (rightEye.position.x - leftEye.position.x).toDouble();
         final dy = (rightEye.position.y - leftEye.position.y).toDouble();
+        // Image y-axis points down, so negate dy for standard angle convention.
         rawRoll = math.atan2(-dy, dx) * 180 / math.pi;
       } else {
         rawRoll = face.headEulerAngleZ ?? 0.0;
       }
       _smoothedRoll = _alpha * rawRoll + (1 - _alpha) * _smoothedRoll;
 
-      // EAR proxy: eye open probability × 0.35 maps [0,1] → [0, 0.35],
-      // matching the training distribution (mean ear_l ≈ 0.29, mean ear_r ≈ 0.27).
-      final earL = (face.leftEyeOpenProbability  ?? 0.5) * 0.35;
-      final earR = (face.rightEyeOpenProbability ?? 0.5) * 0.35;
-
-      // MAR from mouth landmarks: 2 × vertical opening / horizontal width.
-      final leftMouth   = face.landmarks[FaceLandmarkType.leftMouth];
-      final rightMouth  = face.landmarks[FaceLandmarkType.rightMouth];
-      final bottomMouth = face.landmarks[FaceLandmarkType.bottomMouth];
-      double mar = 0.0;
-      if (leftMouth != null && rightMouth != null && bottomMouth != null) {
-        final mouthW = (rightMouth.position.x - leftMouth.position.x).abs().toDouble();
-        if (mouthW > 0) {
-          final midY = (leftMouth.position.y + rightMouth.position.y) / 2.0;
-          mar = 2.0 * (bottomMouth.position.y - midY).abs() / mouthW;
-        }
-      }
-
       return HeadPoseResult(
         normalizedX: nx,
         normalizedY: ny,
-        pitch:      face.headEulerAngleX ?? 0.0,
-        yaw:        face.headEulerAngleY ?? 0.0,
-        roll:       _smoothedRoll,
-        rawEulerZ:  face.headEulerAngleZ ?? 0.0,
-        earL:       earL,
-        earR:       earR,
-        mar:        mar,
+        pitch: face.headEulerAngleX ?? 0.0,
+        yaw:   face.headEulerAngleY ?? 0.0,
+        roll:  _smoothedRoll,
       );
     } catch (e) {
       debugPrint('[HeadPoseService] $e');
