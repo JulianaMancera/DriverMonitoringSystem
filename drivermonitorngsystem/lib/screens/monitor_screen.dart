@@ -756,11 +756,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // doesn't fire mid-inference. Face data is still fresh enough for yaw compensation.
   void _startHeadPoseUpdates() {
     _headPoseTimer?.cancel();
-    _headPoseTimer = Timer.periodic(const Duration(milliseconds: 800), (_) async {
+    _headPoseTimer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
       final frame = _latestFrame;
       if (frame == null || _isHeadPoseRunning || _camDisposing) return;
-      // Skip if inference is currently running to avoid CPU contention
-      if (_isInferring) return;
       _isHeadPoseRunning = true;
       try {
         final result = await HeadPoseService.instance.detectPose(frame);
@@ -774,19 +772,17 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         // Using real values instead of fixed constants enables drowsy detection.
         if (result != null) {
           TfliteService.instance.updateFaceData(
-            earL:       result.earL,  // real EAR from eye open probability
+            earL:       result.earL,
             earR:       result.earR,
-            mar:        result.mar,   // real MAR from mouth landmarks
+            mar:        result.mar,
             pitch:      result.pitch,
             yaw:        result.yaw,
             rollEulerZ: result.roll,
           );
-        } else {
-          TfliteService.instance.updateFaceData(
-            earL: 0.0, earR: 0.0, mar: 0.0,
-            pitch: 0.0, yaw: 0.0, rollEulerZ: 0.0,
-          );
         }
+        // When face is not detected, keep the last known face values.
+        // Zeroing EAR to 0.0 would falsely signal "eyes completely closed"
+        // and corrupt the temporal buffer used for drowsy detection.
       } finally {
         _isHeadPoseRunning = false;
       }

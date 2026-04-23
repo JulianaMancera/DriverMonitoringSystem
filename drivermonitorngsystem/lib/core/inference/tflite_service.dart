@@ -405,9 +405,15 @@ class TfliteService {
       _updateTemporalBuf(prep.features);
       final temporalFlat = _buildTemporalInput();
 
-      for (int i = 0; i < 13; i++) _behaviorBuf[0][i] = 0.0;
-      for (int i = 0; i < 3;  i++) _parentBuf[0][i]   = 0.0;
-      for (int i = 0; i < 8;  i++) _gazeBuf[0][i]     = 0.0;
+      for (int i = 0; i < 13; i++) {
+        _behaviorBuf[0][i] = 0.0;
+      }
+      for (int i = 0; i < 3;  i++) {
+        _parentBuf[0][i]   = 0.0;
+      }
+      for (int i = 0; i < 8;  i++) {
+        _gazeBuf[0][i]     = 0.0;
+      }
 
       // ── FIX: Correct tensor shape wrapping ─────────────────────────────────
       // TFLite Flutter's runForMultipleInputs requires inputs shaped exactly
@@ -604,7 +610,7 @@ class TfliteService {
       final secThresh = _kBehaviorClassThresholds[secondIdx] ?? 30.0;
       if (secondScore >= secThresh && secondScore >= bestDistScore * 0.60) {
         debugPrint('[CrossClass] Demoted body → ${kClassNames[secondIdx]} '
-            '($secondScore% vs body ${bestDistScore}%)');
+            '($secondScore% vs body $bestDistScore%)');
         bestDistIdx  = secondIdx;
         bestDistScore = secondScore;
       }
@@ -614,12 +620,7 @@ class TfliteService {
     final compensatedYaw      = _faceYaw - kSideMountYawOffset;
     final driverLookingAtRoad = compensatedYaw.abs() <= _kOnRoadYawGate;
 
-    // Per-class minimum threshold — set well above observed noise floor
-    final classMinThreshold     = _kBehaviorClassThresholds[bestDistIdx] ?? 5.0;
-    final bestDistMeetsClassMin = bestDistScore >= classMinThreshold;
-
     final parentSaysDistracted = parentClass == 1;
-    final parentSaysDrowsy     = parentClass == 2;
 
     // ── GROOMING DOMINANCE CHECK ──────────────────────────────────────────────
     // From session 111/112: grooming (class 7) is a persistent false positive
@@ -678,8 +679,7 @@ class TfliteService {
     int    activeStage = 0;
 
     if (drowsyPct >= _kDrowsyPctGate &&
-        bestDrowsyScore >= _kDrowsyBestScore &&
-        (parentSaysDrowsy || drowsyPct >= 20.0)) {
+        bestDrowsyScore >= _kDrowsyBestScore) {
       rawState   = 'drowsy';
       rawBestIdx = bestDrowsyIdx;
     }
