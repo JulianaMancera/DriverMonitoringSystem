@@ -454,7 +454,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
       _cameraController = CameraController(cam, ResolutionPreset.medium,
           enableAudio: false,
-          imageFormatGroup: ImageFormatGroup.yuv420);
+          imageFormatGroup: ImageFormatGroup.yuv420,
+          fps: 30);
       await _cameraController!.initialize();
 
       if (!mounted || _camDisposing) return;
@@ -748,7 +749,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // ── HEAD POSE UPDATES ─────────────────────────────────────────────────────────
   void _startHeadPoseUpdates() {
     _headPoseTimer?.cancel();
-    _headPoseTimer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
+    _headPoseTimer = Timer.periodic(const Duration(milliseconds: 100), (_) async {
       final frame = _latestFrame;
       if (frame == null || _isHeadPoseRunning || _camDisposing) return;
       _isHeadPoseRunning = true;

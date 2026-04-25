@@ -48,10 +48,19 @@ class HeadPoseService {
   InputImageRotation _rotation = InputImageRotation.rotation270deg;
 
   double _smoothedRoll = 0.0;
-  static const double _alpha = 0.5;
+  double _smoothedEarL = 0.3;
+  double _smoothedEarR = 0.3;
+  double _smoothedMar  = 0.0;
+
+  static const double _alpha    = 0.5;  // roll smoothing
+  static const double _earAlpha = 0.4;  // EAR: τ ≈ 195ms at 100ms poll rate
+  static const double _marAlpha = 0.5;  // MAR: more responsive for yawn onset
 
   void init(int sensorOrientation) {
     _smoothedRoll = 0.0;
+    _smoothedEarL = 0.3;
+    _smoothedEarR = 0.3;
+    _smoothedMar  = 0.0;
     _rotation = _rotationFromSensor(sensorOrientation);
     _detector?.close();
     _detector = FaceDetector(
@@ -155,11 +164,12 @@ class HeadPoseService {
         }
       }
 
-      debugPrint('[HeadPose] '
-          'yaw=${face.headEulerAngleY?.toStringAsFixed(1)}° '
-          'roll=${_smoothedRoll.toStringAsFixed(1)}° '
-          'earL=${earL.toStringAsFixed(3)} earR=${earR.toStringAsFixed(3)} '
-          'mar=${mar.toStringAsFixed(3)}');
+      // Smooth EAR and MAR to reduce per-frame blink/speech noise.
+      // EAR α=0.4: τ ≈ 195ms — damps blinks, preserves sustained eye closure.
+      // MAR α=0.5: τ ≈ 144ms — damps brief mouth opens, passes yawns (>200ms).
+      _smoothedEarL = _earAlpha * earL + (1 - _earAlpha) * _smoothedEarL;
+      _smoothedEarR = _earAlpha * earR + (1 - _earAlpha) * _smoothedEarR;
+      _smoothedMar  = _marAlpha * mar  + (1 - _marAlpha) * _smoothedMar;
 
       return HeadPoseResult(
         normalizedX: nx,
@@ -167,9 +177,9 @@ class HeadPoseService {
         pitch: face.headEulerAngleX ?? 0.0,
         yaw:   face.headEulerAngleY ?? 0.0,
         roll:  _smoothedRoll,
-        earL:  earL,
-        earR:  earR,
-        mar:   mar,
+        earL:  _smoothedEarL,
+        earR:  _smoothedEarR,
+        mar:   _smoothedMar,
       );
     } catch (e) {
       debugPrint('[HeadPoseService] $e');

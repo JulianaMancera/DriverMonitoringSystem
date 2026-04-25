@@ -175,8 +175,8 @@ const Map<int, double> _kBehaviorClassThresholds = {
   12: 12.0, // drowsy_microsleep
 };
 
-// Inference gap: 200ms = 5fps inference, camera preview unaffected.
-const int _kMinInferenceGapMs = 200;
+// Inference gap: 150ms ≈ 6.7 FPS inference, camera preview unaffected.
+const int _kMinInferenceGapMs = 150;
 
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -243,6 +243,14 @@ class TfliteService {
   int _behaviorOutputIdx = 0;
   int _parentOutputIdx   = 1;
   int _gazeOutputIdx     = 2;
+
+  // Pre-allocated inference tensors — filled in-place each frame to avoid
+  // allocating ~200K list objects per inference call (major GC pressure fix).
+  final List<List<List<List<double>>>> _inferSpatialBuf = List.generate(
+      1, (_) => List.generate(
+          224, (_) => List.generate(224, (_) => List.filled(3, 0.0))));
+  final List<List<List<double>>> _inferTemporalBuf = List.generate(
+      1, (_) => List.generate(_kSeqLen, (_) => List.filled(_kNumFeat, 0.0)));
 
   List<double> _normMean  = [];
   List<double> _normScale = [];
@@ -411,44 +419,27 @@ class TfliteService {
         _gazeBuf[0][i]     = 0.0;
       }
 
-      // ── FIX: Correct tensor shape wrapping ─────────────────────────────────
-      // TFLite Flutter's runForMultipleInputs requires inputs shaped exactly
-      // as the model expects, using nested Lists — NOT flat Float32List.
-      //
-      // Spatial input:  model expects [1, 224, 224, 3]
-      //   → List<List<List<List<double>>>> with shape [1][224][224][3]
-      //
-      // Temporal input: model expects [1, 30, 25]
-      //   → List<List<List<double>>> with shape [1][30][25]
-      //
-      // Passing a flat Float32List causes:
-      //   "input->dims->size != 4 (1 != 4)" → Bad state: failed precondition
-      //
-      // Build [1, 224, 224, 3] spatial tensor from flat Float32List
-      const int dstH = 224, dstW = 224, channels = 3;
-      final spatialTensor = List.generate(1, (_) =>
-        List.generate(dstH, (h) =>
-          List.generate(dstW, (w) =>
-            List.generate(channels, (c) {
-              final idx = (h * dstW + w) * channels + c;
-              return prep.rgbNormalized[idx].toDouble();
-            })
-          )
-        )
-      );
+      // Fill pre-allocated [1, 224, 224, 3] spatial tensor in-place.
+      // Avoids ~200K list allocations per inference that previously caused GC jank.
+      for (int h = 0; h < 224; h++) {
+        for (int w = 0; w < 224; w++) {
+          final idx = (h * 224 + w) * 3;
+          _inferSpatialBuf[0][h][w][0] = prep.rgbNormalized[idx];
+          _inferSpatialBuf[0][h][w][1] = prep.rgbNormalized[idx + 1];
+          _inferSpatialBuf[0][h][w][2] = prep.rgbNormalized[idx + 2];
+        }
+      }
 
-      // Build [1, 30, 25] temporal tensor from flat Float32List
-      final temporalTensor = List.generate(1, (_) =>
-        List.generate(_kSeqLen, (t) =>
-          List.generate(_kNumFeat, (f) =>
-            temporalFlat[t * _kNumFeat + f].toDouble()
-          )
-        )
-      );
+      // Fill pre-allocated [1, 30, 25] temporal tensor in-place.
+      for (int t = 0; t < _kSeqLen; t++) {
+        for (int f = 0; f < _kNumFeat; f++) {
+          _inferTemporalBuf[0][t][f] = temporalFlat[t * _kNumFeat + f];
+        }
+      }
 
       final inputs = List<Object?>.filled(2, null);
-      inputs[_temporalInputIdx] = temporalTensor;
-      inputs[_spatialInputIdx]  = spatialTensor;
+      inputs[_temporalInputIdx] = _inferTemporalBuf;
+      inputs[_spatialInputIdx]  = _inferSpatialBuf;
 
       _interpreter!.runForMultipleInputs(
         inputs.cast<Object>(),
