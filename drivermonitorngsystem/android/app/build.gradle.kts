@@ -19,6 +19,10 @@ android {
         jvmTarget = "21"
     }
 
+    aaptOptions {
+        noCompress("tflite")
+    }
+
     defaultConfig {
         applicationId = "com.example.smartalertdrive"
         minSdk = 26

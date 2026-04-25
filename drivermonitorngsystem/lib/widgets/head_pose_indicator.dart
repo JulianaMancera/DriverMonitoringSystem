@@ -31,20 +31,19 @@ class HeadPoseIndicator extends StatelessWidget {
   }
 }
 
-// ── Zone helpers ───────────────────────────────────────────────────────────────
+// Zone helpers 
+  Color zoneColorFromRoll(double rollDeg) {
+    final r = rollDeg.abs();
+    // Widened to match 30–45° side-mount normal operating angle.
+    // Green:  |roll| < 30°  (was 20°) — optimal
+    // Yellow: 30–55°        (was 45°) — side mount normal range, still detects
+    // Red:    > 55°         (was 45°) — extreme tilt, accuracy drops significantly
+    if (r < 30) return const Color(0xFF22c55e);
+    if (r < 55) return const Color(0xFFfbbf24);
+    return const Color(0xFFef4444);
+  }
 
-/// Zone based on camera roll (degrees).
-/// Green: |roll| < 20°  — straight, accurate detection
-/// Yellow: 20–45°       — slight tilt, lower accuracy
-/// Red: > 45°           — too tilted, cannot detect reliably
-Color zoneColorFromRoll(double rollDeg) {
-  final r = rollDeg.abs();
-  if (r < 20) return const Color(0xFF22c55e);
-  if (r < 45) return const Color(0xFFfbbf24);
-  return const Color(0xFFef4444);
-}
-
-// ── Painter ────────────────────────────────────────────────────────────────────
+// Painter 
 
 class _GaugePainter extends CustomPainter {
   final double roll;
@@ -69,15 +68,16 @@ class _GaugePainter extends CustomPainter {
     // Yellow arcs: ±20°–45° from 12 o'clock (two symmetric slices)
     final yellowPaint = Paint()
       ..color = const Color(0xFFfbbf24).withValues(alpha: 0.82);
-    final yellowStart = 20 * math.pi / 180; // 20°
-    final yellowSpan  = 25 * math.pi / 180; // 20°→45°
+    final yellowStart = 30 * math.pi / 180; // 30° (was 20°)
+    final yellowSpan  = 25 * math.pi / 180; // 30°→55° (was 20°→45°)
     canvas.drawArc(rect, -math.pi / 2 - yellowStart - yellowSpan,
         yellowSpan, true, yellowPaint);
     canvas.drawArc(rect, -math.pi / 2 + yellowStart,
         yellowSpan, true, yellowPaint);
-
-    // Green arc: ±20° from 12 o'clock
-    final greenSpan = 20 * math.pi / 180 * 2; // total 40°
+ 
+    // Green arc: ±30° from 12 o'clock (was ±20°)
+    // At 30–45° side mount, the camera icon now lands in green/yellow.
+    final greenSpan = 30 * math.pi / 180 * 2; // total 60° (was 40°)
     canvas.drawArc(
       rect,
       -math.pi / 2 - greenSpan / 2,
@@ -86,7 +86,7 @@ class _GaugePainter extends CustomPainter {
       Paint()..color = const Color(0xFF22c55e).withValues(alpha: 0.88),
     );
 
-    // ── Outer border — color matches current tilt zone ─────────────────────────
+    // Outer border — color matches current tilt zone 
     canvas.drawCircle(
       center, radius,
       Paint()
@@ -95,10 +95,10 @@ class _GaugePainter extends CustomPainter {
         ..strokeWidth = 3.0,
     );
 
-    // ── Inner reference dot ────────────────────────────────────────────────────
+    // Inner reference dot 
     canvas.drawCircle(center, 3, Paint()..color = Colors.white54);
 
-    // ── Person silhouette (head + body arc) ────────────────────────────────────
+    // Person silhouette (head + body arc) 
     final personY     = cy + radius * 0.38;
     final headRadius  = size.width * 0.072;
     final personPaint = Paint()

@@ -5,8 +5,8 @@ import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
 import '../utils/responsive.dart';
 
-const Color _kDrowsyColor     = Color(0xFFF59E0B);
-const Color _kDistractedColor = Color(0xFFA855F7);
+const Color _kDrowsyColor     = Colors.red;
+const Color _kDistractedColor = Color(0xFFfbbf24);
 
 class _FilterNotifier extends Notifier<int?> {
   @override

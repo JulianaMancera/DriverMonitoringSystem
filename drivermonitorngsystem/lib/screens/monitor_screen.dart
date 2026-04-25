@@ -21,7 +21,9 @@ import '../utils/responsive.dart';
 // GLOBAL — allows stop from notification even during PiP
 _MonitorScreenState? _activeMonitorState;
 
-// MONITOR SCREEN 
+// ─────────────────────────────────────────────────────────────────────────────
+// MONITOR SCREEN
+// ─────────────────────────────────────────────────────────────────────────────
 class MonitorScreen extends ConsumerStatefulWidget {
   const MonitorScreen({super.key});
   @override
@@ -84,7 +86,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   Timer?       _headPoseTimer;
   bool         _isHeadPoseRunning = false;
 
-  // LIFECYCLE
+  // ── LIFECYCLE ────────────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
@@ -171,7 +173,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     super.dispose();
   }
 
-  // TASK DATA CALLBACK
+  // ── TASK DATA CALLBACK ───────────────────────────────────────────────────────
   void _onReceiveTaskData(Object data) async {
     String? message;
     if (data is String) {
@@ -235,7 +237,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // LIFECYCLE STATE
+  // ── LIFECYCLE STATE ──────────────────────────────────────────────────────────
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) async {
     switch (state) {
@@ -277,7 +279,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // CAMERA LIFECYCLE
+  // ── CAMERA LIFECYCLE ─────────────────────────────────────────────────────────
   void _onCameraValueChanged() {
     if (!mounted || _camDisposing) return;
     final ctrl = _cameraController;
@@ -338,7 +340,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // CAMERA INIT
+  // ── CAMERA INIT ──────────────────────────────────────────────────────────────
   Future<void> _loadPreferencesAndInit() async {
     final prefs = PreferencesHelper.instance;
     _prefAlertSensitivity = await prefs.getAlertSensitivity();
@@ -452,7 +454,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
       _cameraController = CameraController(cam, ResolutionPreset.medium,
           enableAudio: false,
-          imageFormatGroup: ImageFormatGroup.yuv420);
+          imageFormatGroup: ImageFormatGroup.yuv420,
+          fps: 30);
       await _cameraController!.initialize();
 
       if (!mounted || _camDisposing) return;
@@ -472,7 +475,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
-  // LOG HELPERS
+  // ── LOG HELPERS ──────────────────────────────────────────────────────────────
   void _flushPendingLogs() {
     if (_pendingLogs.isEmpty) return;
 
@@ -526,7 +529,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     });
   }
 
-  // SESSION
+  // ── SESSION ──────────────────────────────────────────────────────────────────
   Future<void> _startRecording() async {
     // Show camera-alignment guide on first use
     final guideSeen = await PreferencesHelper.instance.getCameraGuideSeen();
@@ -539,9 +542,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     await DatabaseHelper.instance.insertStateCount(_currentSessionId!);
     _sessionStartTime      = DateTime.now();
     await ActiveSession.start(_currentSessionId!);
+
     _consecutiveDrowsy     = 0;
     _consecutiveDistracted = 0;
     _alertLevel            = 0;
+    _isStopping            = false; // reset guard in case it got stuck
+    TfliteService.instance.resetSession();
 
     if (_cameraInitialized && _modelLoaded && !_camDisposing) {
       try {
@@ -552,6 +558,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         _addLogSync('Inference stream error: $e', 'WARNING');
       }
     }
+
+    _startHeadPoseUpdates();
 
     ref.read(isRecordingProvider.notifier).set(true);
     PipService.setRecording(true);
@@ -570,36 +578,16 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(dbChangeCounterProvider.notifier).increment();
   }
 
-  Future<void> _stopRecording() async {
-    if (_currentSessionId == null && ActiveSession.isActive) {
-      _currentSessionId = ActiveSession.sessionId;
-      _sessionStartTime = ActiveSession.startTime;
-    }
-    if (_currentSessionId == null) return;
-    _snapshotTimer?.cancel();
+  double _computeAlertnessAvg(
+      List<Map<String, dynamic>> snapshots, double fallback) {
+    if (snapshots.isEmpty) return fallback;
+    final sum = snapshots.fold<double>(
+        0.0, (acc, s) => acc + (s['alertness_pct'] as num).toDouble());
+    return sum / snapshots.length;
+  }
 
-    await _saveAlertnessSnapshot();
-
-    await _pauseCameraStream();
-    await _alarmPlayer.stop();
-    _alertLevel = _consecutiveDrowsy = _consecutiveDistracted = 0;
-
-    final durationSec = _sessionStartTime != null
-        ? DateTime.now().difference(_sessionStartTime!).inSeconds : 0;
-
-    final snapshots = await DatabaseHelper.instance
-        .getAlertnessSnapshots(_currentSessionId!);
-    final double alertness;
-    if (snapshots.isNotEmpty) {
-      final sum = snapshots.fold<double>(
-          0.0, (acc, s) => acc + ((s['alertness_pct'] as num).toDouble()));
-      alertness = sum / snapshots.length;
-    } else {
-      alertness = ref.read(alertnessPctProvider);
-    }
-
-    final alerts =
-        await DatabaseHelper.instance.getAlertsBySession(_currentSessionId!);
+  double _computeSafetyScore(
+      List<Map<String, dynamic>> alerts, int durationSec) {
     double totalPenalty = 0.0;
     for (final a in alerts) {
       final level = (a['alert_level'] as int?) ?? 1;
@@ -611,64 +599,112 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         totalPenalty += 8.0;
       }
     }
-    // Normalise penalty by session length so short/long sessions are comparable.
-    const double normalizationFactor = 10.0;
     final durationMin = durationSec > 0 ? durationSec / 60.0 : 1.0;
-    final penaltyPerMinute = totalPenalty / durationMin;
-    final safetyScore =
-        (100.0 - penaltyPerMinute * normalizationFactor).clamp(0.0, 100.0);
+    return (100.0 - (totalPenalty / durationMin) * 10.0).clamp(0.0, 100.0);
+  }
 
-    await DatabaseHelper.instance.endSession(
-      sessionId:    _currentSessionId!,
-      durationSec:  durationSec,
-      alertnessAvg: alertness,
-      safetyScore:  safetyScore,
-    );
+  // Re-entrancy guard: prevents _stopRecording from running twice simultaneously.
+  // The double-call happens when the Stop button is tapped AND the notification
+  // stop button fires at the same time (both call _stopRecording).
+  bool _isStopping = false;
 
-    debugPrint('[Monitor] Session $_currentSessionId ended — '
-        'score: ${safetyScore.toInt()}%');
-    await ActiveSession.clear();
-
-    if (mounted) {
-      ref.read(isInPipProvider.notifier).set(false);
-      _flushPendingLogs();
+  Future<void> _stopRecording() async {
+    // Prevent double-call: if already stopping, bail immediately
+    if (_isStopping) {
+      debugPrint('[Monitor] _stopRecording called while already stopping — ignoring');
+      return;
     }
-    _addLogSync('Session Ended — Score: ${safetyScore.toInt()}%', 'INFO');
+    _isStopping = true;
 
-    BantayDriveService.stopService();
-    PipService.setRecording(false);
-
-    _currentSessionId = null;
-    _sessionStartTime = null;
-    _pipResumeHandled = false;
-    _isInPipRecovery  = false;
-
-    final drowsyAlerts     = alerts.where((a) => a['alert_type'] == 'DROWSY').length;
-    final distractedAlerts = alerts.where((a) => a['alert_type'] == 'DISTRACTED').length;
-
-    ref.read(isRecordingProvider.notifier).set(false);
-    ref.read(driverStateProvider.notifier).set('neutral');
-    ref.read(showAlertBannerProvider.notifier).set(false);
-    ref.read(alertnessPctProvider.notifier).set(100.0);
-    ref.read(drowsinessPctProvider.notifier).set(0.0);
-    ref.read(distractionPctProvider.notifier).set(0.0);
-    ref.read(activeSubclassProvider.notifier).set(null);
-    ref.read(activeSubclassIndexProvider.notifier).set(0);
-
-    if (mounted) {
-      ref.read(dbChangeCounterProvider.notifier).increment();
-
-      // Only show the session summary modal if the user has enabled it in Settings.
-      final showSummary =
-          await PreferencesHelper.instance.getShowSessionSummary();
-      if (mounted && showSummary) {
-        _showSessionSummaryModal(
-          durationSec:      durationSec,
-          safetyScore:      safetyScore,
-          drowsyAlerts:     drowsyAlerts,
-          distractedAlerts: distractedAlerts,
-        );
+    try {
+      if (_currentSessionId == null && ActiveSession.isActive) {
+        _currentSessionId = ActiveSession.sessionId;
+        _sessionStartTime = ActiveSession.startTime;
       }
+      // Guard: if still null after restore, nothing to stop
+      if (_currentSessionId == null) {
+        BantayDriveService.stopService();
+        PipService.setRecording(false);
+        if (mounted) {
+          ref.read(isRecordingProvider.notifier).set(false);
+          ref.read(driverStateProvider.notifier).set('neutral');
+          ref.read(showAlertBannerProvider.notifier).set(false);
+        }
+        return; // finally still runs and resets _isStopping
+      }
+
+      _snapshotTimer?.cancel();
+
+      await _saveAlertnessSnapshot();
+
+      await _pauseCameraStream();
+      await _alarmPlayer.stop();
+      _alertLevel = _consecutiveDrowsy = _consecutiveDistracted = 0;
+
+      final durationSec = _sessionStartTime != null
+          ? DateTime.now().difference(_sessionStartTime!).inSeconds : 0;
+
+      final snapshots = await DatabaseHelper.instance
+          .getAlertnessSnapshots(_currentSessionId!);
+      final alertness = _computeAlertnessAvg(snapshots, ref.read(alertnessPctProvider));
+
+      final alerts =
+          await DatabaseHelper.instance.getAlertsBySession(_currentSessionId!);
+      final safetyScore = _computeSafetyScore(alerts, durationSec);
+
+      await DatabaseHelper.instance.endSession(
+        sessionId:    _currentSessionId!,
+        durationSec:  durationSec,
+        alertnessAvg: alertness,
+        safetyScore:  safetyScore,
+      );
+
+      debugPrint('[Monitor] Session $_currentSessionId ended — '
+          'score: ${safetyScore.toInt()}%');
+      await ActiveSession.clear();
+
+      if (mounted) {
+        ref.read(isInPipProvider.notifier).set(false);
+        _flushPendingLogs();
+      }
+      _addLogSync('Session Ended — Score: ${safetyScore.toInt()}%', 'INFO');
+
+      BantayDriveService.stopService();
+      PipService.setRecording(false);
+
+      _currentSessionId = null;
+      _sessionStartTime = null;
+      _pipResumeHandled = false;
+      _isInPipRecovery  = false;
+
+      final drowsyAlerts     = alerts.where((a) => a['alert_type'] == 'DROWSY').length;
+      final distractedAlerts = alerts.where((a) => a['alert_type'] == 'DISTRACTED').length;
+
+      ref.read(isRecordingProvider.notifier).set(false);
+      ref.read(driverStateProvider.notifier).set('neutral');
+      ref.read(showAlertBannerProvider.notifier).set(false);
+      ref.read(alertnessPctProvider.notifier).set(100.0);
+      ref.read(drowsinessPctProvider.notifier).set(0.0);
+      ref.read(distractionPctProvider.notifier).set(0.0);
+      ref.read(activeSubclassProvider.notifier).set(null);
+      ref.read(activeSubclassIndexProvider.notifier).set(0);
+
+      if (mounted) {
+        ref.read(dbChangeCounterProvider.notifier).increment();
+
+        final showSummary =
+            await PreferencesHelper.instance.getShowSessionSummary();
+        if (mounted && showSummary) {
+          _showSessionSummaryModal(
+            durationSec:      durationSec,
+            safetyScore:      safetyScore,
+            drowsyAlerts:     drowsyAlerts,
+            distractedAlerts: distractedAlerts,
+          );
+        }
+      }
+    } finally {
+      _isStopping = false;
     }
   }
 
@@ -693,10 +729,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // INFERENCE
+  // ── INFERENCE ────────────────────────────────────────────────────────────────
   bool _isInferring = false;
 
-  // Non-async so the camera system isn't blocked waiting for inference to finish.
+  // Non-async so the camera system isn't blocked waiting for inference.
   void _onCameraFrame(CameraImage frame) {
     _latestFrame = frame;
     if (_camDisposing || _isInferring) return;
@@ -710,19 +746,34 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }).catchError((_) { _isInferring = false; });
   }
 
-  // HEAD POSE UPDATES ──────────────────────────────────────────────────────────
-
+  // ── HEAD POSE UPDATES ─────────────────────────────────────────────────────────
   void _startHeadPoseUpdates() {
     _headPoseTimer?.cancel();
-    _headPoseTimer = Timer.periodic(const Duration(milliseconds: 1000), (_) async {
+    _headPoseTimer = Timer.periodic(const Duration(milliseconds: 100), (_) async {
       final frame = _latestFrame;
-      if (frame == null || _isInferring || _isHeadPoseRunning || _camDisposing) return;
+      if (frame == null || _isHeadPoseRunning || _camDisposing) return;
       _isHeadPoseRunning = true;
       try {
         final result = await HeadPoseService.instance.detectPose(frame);
+
+        // Update circle indicator
         if (mounted) {
           _headPose.value = (result?.roll ?? 0.0, result != null);
         }
+
+        if (result != null) {
+          TfliteService.instance.updateFaceData(
+            earL:       result.earL,
+            earR:       result.earR,
+            mar:        result.mar,
+            pitch:      result.pitch,
+            yaw:        result.yaw,
+            rollEulerZ: result.roll,
+          );
+        }
+        // When face is not detected, keep the last known face values.
+        // Zeroing EAR to 0.0 would falsely signal "eyes completely closed"
+        // and corrupt the temporal buffer used for drowsy detection.
       } finally {
         _isHeadPoseRunning = false;
       }
@@ -735,9 +786,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (mounted) _headPose.value = (0.0, false);
   }
 
+  // 55° avoids false warnings for typical side-mount angles (30–45°).
   bool _isInRedZone(double rollDeg, bool hasFace) {
     if (!hasFace) return false;
-    return rollDeg.abs() >= 45.0;
+    return rollDeg.abs() >= 55.0;
   }
 
   Future<bool> _showCameraGuide() async {
@@ -790,9 +842,16 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       default:
         _consecutiveDrowsy     = (_consecutiveDrowsy     - 1).clamp(0, 999);
         _consecutiveDistracted = (_consecutiveDistracted - 1).clamp(0, 999);
-        if (_alertLevel > 0 && _alertLevel < 3) {
+        // Only clear an active L1/L2 alert once both counters drop below the
+        // L1 threshold. A single neutral frame during borderline drowsiness was
+        // previously zeroing _alertLevel immediately, making L2/L3 unreachable.
+        final thresholds = _sensitivityThresholds[_prefAlertSensitivity] ?? [3, 6, 9];
+        if (_alertLevel > 0 && _alertLevel < 3 &&
+            _consecutiveDrowsy < thresholds[0] &&
+            _consecutiveDistracted < thresholds[0]) {
           _alertLevel = 0;
           _alarmPlayer.stop();
+          ref.read(showAlertBannerProvider.notifier).set(false);
         }
         ref.read(activeSubclassProvider.notifier).set('safe_driving');
         ref.read(activeSubclassIndexProvider.notifier).set(0);
@@ -859,7 +918,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (mounted) ref.read(dbChangeCounterProvider.notifier).increment();
   }
 
-  // BUILD
+  // ── BUILD ────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final isInPip = ref.watch(isInPipProvider);
@@ -890,7 +949,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // PiP VIEW
+  // ── PiP VIEW ─────────────────────────────────────────────────────────────────
   Widget _buildPipView() {
     final isRecording = ref.watch(isRecordingProvider);
 
@@ -1003,7 +1062,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // LAYOUTS
+  // ── LAYOUTS ──────────────────────────────────────────────────────────────────
   Widget _buildPortraitLayout() => LayoutBuilder(
       builder: (context, constraints) {
         final availH = constraints.maxHeight;
@@ -1031,7 +1090,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       },
     );
 
-  // CAMERA CHILD — ML Kit face box overlay removed
   Widget _buildCameraChild(double camW, double camH) {
     final ctrl = _cameraController;
     final canShow = _cameraInitialized &&
@@ -1310,7 +1368,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         ),
       );
 
-  // ALERT BANNER — L1/L2
+  // ── ALERT BANNER — L1/L2 ────────────────────────────────────────────────────
   Widget _buildAlertBanner(String type) {
     final isDrowsy  = type == 'DROWSY';
     final slideAnim = _notifSlide ?? AlwaysStoppedAnimation(Offset.zero);
@@ -1356,23 +1414,17 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       padding: EdgeInsets.symmetric(
                           horizontal: context.rp(12), vertical: context.rs(10)),
                       child: Row(children: [
-                        AnimatedBuilder(
-                          animation: _warningAnimation,
-                          builder: (context, child) {
-                            final p = (_warningAnimation.value - 0.8) / 0.2;
-                            return Container(
-                              width: context.ri(40), height: context.ri(40),
-                              decoration: BoxDecoration(
-                                color: Colors.red.shade800,
-                                borderRadius: BorderRadius.circular(context.rp(10)),
-                                boxShadow: [BoxShadow(
-                                    color: Colors.red.withValues(alpha: 0.3 + 0.4 * p),
-                                    blurRadius: 14, spreadRadius: 1)],
-                              ),
-                              child: Icon(Icons.warning_amber_rounded,
-                                  color: Colors.white, size: context.ri(22)),
-                            );
-                          },
+                        Container(
+                          width: context.ri(40), height: context.ri(40),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade800,
+                            borderRadius: BorderRadius.circular(context.rp(10)),
+                            boxShadow: [BoxShadow(
+                                color: Colors.red.withValues(alpha: 0.3 + 0.4 * pulse),
+                                blurRadius: 14, spreadRadius: 1)],
+                          ),
+                          child: Icon(Icons.warning_amber_rounded,
+                              color: Colors.white, size: context.ri(22)),
                         ),
                         SizedBox(width: context.rp(10)),
                         Expanded(child: Column(
@@ -1429,7 +1481,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // WARNING OVERLAY — L3
+  // ── WARNING OVERLAY — L3 ─────────────────────────────────────────────────────
   Widget _buildWarningOverlay(String type) {
     final isDrowsy = type == 'DROWSY';
     return GestureDetector(
@@ -1526,7 +1578,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
   }
 
-  // METRICS + SYSTEM LOG
+  // ── METRICS + SYSTEM LOG ─────────────────────────────────────────────────────
   Widget _buildMetricsSidebar() {
     final alertness   = ref.watch(alertnessPctProvider);
     final drowsiness  = ref.watch(drowsinessPctProvider);
@@ -1638,41 +1690,49 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   textAlign: TextAlign.center),
             )
           else
-            SizedBox(
-              height: context.rs(context.isSmallPhone ? 90 : 115),
-              child: ListView.builder(
-                physics: const BouncingScrollPhysics(),
-                itemCount: _systemLogs.length > 20 ? 20 : _systemLogs.length,
-                itemBuilder: (context, index) {
-                  final log = _systemLogs.reversed.toList()[index];
-                  Color textColor;
-                  switch (log['type']) {
-                    case 'SUCCESS': textColor = const Color(0xFF10b981); break;
-                    case 'WARNING': textColor = const Color(0xFFfbbf24); break;
-                    default:        textColor = const Color(0xFF94a3b8);
-                  }
-                  return Padding(
-                    padding: EdgeInsets.only(bottom: context.rs(5)),
-                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('[${log['time']}]',
-                          style: TextStyle(color: const Color(0xFF475569),
-                              fontSize: context.sp(9), fontFamily: 'monospace')),
-                      SizedBox(width: context.rp(6)),
-                      Expanded(child: Text(log['message'],
-                          style: TextStyle(color: textColor,
-                              fontSize: context.sp(9), fontFamily: 'monospace'))),
-                    ]),
-                  );
-                },
-              ),
-            ),
+            Builder(builder: (context) {
+              final recentLogs =
+                  _systemLogs.reversed.take(20).toList();
+              return SizedBox(
+                height: context.rs(context.isSmallPhone ? 90 : 115),
+                child: ListView.builder(
+                  physics: const BouncingScrollPhysics(),
+                  itemCount: recentLogs.length,
+                  itemBuilder: (context, index) {
+                    final log = recentLogs[index];
+                    final textColor = switch (log['type']) {
+                      'SUCCESS' => const Color(0xFF10b981),
+                      'WARNING' => const Color(0xFFfbbf24),
+                      _         => const Color(0xFF94a3b8),
+                    };
+                    return Padding(
+                      padding: EdgeInsets.only(bottom: context.rs(5)),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('[${log['time']}]',
+                              style: TextStyle(color: const Color(0xFF475569),
+                                  fontSize: context.sp(9), fontFamily: 'monospace')),
+                          SizedBox(width: context.rp(6)),
+                          Expanded(child: Text(log['message'],
+                              style: TextStyle(color: textColor,
+                                  fontSize: context.sp(9), fontFamily: 'monospace'))),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              );
+            }),
         ],
       ),
     );
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // METRIC GAUGE
+// ─────────────────────────────────────────────────────────────────────────────
 class _MetricGauge extends StatelessWidget {
   final String label; final double value;
   final Color color;  final IconData icon;
@@ -1740,7 +1800,9 @@ class _MetricGauge extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // CAMERA OVERLAY BUTTON
+// ─────────────────────────────────────────────────────────────────────────────
 class _CameraOverlayButton extends StatelessWidget {
   final IconData icon; final String label;
   final bool isActive; final Color activeColor;
@@ -1774,7 +1836,9 @@ class _CameraOverlayButton extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // SESSION SUMMARY MODAL
+// ─────────────────────────────────────────────────────────────────────────────
 class _SessionSummaryModal extends StatefulWidget {
   final int    durationSec;
   final double safetyScore;
@@ -2029,9 +2093,9 @@ class _ScoreRing extends StatelessWidget {
 }
 
 class _AlertChip extends StatelessWidget {
-  final String label;
-  final int    count;
-  final Color  color;
+  final String  label;
+  final int     count;
+  final Color   color;
   final IconData icon;
   const _AlertChip({
     required this.label,
@@ -2074,8 +2138,9 @@ class _AlertChip extends StatelessWidget {
   }
 }
 
-// ── Camera-alignment guide dialog ─────────────────────────────────────────────
-
+// ─────────────────────────────────────────────────────────────────────────────
+// CAMERA ALIGNMENT GUIDE DIALOG
+// ─────────────────────────────────────────────────────────────────────────────
 class _CameraGuideDialog extends StatelessWidget {
   final ValueNotifier<(double, bool)> headPose;
   const _CameraGuideDialog({required this.headPose});
@@ -2101,7 +2166,6 @@ class _CameraGuideDialog extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          // Live tilt indicator
           ValueListenableBuilder<(double, bool)>(
             valueListenable: headPose,
             builder: (_, pose, __) => HeadPoseIndicator(
@@ -2111,11 +2175,10 @@ class _CameraGuideDialog extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          // Guide card — border turns green when tilt is in green zone
           ValueListenableBuilder<(double, bool)>(
             valueListenable: headPose,
             builder: (_, pose, __) {
-              final inGreen = pose.$2 && pose.$1.abs() < 20.0;
+              final inGreen = pose.$2 && pose.$1.abs() < 30.0;
               return Container(
                 padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
                 decoration: BoxDecoration(
@@ -2130,8 +2193,8 @@ class _CameraGuideDialog extends StatelessWidget {
                 ),
                 child: Column(children: [
                   const Text(
-                    'Hold your phone upright and tilt it left or right '
-                    'until the camera icon is centered in the green zone.',
+                    'Position your phone to the right side of the driver at '
+                    '30–45°. The camera icon should be in the green or yellow zone.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 14,
