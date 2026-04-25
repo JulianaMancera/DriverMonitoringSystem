@@ -66,8 +66,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   Animation<Offset>?       _notifSlide;
   Animation<double>?       _notifFade;
 
-  int  _prefAlertSensitivity = 1;
-  bool _prefAutoStart        = false;
+  int    _prefAlertSensitivity = 1;
+  bool   _prefAutoStart        = false;
+  String _lastLoggedState      = '';
+  String _lastLoggedSubclass   = '';
 
   static const bool _mirrorCamera = false;
 
@@ -546,6 +548,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _consecutiveDrowsy     = 0;
     _consecutiveDistracted = 0;
     _alertLevel            = 0;
+    _lastLoggedState       = '';
+    _lastLoggedSubclass    = '';
     _isStopping            = false; // reset guard in case it got stuck
     TfliteService.instance.resetSession();
 
@@ -749,7 +753,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // ── HEAD POSE UPDATES ─────────────────────────────────────────────────────────
   void _startHeadPoseUpdates() {
     _headPoseTimer?.cancel();
-    _headPoseTimer = Timer.periodic(const Duration(milliseconds: 100), (_) async {
+    _headPoseTimer = Timer.periodic(const Duration(milliseconds: 200), (_) async {
       final frame = _latestFrame;
       if (frame == null || _isHeadPoseRunning || _camDisposing) return;
       _isHeadPoseRunning = true;
@@ -824,18 +828,26 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       case 'drowsy':
         _consecutiveDrowsy++;
         _consecutiveDistracted = (_consecutiveDistracted - 1).clamp(0, 999);
-        _addLogSync(
-          '[${modelSourceLabel(r.modelSource)}] '
-          '${r.subclass} — ${r.drowsyPct.toInt()}% drowsy', 'WARNING');
+        if (r.state != _lastLoggedState || r.subclass != _lastLoggedSubclass) {
+          _lastLoggedState    = r.state;
+          _lastLoggedSubclass = r.subclass;
+          _addLogSync(
+            '[${modelSourceLabel(r.modelSource)}] '
+            '${r.subclass} — ${r.drowsyPct.toInt()}% drowsy', 'WARNING');
+        }
         _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy);
         BantayDriveService.updateState('drowsy');
         break;
       case 'distracted':
         _consecutiveDistracted++;
         _consecutiveDrowsy = (_consecutiveDrowsy - 1).clamp(0, 999);
-        _addLogSync(
-          '[${modelSourceLabel(r.modelSource)}] '
-          '${r.subclass} — ${r.distractedPct.toInt()}% distracted', 'WARNING');
+        if (r.state != _lastLoggedState || r.subclass != _lastLoggedSubclass) {
+          _lastLoggedState    = r.state;
+          _lastLoggedSubclass = r.subclass;
+          _addLogSync(
+            '[${modelSourceLabel(r.modelSource)}] '
+            '${r.subclass} — ${r.distractedPct.toInt()}% distracted', 'WARNING');
+        }
         _checkAndTriggerAlert('DISTRACTED', _consecutiveDistracted);
         BantayDriveService.updateState('distracted');
         break;
