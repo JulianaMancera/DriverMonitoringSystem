@@ -12,7 +12,6 @@
 // ROOT CAUSE OF "DETECTION NOT WORKING" (all screenshots showed 0%):
 //   The previous version had gates that were TOO STRICT:
 //   - _kDistractedThreshold = 22 frames × 200 ms = 4.4 seconds continuous
-//   - _kStableSubclassMin   = 12 frames = same class for 2.4 s before counting
 //   - distractedPct gate    = 78% (model rarely outputs this high from side angle)
 //   - farLeftVeto at -20°   was vetoing all normal forward-driving detections
 //   These combined made detection practically impossible.
@@ -130,9 +129,6 @@ const double _kDistPctLow     = 15.0;
 const double _kDistBestLow    =  8.0;
 const int    _kDistThreshLow  = 22;   // 4.4s
 
-// Subclass stability: 2 frames of same class before counting starts.
-// With lower gates, brief noise spikes are handled by the consecutive counter.
-const int _kStableSubclassMin = 2;
 
 // ── Per-class minimum confidence thresholds ──────────────────────────────────
 //

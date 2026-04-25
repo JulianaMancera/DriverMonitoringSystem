@@ -461,7 +461,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       setState(() { _cameraInitialized = true; _cameraError = null; });
 
       HeadPoseService.instance.init(cam.sensorOrientation);
-      // Start head pose updates (also wires face data to TfliteService)
       _startHeadPoseUpdates();
 
       _cameraController!.addListener(_onCameraValueChanged);
@@ -543,8 +542,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _sessionStartTime      = DateTime.now();
     await ActiveSession.start(_currentSessionId!);
 
-    // PATCH 3: Reset monitor-level counters AND TFLite temporal buffer so
-    // stale data from a previous session doesn't bias the first few seconds.
     _consecutiveDrowsy     = 0;
     _consecutiveDistracted = 0;
     _alertLevel            = 0;
@@ -561,10 +558,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       }
     }
 
-    // PATCH 2: Always restart head pose timer on new session.
-    // _stopHeadPoseUpdates() cancels the timer during _pauseCameraStream(),
-    // so without this the indicator goes blank after Stop → Record.
-    // PATCH 4: _startHeadPoseUpdates() also wires face data to TfliteService.
     _startHeadPoseUpdates();
 
     ref.read(isRecordingProvider.notifier).set(true);
@@ -582,6 +575,31 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _snapshotTimer = Timer.periodic(
         const Duration(seconds: 5), (_) => _saveAlertnessSnapshot());
     ref.read(dbChangeCounterProvider.notifier).increment();
+  }
+
+  double _computeAlertnessAvg(
+      List<Map<String, dynamic>> snapshots, double fallback) {
+    if (snapshots.isEmpty) return fallback;
+    final sum = snapshots.fold<double>(
+        0.0, (acc, s) => acc + (s['alertness_pct'] as num).toDouble());
+    return sum / snapshots.length;
+  }
+
+  double _computeSafetyScore(
+      List<Map<String, dynamic>> alerts, int durationSec) {
+    double totalPenalty = 0.0;
+    for (final a in alerts) {
+      final level = (a['alert_level'] as int?) ?? 1;
+      if (level == 1) {
+        totalPenalty += 2.0;
+      } else if (level == 2) {
+        totalPenalty += 4.0;
+      } else {
+        totalPenalty += 8.0;
+      }
+    }
+    final durationMin = durationSec > 0 ? durationSec / 60.0 : 1.0;
+    return (100.0 - (totalPenalty / durationMin) * 10.0).clamp(0.0, 100.0);
   }
 
   // Re-entrancy guard: prevents _stopRecording from running twice simultaneously.
@@ -627,33 +645,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
       final snapshots = await DatabaseHelper.instance
           .getAlertnessSnapshots(_currentSessionId!);
-      final double alertness;
-      if (snapshots.isNotEmpty) {
-        final sum = snapshots.fold<double>(
-            0.0, (acc, s) => acc + ((s['alertness_pct'] as num).toDouble()));
-        alertness = sum / snapshots.length;
-      } else {
-        alertness = ref.read(alertnessPctProvider);
-      }
+      final alertness = _computeAlertnessAvg(snapshots, ref.read(alertnessPctProvider));
 
       final alerts =
           await DatabaseHelper.instance.getAlertsBySession(_currentSessionId!);
-      double totalPenalty = 0.0;
-      for (final a in alerts) {
-        final level = (a['alert_level'] as int?) ?? 1;
-        if (level == 1) {
-          totalPenalty += 2.0;
-        } else if (level == 2) {
-          totalPenalty += 4.0;
-        } else {
-          totalPenalty += 8.0;
-        }
-      }
-      const double normalizationFactor = 10.0;
-      final durationMin = durationSec > 0 ? durationSec / 60.0 : 1.0;
-      final penaltyPerMinute = totalPenalty / durationMin;
-      final safetyScore =
-          (100.0 - penaltyPerMinute * normalizationFactor).clamp(0.0, 100.0);
+      final safetyScore = _computeSafetyScore(alerts, durationSec);
 
       await DatabaseHelper.instance.endSession(
         sessionId:    _currentSessionId!,
@@ -750,10 +746,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   // ── HEAD POSE UPDATES ─────────────────────────────────────────────────────────
-  // PATCH 4: Runs at 800ms (was 500ms) to reduce main thread congestion.
-  // Camera lag was caused by head pose (500ms) + inference (200ms) + ML Kit
-  // all competing for CPU simultaneously. 800ms spacing ensures head pose
-  // doesn't fire mid-inference. Face data is still fresh enough for yaw compensation.
   void _startHeadPoseUpdates() {
     _headPoseTimer?.cancel();
     _headPoseTimer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
@@ -768,8 +760,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           _headPose.value = (result?.roll ?? 0.0, result != null);
         }
 
-        // PATCH 4: Wire face pose AND real EAR/MAR to TfliteService.
-        // Using real values instead of fixed constants enables drowsy detection.
         if (result != null) {
           TfliteService.instance.updateFaceData(
             earL:       result.earL,
@@ -795,8 +785,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (mounted) _headPose.value = (0.0, false);
   }
 
-  // PATCH 1: Raised from 45° → 55° so normal side-mount angle (30–45°)
-  // no longer shows the "not suitable" warning in the indicator.
+  // 55° avoids false warnings for typical side-mount angles (30–45°).
   bool _isInRedZone(double rollDeg, bool hasFace) {
     if (!hasFace) return false;
     return rollDeg.abs() >= 55.0;
@@ -852,9 +841,16 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       default:
         _consecutiveDrowsy     = (_consecutiveDrowsy     - 1).clamp(0, 999);
         _consecutiveDistracted = (_consecutiveDistracted - 1).clamp(0, 999);
-        if (_alertLevel > 0 && _alertLevel < 3) {
+        // Only clear an active L1/L2 alert once both counters drop below the
+        // L1 threshold. A single neutral frame during borderline drowsiness was
+        // previously zeroing _alertLevel immediately, making L2/L3 unreachable.
+        final thresholds = _sensitivityThresholds[_prefAlertSensitivity] ?? [3, 6, 9];
+        if (_alertLevel > 0 && _alertLevel < 3 &&
+            _consecutiveDrowsy < thresholds[0] &&
+            _consecutiveDistracted < thresholds[0]) {
           _alertLevel = 0;
           _alarmPlayer.stop();
+          ref.read(showAlertBannerProvider.notifier).set(false);
         }
         ref.read(activeSubclassProvider.notifier).set('safe_driving');
         ref.read(activeSubclassIndexProvider.notifier).set(0);
@@ -1417,23 +1413,17 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       padding: EdgeInsets.symmetric(
                           horizontal: context.rp(12), vertical: context.rs(10)),
                       child: Row(children: [
-                        AnimatedBuilder(
-                          animation: _warningAnimation,
-                          builder: (context, child) {
-                            final p = (_warningAnimation.value - 0.8) / 0.2;
-                            return Container(
-                              width: context.ri(40), height: context.ri(40),
-                              decoration: BoxDecoration(
-                                color: Colors.red.shade800,
-                                borderRadius: BorderRadius.circular(context.rp(10)),
-                                boxShadow: [BoxShadow(
-                                    color: Colors.red.withValues(alpha: 0.3 + 0.4 * p),
-                                    blurRadius: 14, spreadRadius: 1)],
-                              ),
-                              child: Icon(Icons.warning_amber_rounded,
-                                  color: Colors.white, size: context.ri(22)),
-                            );
-                          },
+                        Container(
+                          width: context.ri(40), height: context.ri(40),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade800,
+                            borderRadius: BorderRadius.circular(context.rp(10)),
+                            boxShadow: [BoxShadow(
+                                color: Colors.red.withValues(alpha: 0.3 + 0.4 * pulse),
+                                blurRadius: 14, spreadRadius: 1)],
+                          ),
+                          child: Icon(Icons.warning_amber_rounded,
+                              color: Colors.white, size: context.ri(22)),
                         ),
                         SizedBox(width: context.rp(10)),
                         Expanded(child: Column(
@@ -1699,34 +1689,40 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   textAlign: TextAlign.center),
             )
           else
-            SizedBox(
-              height: context.rs(context.isSmallPhone ? 90 : 115),
-              child: ListView.builder(
-                physics: const BouncingScrollPhysics(),
-                itemCount: _systemLogs.length > 20 ? 20 : _systemLogs.length,
-                itemBuilder: (context, index) {
-                  final log = _systemLogs.reversed.toList()[index];
-                  Color textColor;
-                  switch (log['type']) {
-                    case 'SUCCESS': textColor = const Color(0xFF10b981); break;
-                    case 'WARNING': textColor = const Color(0xFFfbbf24); break;
-                    default:        textColor = const Color(0xFF94a3b8);
-                  }
-                  return Padding(
-                    padding: EdgeInsets.only(bottom: context.rs(5)),
-                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('[${log['time']}]',
-                          style: TextStyle(color: const Color(0xFF475569),
-                              fontSize: context.sp(9), fontFamily: 'monospace')),
-                      SizedBox(width: context.rp(6)),
-                      Expanded(child: Text(log['message'],
-                          style: TextStyle(color: textColor,
-                              fontSize: context.sp(9), fontFamily: 'monospace'))),
-                    ]),
-                  );
-                },
-              ),
-            ),
+            Builder(builder: (context) {
+              final recentLogs =
+                  _systemLogs.reversed.take(20).toList();
+              return SizedBox(
+                height: context.rs(context.isSmallPhone ? 90 : 115),
+                child: ListView.builder(
+                  physics: const BouncingScrollPhysics(),
+                  itemCount: recentLogs.length,
+                  itemBuilder: (context, index) {
+                    final log = recentLogs[index];
+                    final textColor = switch (log['type']) {
+                      'SUCCESS' => const Color(0xFF10b981),
+                      'WARNING' => const Color(0xFFfbbf24),
+                      _         => const Color(0xFF94a3b8),
+                    };
+                    return Padding(
+                      padding: EdgeInsets.only(bottom: context.rs(5)),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('[${log['time']}]',
+                              style: TextStyle(color: const Color(0xFF475569),
+                                  fontSize: context.sp(9), fontFamily: 'monospace')),
+                          SizedBox(width: context.rp(6)),
+                          Expanded(child: Text(log['message'],
+                              style: TextStyle(color: textColor,
+                                  fontSize: context.sp(9), fontFamily: 'monospace'))),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              );
+            }),
         ],
       ),
     );
