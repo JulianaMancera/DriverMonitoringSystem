@@ -1222,12 +1222,15 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 ),
               ),
 
-            // Head pose indicator — always visible when camera is active
+            // Head pose indicator — always visible when camera is active.
+            // RepaintBoundary isolates the 200ms repaints so they don't
+            // invalidate the camera composite layer each time.
             if (!ref.watch(isInPipProvider) && _cameraInitialized && !_camDisposing)
               Positioned(
                 bottom: context.rs(58),
                 right: context.rp(10),
-                child: ValueListenableBuilder<(double, bool)>(
+                child: RepaintBoundary(
+                  child: ValueListenableBuilder<(double, bool)>(
                   valueListenable: _headPose,
                   builder: (_, pose, __) {
                     final roll    = pose.$1;
@@ -1264,6 +1267,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       ],
                     );
                   },
+                ),
                 ),
               ),
 

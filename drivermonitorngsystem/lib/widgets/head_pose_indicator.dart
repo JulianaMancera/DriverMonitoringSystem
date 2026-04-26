@@ -148,18 +148,7 @@ class _GaugePainter extends CustomPainter {
 
   void _drawCameraIcon(Canvas canvas, Offset pos, double s) {
     final white  = Paint()..color = Colors.white..style = PaintingStyle.fill;
-    final shadow = Paint()
-      ..color      = Colors.black38
-      ..style      = PaintingStyle.fill
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2);
 
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromCenter(center: pos.translate(1, 1), width: s * 1.9, height: s * 1.3),
-        Radius.circular(s * 0.22),
-      ),
-      shadow,
-    );
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Rect.fromCenter(center: pos, width: s * 1.9, height: s * 1.3),
@@ -196,5 +185,5 @@ class _GaugePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_GaugePainter old) =>
-      old.roll != roll || old.hasFace != hasFace;
+      (old.roll - roll).abs() > 0.5 || old.hasFace != hasFace;
 }

@@ -221,7 +221,8 @@ class TfliteService {
   static final TfliteService instance = TfliteService._init();
   TfliteService._init();
 
-  Interpreter? _interpreter;
+  Interpreter?         _interpreter;
+  IsolateInterpreter?  _isolateInterpreter;
   bool _isInitialized    = false;
   bool _isRunning        = false;
   int  _lastInferenceMs  = 0;
@@ -243,14 +244,6 @@ class TfliteService {
   int _behaviorOutputIdx = 0;
   int _parentOutputIdx   = 1;
   int _gazeOutputIdx     = 2;
-
-  // Pre-allocated inference tensors — filled in-place each frame to avoid
-  // allocating ~200K list objects per inference call (major GC pressure fix).
-  final List<List<List<List<double>>>> _inferSpatialBuf = List.generate(
-      1, (_) => List.generate(
-          224, (_) => List.generate(224, (_) => List.filled(3, 0.0))));
-  final List<List<List<double>>> _inferTemporalBuf = List.generate(
-      1, (_) => List.generate(_kSeqLen, (_) => List.filled(_kNumFeat, 0.0)));
 
   List<double> _normMean  = [];
   List<double> _normScale = [];
@@ -308,6 +301,8 @@ class TfliteService {
         ..useNnApiForAndroid = false;
       _interpreter = await Interpreter.fromAsset(_kModelAsset, options: opts);
       _interpreter!.allocateTensors();
+      _isolateInterpreter = await IsolateInterpreter.create(
+          address: _interpreter!.address);
 
       final inputTensors = _interpreter!.getInputTensors();
       final sIdx = inputTensors.indexWhere((t) => t.name.contains('spatial'));
@@ -367,6 +362,8 @@ class TfliteService {
   }
 
   void dispose() {
+    _isolateInterpreter?.close();
+    _isolateInterpreter = null;
     _interpreter?.close();
     _interpreter   = null;
     _isInitialized = false;
@@ -375,7 +372,7 @@ class TfliteService {
 
   // ── Main inference entry point ───────────────────────────────────────────────
   Future<InferenceResult?> runInference(CameraImage image) async {
-    if (!_isInitialized || _interpreter == null) return null;
+    if (!_isInitialized || _interpreter == null || _isolateInterpreter == null) return null;
     if (_isRunning) return null;
 
     final nowMs = DateTime.now().millisecondsSinceEpoch;
@@ -383,6 +380,7 @@ class TfliteService {
 
     _isRunning = true;
     try {
+      final t0 = DateTime.now().millisecondsSinceEpoch;
       final prep = await compute(
         _preprocessFrameV3,
         _PrepInput(
@@ -405,6 +403,7 @@ class TfliteService {
       );
       if (prep == null) return null;
       _lastInferenceMs = nowMs;
+      final tPrep = DateTime.now().millisecondsSinceEpoch;
 
       _updateTemporalBuf(prep.features);
       final temporalFlat = _buildTemporalInput();
@@ -419,29 +418,15 @@ class TfliteService {
         _gazeBuf[0][i]     = 0.0;
       }
 
-      // Fill pre-allocated [1, 224, 224, 3] spatial tensor in-place.
-      // Avoids ~200K list allocations per inference that previously caused GC jank.
-      for (int h = 0; h < 224; h++) {
-        for (int w = 0; w < 224; w++) {
-          final idx = (h * 224 + w) * 3;
-          _inferSpatialBuf[0][h][w][0] = prep.rgbNormalized[idx];
-          _inferSpatialBuf[0][h][w][1] = prep.rgbNormalized[idx + 1];
-          _inferSpatialBuf[0][h][w][2] = prep.rgbNormalized[idx + 2];
-        }
-      }
-
-      // Fill pre-allocated [1, 30, 25] temporal tensor in-place.
-      for (int t = 0; t < _kSeqLen; t++) {
-        for (int f = 0; f < _kNumFeat; f++) {
-          _inferTemporalBuf[0][t][f] = temporalFlat[t * _kNumFeat + f];
-        }
-      }
-
+      // Pass raw byte buffers — hits the O(1) Uint8List fast path in
+      // convertObjectToBytes, and the isolate copy is a flat memcpy (~0.6ms).
+      // The actual TFLite forward pass runs in the background isolate, so the
+      // main thread is NOT blocked during inference (~100–200ms saved per call).
       final inputs = List<Object?>.filled(2, null);
-      inputs[_temporalInputIdx] = _inferTemporalBuf;
-      inputs[_spatialInputIdx]  = _inferSpatialBuf;
+      inputs[_temporalInputIdx] = temporalFlat.buffer.asUint8List();
+      inputs[_spatialInputIdx]  = prep.rgbNormalized.buffer.asUint8List();
 
-      _interpreter!.runForMultipleInputs(
+      await _isolateInterpreter!.runForMultipleInputs(
         inputs.cast<Object>(),
         <int, Object>{
           _behaviorOutputIdx: _behaviorBuf,
@@ -449,6 +434,8 @@ class TfliteService {
           _gazeOutputIdx:     _gazeBuf,
         },
       );
+      final tInfer = DateTime.now().millisecondsSinceEpoch;
+      debugPrint('[TfliteService] prep=${tPrep - t0}ms infer=${tInfer - tPrep}ms total=${tInfer - t0}ms');
 
       final rawBehavior   = List<double>.from(_behaviorBuf[0]);
       final behaviorSum   = rawBehavior.fold(0.0, (a, b) => a + b);
