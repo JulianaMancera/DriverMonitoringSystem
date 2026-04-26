@@ -459,16 +459,6 @@ class TfliteService {
       final parentProbs = List<double>.from(_parentBuf[0]);
       final gazeProbs   = List<double>.from(_gazeBuf[0]);
 
-      // Debug: log top 3 predictions every frame
-      final indexed = List.generate(13, (i) => MapEntry(i, behaviorProbs[i]));
-      indexed.sort((a, b) => b.value.compareTo(a.value));
-      debugPrint('[V3] '
-          '${kClassNames[indexed[0].key]}=${(indexed[0].value * 100).toStringAsFixed(1)}% | '
-          '${kClassNames[indexed[1].key]}=${(indexed[1].value * 100).toStringAsFixed(1)}% | '
-          '${kClassNames[indexed[2].key]}=${(indexed[2].value * 100).toStringAsFixed(1)}% '
-          '| yaw=${_faceYaw.toStringAsFixed(1)}° '
-          '| compensated=${(_faceYaw - kSideMountYawOffset).toStringAsFixed(1)}°');
-
       final parentClass = parentProbs.indexOf(parentProbs.reduce(math.max));
       final gazeZone    = gazeProbs.indexOf(gazeProbs.reduce(math.max));
 
@@ -815,14 +805,6 @@ class TfliteService {
       outputState = 'neutral';
       outputIdx   = 0;
     }
-
-    debugPrint('[Debounce] '
-        'drowsy=$_consecutiveDrowsy/$_kDrowsyThreshold '
-        'distracted=$_consecutiveDistracted/$effectiveDistThreshold(s$effectiveStage) '
-        'raw=$rawState → out=$outputState '
-        'distPct=${distractedPct.toStringAsFixed(1)} '
-        'drowsyPct=${drowsyPct.toStringAsFixed(1)} '
-        'bestDist=${kClassNames[bestDistIdx]}@${bestDistScore.toStringAsFixed(1)}%');
 
     return InferenceResult(
       state:         outputState,

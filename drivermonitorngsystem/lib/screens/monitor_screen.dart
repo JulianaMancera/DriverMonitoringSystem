@@ -70,6 +70,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   bool   _prefAutoStart        = false;
   String _lastLoggedState      = '';
   String _lastLoggedSubclass   = '';
+  String _lastServiceState     = '';
 
   static const bool _mirrorCamera = false;
 
@@ -836,7 +837,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             '${r.subclass} — ${r.drowsyPct.toInt()}% drowsy', 'WARNING');
         }
         _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy);
-        BantayDriveService.updateState('drowsy');
         break;
       case 'distracted':
         _consecutiveDistracted++;
@@ -849,7 +849,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             '${r.subclass} — ${r.distractedPct.toInt()}% distracted', 'WARNING');
         }
         _checkAndTriggerAlert('DISTRACTED', _consecutiveDistracted);
-        BantayDriveService.updateState('distracted');
         break;
       default:
         _consecutiveDrowsy     = (_consecutiveDrowsy     - 1).clamp(0, 999);
@@ -867,7 +866,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         }
         ref.read(activeSubclassProvider.notifier).set('safe_driving');
         ref.read(activeSubclassIndexProvider.notifier).set(0);
-        BantayDriveService.updateState('neutral');
+    }
+    // Platform-channel call only on state transitions — not every inference frame.
+    if (_lastServiceState != r.state) {
+      _lastServiceState = r.state;
+      BantayDriveService.updateState(r.state);
     }
   }
 
@@ -1269,28 +1272,22 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 bottom: context.rs(12),
                 left: 0, right: 0,
                 child: Center(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(context.rp(24)),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-                      child: Container(
-                        padding: EdgeInsets.symmetric(
-                            horizontal: context.rp(5), vertical: context.rs(5)),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF0f172a).withValues(alpha: 0.65),
-                          borderRadius: BorderRadius.circular(context.rp(24)),
-                          border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.08), width: 1),
-                        ),
-                        child: _CameraOverlayButton(
-                          icon: isRecording
-                              ? Icons.stop_circle : Icons.fiber_manual_record,
-                          label: isRecording ? 'Stop' : 'Record',
-                          isActive: isRecording, activeColor: Colors.red,
-                          onTap: () => isRecording
-                              ? _stopRecording() : _startRecording(),
-                        ),
-                      ),
+                  child: Container(
+                    padding: EdgeInsets.symmetric(
+                        horizontal: context.rp(5), vertical: context.rs(5)),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0f172a).withValues(alpha: 0.88),
+                      borderRadius: BorderRadius.circular(context.rp(24)),
+                      border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.10), width: 1),
+                    ),
+                    child: _CameraOverlayButton(
+                      icon: isRecording
+                          ? Icons.stop_circle : Icons.fiber_manual_record,
+                      label: isRecording ? 'Stop' : 'Record',
+                      isActive: isRecording, activeColor: Colors.red,
+                      onTap: () => isRecording
+                          ? _stopRecording() : _startRecording(),
                     ),
                   ),
                 ),
@@ -1592,30 +1589,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   // ── METRICS + SYSTEM LOG ─────────────────────────────────────────────────────
   Widget _buildMetricsSidebar() {
-    final alertness   = ref.watch(alertnessPctProvider);
-    final drowsiness  = ref.watch(drowsinessPctProvider);
-    final distraction = ref.watch(distractionPctProvider);
-
     return Column(children: [
-      ClipRect(
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Expanded(child: _MetricGauge(label: 'Alertness', value: alertness,
-              color: const Color(0xFF22d3ee), icon: Icons.bolt)),
-          SizedBox(width: context.rp(10)),
-          Expanded(child: GestureDetector(
-            onTap: drowsiness > 0 ? () => _showSubclassSheet('drowsy') : null,
-            child: _MetricGauge(label: 'Drowsiness', value: drowsiness,
-                color: const Color(0xFFef4444),
-                icon: Icons.visibility_off, tapHint: drowsiness > 0),
-          )),
-          SizedBox(width: context.rp(10)),
-          Expanded(child: GestureDetector(
-            onTap: distraction > 0 ? () => _showSubclassSheet('distracted') : null,
-            child: _MetricGauge(label: 'Distraction', value: distraction,
-                color: const Color(0xFFfbbf24),
-                icon: Icons.visibility, tapHint: distraction > 0),
-          )),
-        ]),
+      _MetricGaugesRow(
+        onDrowsyTap:      () => _showSubclassSheet('drowsy'),
+        onDistractionTap: () => _showSubclassSheet('distracted'),
       ),
       SizedBox(height: context.rs(12)),
       _buildSystemLog(),
@@ -1738,6 +1715,47 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             }),
         ],
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// METRIC GAUGES ROW — isolated ConsumerWidget so per-frame provider updates
+// don't cascade into a full MonitorScreen rebuild (and re-layout CameraPreview).
+// ─────────────────────────────────────────────────────────────────────────────
+class _MetricGaugesRow extends ConsumerWidget {
+  final VoidCallback? onDrowsyTap;
+  final VoidCallback? onDistractionTap;
+  const _MetricGaugesRow({this.onDrowsyTap, this.onDistractionTap});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final alertness   = ref.watch(alertnessPctProvider);
+    final drowsiness  = ref.watch(drowsinessPctProvider);
+    final distraction = ref.watch(distractionPctProvider);
+
+    return ClipRect(
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(child: _MetricGauge(
+          label: 'Alertness', value: alertness,
+          color: const Color(0xFF22d3ee), icon: Icons.bolt)),
+        SizedBox(width: context.rp(10)),
+        Expanded(child: GestureDetector(
+          onTap: drowsiness > 0 ? onDrowsyTap : null,
+          child: _MetricGauge(
+            label: 'Drowsiness', value: drowsiness,
+            color: const Color(0xFFef4444),
+            icon: Icons.visibility_off, tapHint: drowsiness > 0),
+        )),
+        SizedBox(width: context.rp(10)),
+        Expanded(child: GestureDetector(
+          onTap: distraction > 0 ? onDistractionTap : null,
+          child: _MetricGauge(
+            label: 'Distraction', value: distraction,
+            color: const Color(0xFFfbbf24),
+            icon: Icons.visibility, tapHint: distraction > 0),
+        )),
+      ]),
     );
   }
 }
