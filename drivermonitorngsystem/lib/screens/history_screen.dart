@@ -1,8 +1,11 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:video_player/video_player.dart';
 import '../utils/responsive.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
+import '../core/services/video_clip_service.dart';
 
 class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
@@ -10,7 +13,8 @@ class HistoryScreen extends ConsumerStatefulWidget {
   ConsumerState<HistoryScreen> createState() => _HistoryScreenState();
 }
 
-class _HistoryScreenState extends ConsumerState<HistoryScreen> {
+class _HistoryScreenState extends ConsumerState<HistoryScreen>
+    with SingleTickerProviderStateMixin {
   static const Color _bg          = Color(0xFF080E1A);
   static const Color _surface     = Color(0xFF0D1627);
   static const Color _surfaceAlt  = Color(0xFF1A2235);
@@ -22,6 +26,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   static const Color _textDim     = Color(0xFF6B7A99);
   static const Color _divider     = Color(0xFF1E2D45);
 
+  late TabController _tabController;
+
+  // ── SESSION LOGS state ───────────────────────────────────────────────────
   bool   _isLoading      = true;
   List<Map<String, dynamic>> _sessions = [];
   List<Map<String, dynamic>> _filtered = [];
@@ -35,10 +42,21 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     'All', 'This Week', 'This Month', 'With Alerts', 'Safe Drives',
   ];
 
+  // ── VIDEO LOGS state ─────────────────────────────────────────────────────
+  bool _clipsLoading = true;
+  List<Map<String, dynamic>> _clips = [];
+  final Set<int> _selectedClipIds = {};
+  bool _isDownloading = false;
+
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      if (mounted) setState(() {});
+    });
     _loadSessions();
+    _loadClips();
     _searchCtrl.addListener(_applyFilter);
     _filterScrollCtrl.addListener(_onFilterScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkFilterScroll());
@@ -46,10 +64,13 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 
   @override
   void dispose() {
+    _tabController.dispose();
     _searchCtrl.dispose();
     _filterScrollCtrl.dispose();
     super.dispose();
   }
+
+  // ── SESSION LOGS helpers ─────────────────────────────────────────────────
 
   void _onFilterScroll() {
     final pos       = _filterScrollCtrl.position;
@@ -153,6 +174,68 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     );
   }
 
+  // ── VIDEO LOGS helpers ───────────────────────────────────────────────────
+
+  Future<void> _loadClips() async {
+    setState(() => _clipsLoading = true);
+    final clips = await DatabaseHelper.instance.getAllVideoClips();
+    // Filter out clips whose files no longer exist on disk
+    final valid = <Map<String, dynamic>>[];
+    for (final c in clips) {
+      if (await VideoClipService.clipExists(c['file_path'] as String)) {
+        valid.add(c);
+      }
+    }
+    if (mounted) setState(() { _clips = valid; _clipsLoading = false; });
+  }
+
+  Future<void> _downloadSelected() async {
+    if (_selectedClipIds.isEmpty || _isDownloading) return;
+    setState(() => _isDownloading = true);
+
+    int success = 0;
+    for (final clip in _clips) {
+      if (!_selectedClipIds.contains(clip['id'] as int)) continue;
+      final dest = await VideoClipService.exportToDownloads(
+          clip['file_path'] as String);
+      if (dest != null) success++;
+    }
+
+    if (mounted) {
+      setState(() { _isDownloading = false; _selectedClipIds.clear(); });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        backgroundColor: success > 0
+            ? _green.withValues(alpha: 0.9)
+            : Colors.red.withValues(alpha: 0.9),
+        content: Text(
+          success > 0
+              ? '$success video${success > 1 ? 's' : ''} saved to Downloads'
+              : 'Download failed — check storage permission',
+          style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w600),
+        ),
+      ));
+    }
+  }
+
+  Future<void> _deleteClip(Map<String, dynamic> clip) async {
+    final id   = clip['id']        as int;
+    final path = clip['file_path'] as String;
+    await DatabaseHelper.instance.deleteVideoClip(id);
+    await VideoClipService.deleteFile(path);
+    _selectedClipIds.remove(id);
+    await _loadClips();
+  }
+
+  void _openVideoPlayer(Map<String, dynamic> clip) {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (_) => _VideoPlayerDialog(filePath: clip['file_path'] as String),
+    );
+  }
+
+  // ── SHARED formatters ────────────────────────────────────────────────────
+
   String _formatDuration(int seconds) {
     final h = seconds ~/ 3600;
     final m = (seconds % 3600) ~/ 60;
@@ -197,10 +280,10 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   }
 
   Map<String, List<Map<String, dynamic>>> _groupByDate(
-      List<Map<String, dynamic>> sessions) {
+      List<Map<String, dynamic>> items, String dateKey) {
     final groups = <String, List<Map<String, dynamic>>>{};
-    for (final s in sessions) {
-      groups.putIfAbsent(_dateGroupLabel(s['started_at']), () => []).add(s);
+    for (final s in items) {
+      groups.putIfAbsent(_dateGroupLabel(s[dateKey]), () => []).add(s);
     }
     return groups;
   }
@@ -211,28 +294,64 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     return _distracted;
   }
 
+  // ── BUILD ────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     ref.listen<int>(dbChangeCounterProvider, (previous, next) {
-      if (next > (previous ?? 0)) _loadSessions();
+      if (next > (previous ?? 0)) { _loadSessions(); _loadClips(); }
     });
 
     return Scaffold(
       backgroundColor: _bg,
       body: Column(children: [
-        _buildSearchBar(),
-        _buildFilterChips(),
+        _buildTabBar(),
         Expanded(
-          child: _isLoading
-              ? const Center(child: CircularProgressIndicator(color: _cyan))
-              : _filtered.isEmpty ? _buildEmpty() : _buildList(),
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              _buildSessionLogsTab(),
+              _buildVideoLogsTab(),
+            ],
+          ),
         ),
       ]),
     );
   }
 
-  // FIX: Search bar height uses context.rs() so it scales correctly
-  // on compact phones (was fixed 44px — too tall on 360dp phones)
+  Widget _buildTabBar() => Container(
+    color: _surface,
+    child: TabBar(
+      controller: _tabController,
+      labelColor: _cyan,
+      unselectedLabelColor: _textDim,
+      labelStyle: TextStyle(
+          fontSize: context.sp(12), fontWeight: FontWeight.w600),
+      unselectedLabelStyle: TextStyle(
+          fontSize: context.sp(12), fontWeight: FontWeight.w500),
+      indicatorColor: _cyan,
+      indicatorWeight: 2,
+      indicatorSize: TabBarIndicatorSize.tab,
+      dividerColor: _divider,
+      tabs: const [
+        Tab(text: 'Session Logs'),
+        Tab(text: 'Video Logs'),
+      ],
+    ),
+  );
+
+  // ── SESSION LOGS TAB ─────────────────────────────────────────────────────
+
+  Widget _buildSessionLogsTab() => Column(children: [
+    _buildSearchBar(),
+    _buildFilterChips(),
+    Expanded(
+      child: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: _cyan))
+          : _filtered.isEmpty ? _buildSessionEmpty() : _buildSessionList(),
+    ),
+  ]);
+
   Widget _buildSearchBar() {
     final barH = context.rs(44).clamp(38.0, 52.0);
     return Container(
@@ -253,8 +372,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             onSubmitted: (_) => FocusScope.of(context).unfocus(),
             decoration: InputDecoration(
               hintText: 'Search by date, month, or "safe"...',
-              hintStyle: TextStyle(
-                  color: _textDim, fontSize: context.sp(13)),
+              hintStyle: TextStyle(color: _textDim, fontSize: context.sp(13)),
               prefixIcon: Icon(Icons.search_rounded,
                   color: _textDim, size: context.ri(18)),
               prefixIconConstraints: BoxConstraints(
@@ -343,8 +461,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         ]),
       );
 
-  Widget _buildList() {
-    final groups = _groupByDate(_filtered);
+  Widget _buildSessionList() {
+    final groups = _groupByDate(_filtered, 'started_at');
     return RefreshIndicator(
       color: _cyan, backgroundColor: _surface, onRefresh: _loadSessions,
       child: ListView(
@@ -362,19 +480,18 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                   color: _textDim, fontSize: context.sp(10),
                   fontWeight: FontWeight.w600, letterSpacing: 1.2)),
             ),
-            ...entry.value.map((s) => _buildCard(s)),
+            ...entry.value.map((s) => _buildSessionCard(s)),
           ],
         )).toList(),
       ),
     );
   }
 
-  Widget _buildCard(Map<String, dynamic> s) {
+  Widget _buildSessionCard(Map<String, dynamic> s) {
     final duration   = s['duration_sec'] as int? ?? 0;
     final alertCount = s['alert_count']  as int? ?? 0;
     final isSafe     = alertCount == 0;
     final accent     = _accentColor(alertCount);
-    // FIX: icon container size uses context.ri() — scales on small phones
     final iconBoxSize = context.ri(40).clamp(34.0, 48.0);
 
     return Container(
@@ -393,8 +510,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             padding: EdgeInsets.symmetric(
                 horizontal: context.rp(16), vertical: context.rs(12)),
             child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-
-              // Status icon
               Container(
                 width: iconBoxSize, height: iconBoxSize,
                 decoration: BoxDecoration(
@@ -407,7 +522,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                          : Icons.warning_amber_rounded,
                   color: accent, size: context.ri(20))),
               SizedBox(width: context.rp(12)),
-              // Date / time / duration
               Expanded(child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -437,7 +551,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                   ]),
                 ],
               )),
-              // Badge + chevron
               Row(mainAxisSize: MainAxisSize.min, children: [
                 _buildAlertBadge(alertCount),
                 SizedBox(width: context.rp(4)),
@@ -482,7 +595,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     );
   }
 
-  Widget _buildEmpty() => RefreshIndicator(
+  Widget _buildSessionEmpty() => RefreshIndicator(
         color: _cyan, backgroundColor: _surface, onRefresh: _loadSessions,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -505,6 +618,423 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
           ],
         ),
       );
+
+  // ── VIDEO LOGS TAB ───────────────────────────────────────────────────────
+
+  Widget _buildVideoLogsTab() {
+    if (_clipsLoading) {
+      return const Center(child: CircularProgressIndicator(color: _cyan));
+    }
+    if (_clips.isEmpty) {
+      return _buildVideoEmpty();
+    }
+    return Stack(children: [
+      _buildClipList(),
+      if (_selectedClipIds.isNotEmpty)
+        Positioned(
+          bottom: 0, left: 0, right: 0,
+          child: _buildDownloadBar(),
+        ),
+    ]);
+  }
+
+  Widget _buildVideoEmpty() => Center(
+    child: Padding(
+      padding: EdgeInsets.all(context.rp(32)),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.videocam_off_rounded, color: _textDim, size: context.ri(56)),
+        SizedBox(height: context.rs(16)),
+        Text('No Alert Videos', style: TextStyle(
+            color: _textPrimary, fontSize: context.sp(16),
+            fontWeight: FontWeight.w600)),
+        SizedBox(height: context.rs(8)),
+        Text(
+          'Videos are saved automatically when a drowsiness or distraction alert is triggered during a session.\n\nSafe drives leave no videos.',
+          style: TextStyle(color: _textDim, fontSize: context.sp(13), height: 1.5),
+          textAlign: TextAlign.center),
+      ]),
+    ),
+  );
+
+  Widget _buildClipList() {
+    final groups = _groupByDate(_clips, 'created_at');
+    return RefreshIndicator(
+      color: _cyan, backgroundColor: _surface, onRefresh: _loadClips,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.fromLTRB(
+            context.rp(16), context.rs(6),
+            context.rp(16),
+            context.rs(_selectedClipIds.isNotEmpty ? 88 : 32)),
+        children: groups.entries.map((entry) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: EdgeInsets.only(
+                  top: context.rs(12), bottom: context.rs(6)),
+              child: Text(entry.key, style: TextStyle(
+                  color: _textDim, fontSize: context.sp(10),
+                  fontWeight: FontWeight.w600, letterSpacing: 1.2)),
+            ),
+            ...entry.value.map((c) => _buildClipCard(c)),
+          ],
+        )).toList(),
+      ),
+    );
+  }
+
+  Widget _buildClipCard(Map<String, dynamic> clip) {
+    final id         = clip['id']          as int;
+    final alertTypes = clip['alert_types'] as String? ?? '';
+    final createdAt  = clip['created_at']  as String? ?? '';
+    final duration   = clip['duration_sec'] as int? ?? 0;
+    final sessionId  = clip['session_id']  as int? ?? 0;
+    final isSelected = _selectedClipIds.contains(id);
+
+    final hasDrowsy     = alertTypes.contains('DROWSY');
+    final hasDistracted = alertTypes.contains('DISTRACTED');
+    final chipColor     = hasDrowsy ? _drowsy : _distracted;
+    final chipLabel     = hasDrowsy && hasDistracted
+        ? 'Drowsy + Distracted'
+        : hasDrowsy ? 'Drowsiness Alert' : 'Distraction Alert';
+    final chipIcon = hasDrowsy
+        ? Icons.airline_seat_flat_rounded
+        : Icons.remove_red_eye_outlined;
+
+    return Dismissible(
+      key: ValueKey(id),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: EdgeInsets.only(right: context.rp(20)),
+        decoration: BoxDecoration(
+            color: Colors.red.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(context.rp(14))),
+        child: Icon(Icons.delete_outline_rounded,
+            color: Colors.red, size: context.ri(22)),
+      ),
+      confirmDismiss: (_) async {
+        return await showDialog<bool>(
+          context: context,
+          builder: (_) => AlertDialog(
+            backgroundColor: const Color(0xFF0f172a),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
+            title: const Text('Delete Video?',
+                style: TextStyle(color: Colors.white)),
+            content: const Text(
+              'This will permanently delete the video clip from your device.',
+              style: TextStyle(color: Color(0xFF94a3b8))),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel',
+                    style: TextStyle(color: Color(0xFF64748b)))),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Delete',
+                    style: TextStyle(color: Colors.red))),
+            ],
+          ),
+        ) ?? false;
+      },
+      onDismissed: (_) => _deleteClip(clip),
+      child: Container(
+        margin: EdgeInsets.only(bottom: context.rs(10)),
+        decoration: BoxDecoration(
+          color: _surface,
+          borderRadius: BorderRadius.circular(context.rp(14)),
+          border: Border.all(
+            color: isSelected
+                ? _cyan.withValues(alpha: 0.5)
+                : _divider,
+            width: isSelected ? 1.5 : 1,
+          ),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(context.rp(14)),
+            splashColor: _cyan.withValues(alpha: 0.08),
+            onTap: () => _openVideoPlayer(clip),
+            onLongPress: () => setState(() {
+              if (isSelected) {
+                _selectedClipIds.remove(id);
+              } else {
+                _selectedClipIds.add(id);
+              }
+            }),
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                  horizontal: context.rp(14), vertical: context.rs(12)),
+              child: Row(children: [
+                // Play icon
+                Container(
+                  width: context.ri(42), height: context.ri(42),
+                  decoration: BoxDecoration(
+                    color: chipColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(context.rp(10)),
+                    border: Border.all(
+                        color: chipColor.withValues(alpha: 0.25), width: 1),
+                  ),
+                  child: Icon(Icons.play_circle_outline_rounded,
+                      color: chipColor, size: context.ri(22)),
+                ),
+                SizedBox(width: context.rp(12)),
+                Expanded(child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Icon(chipIcon, color: chipColor, size: context.ri(12)),
+                      SizedBox(width: context.rp(4)),
+                      Flexible(child: Text(chipLabel, style: TextStyle(
+                          color: chipColor, fontSize: context.sp(11),
+                          fontWeight: FontWeight.w700),
+                          overflow: TextOverflow.ellipsis)),
+                    ]),
+                    SizedBox(height: context.rs(3)),
+                    Text(_formatTime(createdAt), style: TextStyle(
+                        color: _textPrimary, fontSize: context.sp(13),
+                        fontWeight: FontWeight.w600)),
+                    SizedBox(height: context.rs(2)),
+                    Row(children: [
+                      Icon(Icons.videocam_outlined,
+                          color: _textDim, size: context.ri(11)),
+                      SizedBox(width: context.rp(3)),
+                      Text('Session #$sessionId', style: TextStyle(
+                          color: _textDim, fontSize: context.sp(10))),
+                      if (duration > 0) ...[
+                        Padding(
+                          padding: EdgeInsets.symmetric(horizontal: context.rp(5)),
+                          child: Container(
+                              width: context.rp(3), height: context.rp(3),
+                              decoration: BoxDecoration(
+                                  color: _textDim, shape: BoxShape.circle))),
+                        Text(_formatDuration(duration), style: TextStyle(
+                            color: _textDim, fontSize: context.sp(10))),
+                      ],
+                    ]),
+                  ],
+                )),
+                // Checkbox
+                GestureDetector(
+                  onTap: () => setState(() {
+                    if (isSelected) {
+                      _selectedClipIds.remove(id);
+                    } else {
+                      _selectedClipIds.add(id);
+                    }
+                  }),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    width: context.ri(22), height: context.ri(22),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? _cyan.withValues(alpha: 0.15) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(context.rp(6)),
+                      border: Border.all(
+                        color: isSelected ? _cyan : _textDim, width: 1.5),
+                    ),
+                    child: isSelected
+                        ? Icon(Icons.check_rounded,
+                            color: _cyan, size: context.ri(14))
+                        : null,
+                  ),
+                ),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDownloadBar() {
+    final count = _selectedClipIds.length;
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+          context.rp(16), context.rs(10),
+          context.rp(16), context.rs(18)),
+      decoration: BoxDecoration(
+        color: _surface,
+        border: Border(top: BorderSide(color: _divider, width: 1)),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.4),
+              blurRadius: 16, offset: const Offset(0, -4)),
+        ],
+      ),
+      child: Row(children: [
+        Expanded(
+          child: Text(
+            '$count video${count > 1 ? 's' : ''} selected',
+            style: TextStyle(color: _textPrimary,
+                fontSize: context.sp(13), fontWeight: FontWeight.w600)),
+        ),
+        TextButton(
+          onPressed: () => setState(() => _selectedClipIds.clear()),
+          child: Text('Clear', style: TextStyle(
+              color: _textDim, fontSize: context.sp(12))),
+        ),
+        SizedBox(width: context.rp(8)),
+        ElevatedButton.icon(
+          onPressed: _isDownloading ? null : _downloadSelected,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _cyan,
+            foregroundColor: Colors.black,
+            padding: EdgeInsets.symmetric(
+                horizontal: context.rp(16), vertical: context.rs(10)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(context.rp(10))),
+          ),
+          icon: _isDownloading
+              ? SizedBox(
+                  width: context.ri(14), height: context.ri(14),
+                  child: const CircularProgressIndicator(
+                      color: Colors.black, strokeWidth: 2))
+              : Icon(Icons.download_rounded, size: context.ri(16)),
+          label: Text(
+            _isDownloading ? 'Saving...' : 'Download',
+            style: TextStyle(fontSize: context.sp(12),
+                fontWeight: FontWeight.w700)),
+        ),
+      ]),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// VIDEO PLAYER DIALOG
+// ═══════════════════════════════════════════════════════════════════════════════
+class _VideoPlayerDialog extends StatefulWidget {
+  final String filePath;
+  const _VideoPlayerDialog({required this.filePath});
+  @override
+  State<_VideoPlayerDialog> createState() => _VideoPlayerDialogState();
+}
+
+class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
+  late VideoPlayerController _controller;
+  bool _initialized = false;
+  bool _error = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.file(File(widget.filePath))
+      ..initialize().then((_) {
+        if (mounted) {
+          setState(() => _initialized = true);
+          _controller.play();
+        }
+      }).catchError((_) {
+        if (mounted) setState(() => _error = true);
+      });
+    _controller.addListener(() { if (mounted) setState(() {}); });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.black,
+      insetPadding: const EdgeInsets.all(16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Title bar
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+            child: Row(children: [
+              const Icon(Icons.videocam_rounded,
+                  color: Color(0xFF00D4FF), size: 18),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text('Alert Video Clip',
+                    style: TextStyle(color: Colors.white,
+                        fontSize: 14, fontWeight: FontWeight.w600)),
+              ),
+              IconButton(
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close_rounded,
+                    color: Colors.white54, size: 20),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+            ]),
+          ),
+
+          // Video area
+          ClipRRect(
+            borderRadius: const BorderRadius.vertical(
+                bottom: Radius.circular(16)),
+            child: AspectRatio(
+              aspectRatio: _initialized
+                  ? _controller.value.aspectRatio : 9 / 16,
+              child: _error
+                  ? const Center(
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.broken_image_outlined,
+                            color: Colors.white38, size: 40),
+                        SizedBox(height: 8),
+                        Text('Could not load video',
+                            style: TextStyle(color: Colors.white38,
+                                fontSize: 12)),
+                      ]))
+                  : _initialized
+                      ? Stack(alignment: Alignment.center, children: [
+                          VideoPlayer(_controller),
+                          // Play/Pause overlay
+                          GestureDetector(
+                            onTap: () => setState(() {
+                              _controller.value.isPlaying
+                                  ? _controller.pause()
+                                  : _controller.play();
+                            }),
+                            child: AnimatedOpacity(
+                              opacity: _controller.value.isPlaying ? 0.0 : 1.0,
+                              duration: const Duration(milliseconds: 200),
+                              child: Container(
+                                width: 56, height: 56,
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.55),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.play_arrow_rounded,
+                                    color: Colors.white, size: 32),
+                              ),
+                            ),
+                          ),
+                          // Progress bar
+                          Positioned(
+                            bottom: 0, left: 0, right: 0,
+                            child: VideoProgressIndicator(
+                              _controller,
+                              allowScrubbing: true,
+                              colors: const VideoProgressColors(
+                                playedColor: Color(0xFF00D4FF),
+                                bufferedColor: Colors.white24,
+                                backgroundColor: Colors.white12,
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 8, horizontal: 0),
+                            ),
+                          ),
+                        ])
+                      : const Center(
+                          child: CircularProgressIndicator(
+                              color: Color(0xFF00D4FF))),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -604,8 +1134,8 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
   Color _logTypeColor(String type) {
     switch (type) {
       case 'SUCCESS':            return _green;
-      case 'DROWSY_WARNING':     return _drowsy;      
-      case 'DISTRACTED_WARNING': return _distracted;   
+      case 'DROWSY_WARNING':     return _drowsy;
+      case 'DISTRACTED_WARNING': return _distracted;
       case 'WARNING':            return _distracted;
       default:                   return _textMuted;
     }
@@ -630,7 +1160,6 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     final isSafe     = alertCount == 0;
     final headerColor = isSafe ? _green :
         (alertCount <= 2 ? _drowsy : _distracted);
-    // FIX: header icon size responsive
     final iconSize = context.ri(48).clamp(40.0, 56.0);
 
     return FadeTransition(
@@ -661,7 +1190,6 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                       color: _divider,
                       borderRadius: BorderRadius.circular(2))),
             ),
-            // Header
             Padding(
               padding: EdgeInsets.fromLTRB(
                   context.rp(20), context.rs(8),

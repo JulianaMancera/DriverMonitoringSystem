@@ -55,6 +55,9 @@ dependencies:
   # App version in settings/about
   package_info_plus: ^10.0.0
 
+  # Video playback for alert clip review
+  video_player: ^2.9.2
+
 
 dev_dependencies:
   flutter_test:

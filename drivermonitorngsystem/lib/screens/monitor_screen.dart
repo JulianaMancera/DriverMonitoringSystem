@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:camera/camera.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -13,6 +14,7 @@ import '../core/services/notifications.dart';
 import '../core/services/pip_service.dart';
 import '../core/services/head_pose_service.dart';
 import '../core/session_state.dart';
+import '../core/services/video_clip_service.dart';
 import '../widgets/head_pose_indicator.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -33,7 +35,6 @@ class MonitorScreen extends ConsumerStatefulWidget {
 class _MonitorScreenState extends ConsumerState<MonitorScreen>
     with TickerProviderStateMixin, WidgetsBindingObserver {
 
-  final GlobalKey _cameraKey = GlobalKey();
   CameraController? _cameraController;
   List<CameraDescription> _cameras = [];
   bool    _cameraInitialized  = false;
@@ -81,6 +82,21 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   };
 
   bool _modelLoaded = false;
+
+  // ── VIDEO CLIP ───────────────────────────────────────────────────────────────
+  bool  _videoRecordingActive = false;
+  bool  _sessionHadAlerts     = false;
+  final Set<String> _sessionAlertTypes = {};
+
+  // Cached at camera init — insulates the aspect-ratio calculation from any
+  // previewSize change that CameraX fires when startVideoRecording() rebinds
+  // its internal use cases.
+  Size? _cachedPreviewSize;
+
+  // FIX: Orientation locked at camera init so that startVideoRecording()
+  // writing value.recordingOrientation cannot rotate the preview mid-session.
+  int  _lockedQuarterTurns = 0;
+  bool _lockedIsLandscape  = false;
 
   // HEAD POSE — (roll in degrees, hasFace)
   final ValueNotifier<(double, bool)> _headPose =
@@ -159,6 +175,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _headPose.dispose();
 
     _camDisposing = true;
+    // Stop video recording and discard the temp file — dispose() is sync so
+    // we fire-and-forget. Session already ended cleanly via _stopRecording.
+    if (_videoRecordingActive) {
+      _videoRecordingActive = false;
+      _cameraController?.stopVideoRecording().then((xfile) {
+        VideoClipService.deleteFile(xfile.path);
+      }).catchError((_) {});
+    }
     try {
       if (_cameraController != null &&
           _cameraController!.value.isInitialized &&
@@ -318,7 +342,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (!mounted || _camDisposing) return;
 
     try {
-      if (!_cameraController!.value.isStreamingImages) {
+      // If video recording is active, frames arrive via startVideoRecording's
+      // concurrent pipeline — don't try to start a separate image stream.
+      if (!_videoRecordingActive &&
+          !_cameraController!.value.isStreamingImages) {
         await _cameraController!.startImageStream(_onCameraFrame);
       }
       _isInPipRecovery = false;
@@ -329,7 +356,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       Future.delayed(const Duration(milliseconds: 800), () async {
         if (!mounted || _camDisposing || _cameraController == null) return;
         try {
-          if (!_cameraController!.value.isStreamingImages) {
+          if (!_videoRecordingActive &&
+              !_cameraController!.value.isStreamingImages) {
             await _cameraController!.startImageStream(_onCameraFrame);
           }
           _isInPipRecovery = false;
@@ -455,11 +483,33 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       if (!_camDisposing) await _cameraController?.dispose();
       if (_camDisposing) return;
 
-      _cameraController = CameraController(cam, ResolutionPreset.medium,
-          enableAudio: false,
-          imageFormatGroup: ImageFormatGroup.yuv420,
-          fps: 30);
+      _cameraController = CameraController(
+        cam,
+        ResolutionPreset.medium,
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.yuv420,
+        fps: 30,
+      );
       await _cameraController!.initialize();
+      _cachedPreviewSize = _cameraController!.value.previewSize;
+
+      // FIX: Lock orientation immediately after init, before recording starts.
+      // This captures the true portrait orientation so that when
+      // startVideoRecording() later writes value.recordingOrientation (often
+      // a landscape value on CameraX), our preview widget ignores it entirely.
+      await _cameraController!.lockCaptureOrientation(DeviceOrientation.portraitUp);
+
+      final initOrientation =
+          _cameraController!.value.lockedCaptureOrientation ??
+          _cameraController!.value.deviceOrientation;
+      _lockedIsLandscape = initOrientation == DeviceOrientation.landscapeLeft ||
+          initOrientation == DeviceOrientation.landscapeRight;
+      _lockedQuarterTurns = <DeviceOrientation, int>{
+        DeviceOrientation.portraitUp:     0,
+        DeviceOrientation.landscapeRight: 1,
+        DeviceOrientation.portraitDown:   2,
+        DeviceOrientation.landscapeLeft:  3,
+      }[initOrientation] ?? 0;
 
       if (!mounted || _camDisposing) return;
       setState(() { _cameraInitialized = true; _cameraError = null; });
@@ -551,7 +601,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _alertLevel            = 0;
     _lastLoggedState       = '';
     _lastLoggedSubclass    = '';
-    _isStopping            = false; // reset guard in case it got stuck
+    _isStopping            = false;
+    _sessionHadAlerts      = false;
+    _sessionAlertTypes.clear();
+    _inferenceSkipCtr      = 0;
     TfliteService.instance.resetSession();
 
     if (_cameraInitialized && _modelLoaded && !_camDisposing) {
@@ -565,6 +618,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
 
     _startHeadPoseUpdates();
+    await _startVideoCapture();
 
     ref.read(isRecordingProvider.notifier).set(true);
     PipService.setRecording(true);
@@ -581,6 +635,84 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     _snapshotTimer = Timer.periodic(
         const Duration(seconds: 5), (_) => _saveAlertnessSnapshot());
     ref.read(dbChangeCounterProvider.notifier).increment();
+  }
+
+  // ── VIDEO CAPTURE ─────────────────────────────────────────────────────────────
+
+  Future<void> _startVideoCapture() async {
+    if (_cameraController == null || !_cameraInitialized || _camDisposing) return;
+    try {
+      // FIX: Re-assert the portrait lock right before startVideoRecording().
+      // CameraX may reset the lock internally when rebinding use cases.
+      // This prevents the recorded orientation from polluting value.recordingOrientation
+      // and causing the preview to snap to landscape.
+      await _cameraController!.lockCaptureOrientation(DeviceOrientation.portraitUp);
+
+      // On this device CameraX drops ImageAnalysis when VideoCapture is added,
+      // so the image stream stops delivering frames and inference dies. Stopping
+      // the stream first and using onAvailable keeps inference running through
+      // the video pipeline instead of a separate ImageAnalysis surface.
+      if (_cameraController!.value.isStreamingImages) {
+        await _cameraController!.stopImageStream();
+      }
+      await _cameraController!.startVideoRecording(
+        onAvailable: _onCameraFrame,
+      );
+      _videoRecordingActive = true;
+      debugPrint('[Video] Recording started');
+    } catch (e) {
+      _videoRecordingActive = false;
+      // Recording failed — restore the image stream so inference continues.
+      if (!_camDisposing &&
+          _cameraController != null &&
+          !_cameraController!.value.isStreamingImages) {
+        try {
+          await _cameraController!.startImageStream(_onCameraFrame);
+        } catch (_) {}
+      }
+      debugPrint('[Video] startVideoRecording unavailable: $e — inference unaffected');
+    }
+  }
+
+  /// Stops the video recording. If the session had alerts the clip is saved to
+  /// app documents and written to the DB; otherwise the temp file is deleted.
+  Future<void> _stopAndSaveVideo() async {
+    if (!_videoRecordingActive || _cameraController == null) return;
+    _videoRecordingActive = false;
+    final sessionId = _currentSessionId; // capture before it gets nulled
+    try {
+      final xfile = await _cameraController!.stopVideoRecording();
+      // Recording has ended — restart the image stream so inference continues
+      // for the remainder of any active session (shouldn't normally happen, but
+      // guards against the case where stopAndSave is called mid-session).
+      if (!_camDisposing &&
+          _cameraController != null &&
+          !_cameraController!.value.isStreamingImages &&
+          ref.read(isRecordingProvider)) {
+        try {
+          await _cameraController!.startImageStream(_onCameraFrame);
+        } catch (_) {}
+      }
+      if (_sessionHadAlerts && sessionId != null) {
+        final saved = await VideoClipService.saveClip(
+          sourcePath: xfile.path,
+          sessionId: sessionId,
+        );
+        if (saved != null) {
+          await DatabaseHelper.instance.insertVideoClip(
+            sessionId:  sessionId,
+            filePath:   saved,
+            alertTypes: _sessionAlertTypes.join(','),
+          );
+          _addLogSync('Alert video clip saved', 'SUCCESS');
+        }
+      } else {
+        await VideoClipService.deleteFile(xfile.path);
+        debugPrint('[Video] Safe drive — temp clip discarded');
+      }
+    } catch (e) {
+      debugPrint('[Video] stopVideoRecording error: $e');
+    }
   }
 
   double _computeAlertnessAvg(
@@ -609,12 +741,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   // Re-entrancy guard: prevents _stopRecording from running twice simultaneously.
-  // The double-call happens when the Stop button is tapped AND the notification
-  // stop button fires at the same time (both call _stopRecording).
   bool _isStopping = false;
 
   Future<void> _stopRecording() async {
-    // Prevent double-call: if already stopping, bail immediately
     if (_isStopping) {
       debugPrint('[Monitor] _stopRecording called while already stopping — ignoring');
       return;
@@ -626,7 +755,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         _currentSessionId = ActiveSession.sessionId;
         _sessionStartTime = ActiveSession.startTime;
       }
-      // Guard: if still null after restore, nothing to stop
       if (_currentSessionId == null) {
         BantayDriveService.stopService();
         PipService.setRecording(false);
@@ -635,10 +763,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           ref.read(driverStateProvider.notifier).set('neutral');
           ref.read(showAlertBannerProvider.notifier).set(false);
         }
-        return; // finally still runs and resets _isStopping
+        return;
       }
 
       _snapshotTimer?.cancel();
+      await _stopAndSaveVideo();
 
       await _saveAlertnessSnapshot();
 
@@ -735,13 +864,18 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   // ── INFERENCE ────────────────────────────────────────────────────────────────
-  bool _isInferring = false;
+  bool _isInferring      = false;
+  int  _inferenceSkipCtr = 0;
 
   // Non-async so the camera system isn't blocked waiting for inference.
   void _onCameraFrame(CameraImage frame) {
     _latestFrame = frame;
     if (_camDisposing || _isInferring) return;
     if (!mounted || !ref.read(isRecordingProvider)) return;
+    // FIX: Skip 2 out of every 3 frames during video recording (was 1 of 2).
+    // The encoder needs more CPU headroom during the first seconds after
+    // startVideoRecording() as CameraX is binding its internal pipeline.
+    if (_videoRecordingActive && (++_inferenceSkipCtr % 3 != 0)) return;
     _isInferring = true;
     TfliteService.instance.runInference(frame).then((result) {
       _isInferring = false;
@@ -761,7 +895,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       try {
         final result = await HeadPoseService.instance.detectPose(frame);
 
-        // Update circle indicator
         if (mounted) {
           _headPose.value = (result?.roll ?? 0.0, result != null);
         }
@@ -776,9 +909,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             rollEulerZ: result.roll,
           );
         }
-        // When face is not detected, keep the last known face values.
-        // Zeroing EAR to 0.0 would falsely signal "eyes completely closed"
-        // and corrupt the temporal buffer used for drowsy detection.
       } finally {
         _isHeadPoseRunning = false;
       }
@@ -853,9 +983,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       default:
         _consecutiveDrowsy     = (_consecutiveDrowsy     - 1).clamp(0, 999);
         _consecutiveDistracted = (_consecutiveDistracted - 1).clamp(0, 999);
-        // Only clear an active L1/L2 alert once both counters drop below the
-        // L1 threshold. A single neutral frame during borderline drowsiness was
-        // previously zeroing _alertLevel immediately, making L2/L3 unreachable.
         final thresholds = _sensitivityThresholds[_prefAlertSensitivity] ?? [3, 6, 9];
         if (_alertLevel > 0 && _alertLevel < 3 &&
             _consecutiveDrowsy < thresholds[0] &&
@@ -867,7 +994,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         ref.read(activeSubclassProvider.notifier).set('safe_driving');
         ref.read(activeSubclassIndexProvider.notifier).set(0);
     }
-    // Platform-channel call only on state transitions — not every inference frame.
     if (_lastServiceState != r.state) {
       _lastServiceState = r.state;
       BantayDriveService.updateState(r.state);
@@ -888,6 +1014,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     if (newLevel <= _alertLevel) return;
     _alertLevel = newLevel;
+
+    _sessionHadAlerts = true;
+    _sessionAlertTypes.add(type);
 
     ref.read(showAlertBannerProvider.notifier).set(true);
     ref.read(alertBannerTypeProvider.notifier).set(type);
@@ -1008,9 +1137,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               fit: BoxFit.cover,
               clipBehavior: Clip.hardEdge,
               child: SizedBox(
-                width:  _cameraController!.value.previewSize?.height ?? 480,
-                height: _cameraController!.value.previewSize?.width  ?? 640,
-                child: CameraPreview(_cameraController!),
+                width:  (_cachedPreviewSize ?? _cameraController!.value.previewSize)?.height ?? 480,
+                height: (_cachedPreviewSize ?? _cameraController!.value.previewSize)?.width  ?? 640,
+                child: _buildRawPreview(_cameraController!),
               ),
             ),
           ),
@@ -1105,6 +1234,25 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       },
     );
 
+  // FIX: Replaced the old ValueListenableBuilder-based _buildRawPreview with a
+  // static version that uses _lockedQuarterTurns / _lockedIsLandscape captured
+  // at camera init. This means:
+  //   1. No rebuild fires on every CameraValue change (huge perf win).
+  //   2. startVideoRecording() writing value.recordingOrientation to a landscape
+  //      value can never rotate the preview — we simply ignore the live value.
+  Widget _buildRawPreview(CameraController ctrl) {
+    if (!ctrl.value.isInitialized) return const SizedBox.shrink();
+    return AspectRatio(
+      aspectRatio: _lockedIsLandscape
+          ? ctrl.value.aspectRatio
+          : 1.0 / ctrl.value.aspectRatio,
+      child: RotatedBox(
+        quarterTurns: _lockedQuarterTurns,
+        child: ctrl.buildPreview(),
+      ),
+    );
+  }
+
   Widget _buildCameraChild(double camW, double camH) {
     final ctrl = _cameraController;
     final canShow = _cameraInitialized &&
@@ -1114,7 +1262,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     if (canShow) {
       return Stack(children: [
-        CameraPreview(key: _cameraKey, ctrl),
+        _buildRawPreview(ctrl),
 
         if (_cameraReconnecting)
           Positioned.fill(
@@ -1148,10 +1296,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     double camAspect;
     final ctrl = _cameraController;
+    final ps = _cachedPreviewSize ?? ctrl?.value.previewSize;
     if (_cameraInitialized && ctrl != null &&
-        ctrl.value.isInitialized &&
-        ctrl.value.previewSize != null) {
-      final ps = ctrl.value.previewSize!;
+        ctrl.value.isInitialized && ps != null) {
       camAspect = 1.0 / (ps.width / ps.height);
     } else {
       camAspect = 3.0 / 4.0;
@@ -1222,9 +1369,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 ),
               ),
 
-            // Head pose indicator — always visible when camera is active.
-            // RepaintBoundary isolates the 200ms repaints so they don't
-            // invalidate the camera composite layer each time.
             if (!ref.watch(isInPipProvider) && _cameraInitialized && !_camDisposing)
               Positioned(
                 bottom: context.rs(58),
@@ -1724,8 +1868,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// METRIC GAUGES ROW — isolated ConsumerWidget so per-frame provider updates
-// don't cascade into a full MonitorScreen rebuild (and re-layout CameraPreview).
+// METRIC GAUGES ROW
 // ─────────────────────────────────────────────────────────────────────────────
 class _MetricGaugesRow extends ConsumerWidget {
   final VoidCallback? onDrowsyTap;
