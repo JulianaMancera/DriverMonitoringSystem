@@ -33,7 +33,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
   List<Map<String, dynamic>> _sessions = [];
   List<Map<String, dynamic>> _filtered = [];
 
-  // New filter state (replaces _selectedFilter int + _filters list)
   DateTime? _dateRangeStart;
   DateTime? _dateRangeEnd;
   Set<String> _detectionFilter = {};
@@ -44,8 +43,14 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
   // ── VIDEO LOGS state ─────────────────────────────────────────────────────
   bool _clipsLoading = true;
   List<Map<String, dynamic>> _clips = [];
+  List<Map<String, dynamic>> _filteredClips = [];
   final Set<int> _selectedClipIds = {};
   bool _isDownloading = false;
+
+  // Video filter state
+  DateTime? _videoDateRangeStart;
+  DateTime? _videoDateRangeEnd;
+  Set<String> _videoDetectionFilter = {};
 
   @override
   void initState() {
@@ -89,7 +94,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     final query = _searchCtrl.text.toLowerCase().trim();
     List<Map<String, dynamic>> result = List.from(_sessions);
 
-    // Search query
     if (query.isNotEmpty) {
       result = result.where((s) {
         final iso = s['started_at'] as String? ?? '';
@@ -123,7 +127,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
       }).toList();
     }
 
-    // Date range filter
     if (_dateRangeStart != null) {
       final start = DateTime(
           _dateRangeStart!.year, _dateRangeStart!.month, _dateRangeStart!.day);
@@ -139,7 +142,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
       }).toList();
     }
 
-    // Detection type filter
     if (_detectionFilter.isNotEmpty) {
       result = result.where((s) {
         final alertCount = s['alert_count'] as int? ?? 0;
@@ -153,12 +155,41 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
       }).toList();
     }
 
-    // Min severity
-    // if (_minAlertLevel > 0) {
-    //   result = result.where((s) => (s['max_alert_level'] as int? ?? 0) >= _minAlertLevel).toList();
-    // }
-
     setState(() => _filtered = result);
+  }
+
+  // ── VIDEO LOGS filter helpers ────────────────────────────────────────────
+
+  void _applyVideoFilter() {
+    List<Map<String, dynamic>> result = List.from(_clips);
+
+    if (_videoDateRangeStart != null) {
+      final start = DateTime(_videoDateRangeStart!.year,
+          _videoDateRangeStart!.month, _videoDateRangeStart!.day);
+      final end = _videoDateRangeEnd != null
+          ? DateTime(_videoDateRangeEnd!.year, _videoDateRangeEnd!.month,
+              _videoDateRangeEnd!.day, 23, 59, 59)
+          : DateTime(start.year, start.month, start.day, 23, 59, 59);
+      result = result.where((c) {
+        final d = DateTime.tryParse(c['created_at'] ?? '')?.toLocal();
+        return d != null &&
+            d.isAfter(start.subtract(const Duration(seconds: 1))) &&
+            d.isBefore(end.add(const Duration(seconds: 1)));
+      }).toList();
+    }
+
+    if (_videoDetectionFilter.isNotEmpty) {
+      result = result.where((c) {
+        final alertTypes = c['alert_types'] as String? ?? '';
+        if (_videoDetectionFilter.contains('DROWSY') &&
+            alertTypes.contains('DROWSY')) return true;
+        if (_videoDetectionFilter.contains('DISTRACTED') &&
+            alertTypes.contains('DISTRACTED')) return true;
+        return false;
+      }).toList();
+    }
+
+    setState(() => _filteredClips = result);
   }
 
   void _openSessionDetail(Map<String, dynamic> session) {
@@ -173,14 +204,18 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     );
   }
 
-  // ── CALENDAR FILTER ──────────────────────────────────────────────────────
+  // ── CALENDAR FILTER (shared logic) ───────────────────────────────────────
 
-  void _openCalendarFilter() {
-    DateTime viewMonth = _dateRangeStart != null
-        ? DateTime(_dateRangeStart!.year, _dateRangeStart!.month)
+  void _openCalendarFilter({
+    required DateTime? initialStart,
+    required DateTime? initialEnd,
+    required void Function(DateTime? start, DateTime? end) onApply,
+  }) {
+    DateTime viewMonth = initialStart != null
+        ? DateTime(initialStart.year, initialStart.month)
         : DateTime(DateTime.now().year, DateTime.now().month);
-    DateTime? tempStart = _dateRangeStart;
-    DateTime? tempEnd = _dateRangeEnd;
+    DateTime? tempStart = initialStart;
+    DateTime? tempEnd = initialEnd;
 
     showModalBottomSheet(
       context: context,
@@ -196,14 +231,12 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            // Handle
             Container(
                 margin: const EdgeInsets.only(top: 12, bottom: 4),
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
                     color: _divider, borderRadius: BorderRadius.circular(2))),
-            // Header
             Padding(
               padding: EdgeInsets.fromLTRB(
                   context.rp(20), context.rs(8), context.rp(16), context.rs(12)),
@@ -216,11 +249,10 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
                 const Spacer(),
                 if (tempStart != null)
                   GestureDetector(
-                    onTap: () =>
-                        setSheet(() {
-                          tempStart = null;
-                          tempEnd = null;
-                        }),
+                    onTap: () => setSheet(() {
+                      tempStart = null;
+                      tempEnd = null;
+                    }),
                     child: Text('Clear',
                         style: TextStyle(
                             color: _cyan,
@@ -229,7 +261,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
                   ),
               ]),
             ),
-            // Month nav
             Padding(
               padding: EdgeInsets.symmetric(
                   horizontal: context.rp(20), vertical: context.rs(4)),
@@ -260,7 +291,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
                     })),
               ]),
             ),
-            // Day names
             Padding(
               padding: EdgeInsets.symmetric(
                   horizontal: context.rp(16), vertical: context.rs(4)),
@@ -277,7 +307,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
                     .toList(),
               ),
             ),
-            // Calendar grid
             Padding(
               padding: EdgeInsets.symmetric(horizontal: context.rp(12)),
               child: _buildCalGrid(
@@ -297,7 +326,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
                 }),
               ),
             ),
-            // Range hint
             Padding(
               padding: EdgeInsets.fromLTRB(
                   context.rp(20), context.rs(8), context.rp(20), context.rs(4)),
@@ -305,12 +333,11 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
                 tempStart == null
                     ? 'Tap to select start date'
                     : tempEnd == null
-                        ? 'Start: ${_formatDate(tempStart!.toIso8601String())}  —  tap end date'
-                        : '${_formatDate(tempStart!.toIso8601String())}  →  ${_formatDate(tempEnd!.toIso8601String())}',
+                        ? 'Start: ${_formatDateMDY(tempStart!.toIso8601String())}  —  tap end date'
+                        : '${_formatDateMDY(tempStart!.toIso8601String())}  →  ${_formatDateMDY(tempEnd!.toIso8601String())}',
                 style: TextStyle(color: _textDim, fontSize: context.sp(11)),
               ),
             ),
-            // Buttons
             Padding(
               padding: EdgeInsets.fromLTRB(
                   context.rp(16), context.rs(8), context.rp(16), context.rs(24)),
@@ -334,11 +361,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
                 Expanded(
                   child: ElevatedButton(
                     onPressed: () {
-                      setState(() {
-                        _dateRangeStart = tempStart;
-                        _dateRangeEnd = tempEnd;
-                      });
-                      _applyFilter();
+                      onApply(tempStart, tempEnd);
                       Navigator.pop(ctx);
                     },
                     style: ElevatedButton.styleFrom(
@@ -449,7 +472,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
   bool _sameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
 
-  // ── DETECTION FILTER ─────────────────────────────────────────────────────
+  // ── SESSION DETECTION FILTER ─────────────────────────────────────────────
 
   void _openDetectionFilter() {
     Set<String> tempDet = Set.from(_detectionFilter);
@@ -498,7 +521,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
               ]),
             ),
             Divider(color: _divider, height: 1),
-            // Section: Drive Outcome
             Padding(
               padding: EdgeInsets.fromLTRB(
                   context.rp(20), context.rs(14), context.rp(20), context.rs(10)),
@@ -539,7 +561,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
                     ]),
                   ]),
             ),
-            // Section: Alert Type
             Padding(
               padding: EdgeInsets.fromLTRB(
                   context.rp(20), context.rs(4), context.rp(20), context.rs(10)),
@@ -580,7 +601,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
                     ]),
                   ]),
             ),
-            // Section: Severity
             Padding(
               padding: EdgeInsets.fromLTRB(
                   context.rp(20), context.rs(4), context.rp(20), context.rs(10)),
@@ -665,6 +685,148 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
                         _minAlertLevel = tempSev;
                       });
                       _applyFilter();
+                      Navigator.pop(ctx);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _cyan,
+                      foregroundColor: Colors.black,
+                      padding:
+                          EdgeInsets.symmetric(vertical: context.rs(12)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(context.rp(12))),
+                    ),
+                    child: const Text('Apply Filter',
+                        style: TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ]),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  // ── VIDEO DETECTION FILTER ───────────────────────────────────────────────
+
+  void _openVideoDetectionFilter() {
+    Set<String> tempDet = Set.from(_videoDetectionFilter);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.6),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFF0D1627),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+                margin: const EdgeInsets.only(top: 12, bottom: 4),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                    color: _divider, borderRadius: BorderRadius.circular(2))),
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  context.rp(20), context.rs(8), context.rp(16), context.rs(12)),
+              child: Row(children: [
+                Text('Detection Filter',
+                    style: TextStyle(
+                        color: _textPrimary,
+                        fontSize: context.sp(15),
+                        fontWeight: FontWeight.w700)),
+                const Spacer(),
+                GestureDetector(
+                  onTap: () => setSheet(() => tempDet.clear()),
+                  child: Text('Clear all',
+                      style: TextStyle(
+                          color: _cyan,
+                          fontSize: context.sp(12),
+                          fontWeight: FontWeight.w600)),
+                ),
+              ]),
+            ),
+            Divider(color: _divider, height: 1),
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  context.rp(20), context.rs(14), context.rp(20), context.rs(10)),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('ALERT TYPE',
+                        style: TextStyle(
+                            color: _textDim,
+                            fontSize: context.sp(10),
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 1.2)),
+                    SizedBox(height: context.rs(10)),
+                    Row(children: [
+                      Expanded(
+                          child: _detOption(
+                        isSelected: tempDet.contains('DROWSY'),
+                        icon: Icons.airline_seat_flat_rounded,
+                        iconColor: _drowsy,
+                        label: 'Drowsiness',
+                        sublabel: 'Eyes closed / nodding',
+                        onTap: () => setSheet(() {
+                          if (tempDet.contains('DROWSY')) {
+                            tempDet.remove('DROWSY');
+                          } else {
+                            tempDet.add('DROWSY');
+                          }
+                        }),
+                      )),
+                      SizedBox(width: context.rp(10)),
+                      Expanded(
+                          child: _detOption(
+                        isSelected: tempDet.contains('DISTRACTED'),
+                        icon: Icons.remove_red_eye_outlined,
+                        iconColor: _distracted,
+                        label: 'Distraction',
+                        sublabel: 'Looking away / phone',
+                        onTap: () => setSheet(() {
+                          if (tempDet.contains('DISTRACTED')) {
+                            tempDet.remove('DISTRACTED');
+                          } else {
+                            tempDet.add('DISTRACTED');
+                          }
+                        }),
+                      )),
+                    ]),
+                  ]),
+            ),
+            Divider(color: _divider, height: 1),
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  context.rp(16), context.rs(12), context.rp(16), context.rs(28)),
+              child: Row(children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _textDim,
+                      side: BorderSide(color: _divider),
+                      padding:
+                          EdgeInsets.symmetric(vertical: context.rs(12)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(context.rp(12))),
+                    ),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                SizedBox(width: context.rp(12)),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () {
+                      setState(() => _videoDetectionFilter = tempDet);
+                      _applyVideoFilter();
                       Navigator.pop(ctx);
                     },
                     style: ElevatedButton.styleFrom(
@@ -774,11 +936,13 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
         valid.add(c);
       }
     }
-    if (mounted)
+    if (mounted) {
       setState(() {
         _clips = valid;
         _clipsLoading = false;
       });
+      _applyVideoFilter();
+    }
   }
 
   Future<void> _downloadSelected() async {
@@ -786,7 +950,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     setState(() => _isDownloading = true);
 
     int success = 0;
-    for (final clip in _clips) {
+    for (final clip in _filteredClips) {
       if (!_selectedClipIds.contains(clip['id'] as int)) continue;
       final dest = await VideoClipService.exportToDownloads(
           clip['file_path'] as String);
@@ -826,8 +990,11 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     showDialog(
       context: context,
       barrierColor: Colors.black87,
-      builder: (_) =>
-          _VideoPlayerDialog(filePath: clip['file_path'] as String),
+      builder: (_) => _VideoPlayerDialog(
+        filePath: clip['file_path'] as String,
+        createdAt: clip['created_at'] as String? ?? '',
+        sessionId: clip['session_id'] as int? ?? 0,
+      ),
     );
   }
 
@@ -842,16 +1009,15 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     return '${s}s';
   }
 
-  String _formatDate(String? iso) {
+  /// Returns MM/DD/YYYY format
+  String _formatDateMDY(String? iso) {
     if (iso == null) return '—';
     final d = DateTime.tryParse(iso);
     if (d == null) return '—';
     final l = d.toLocal();
-    const mo = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-    ];
-    return '${mo[l.month - 1]} ${l.day}, ${l.year}';
+    final mm = l.month.toString().padLeft(2, '0');
+    final dd = l.day.toString().padLeft(2, '0');
+    return '$mm/${dd}/${l.year}';
   }
 
   String _formatTime(String? iso) {
@@ -875,7 +1041,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     final day = DateTime(local.year, local.month, local.day);
     if (day == today) return 'TODAY';
     if (day == today.subtract(const Duration(days: 1))) return 'YESTERDAY';
-    return _formatDate(iso).toUpperCase();
+    return _formatDateMDY(iso);
   }
 
   Map<String, List<Map<String, dynamic>>> _groupByDate(
@@ -895,20 +1061,15 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
 
   // ── FILTER PILL HELPERS ──────────────────────────────────────────────────
 
-  String _dateRangeLabel() {
-    const mo = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-    ];
-    final s = _dateRangeStart!;
-    if (_dateRangeEnd == null || _dateRangeEnd == _dateRangeStart) {
-      return '${mo[s.month - 1]} ${s.day}';
+  String _dateRangeLabel(DateTime start, DateTime? end) {
+    final mm = start.month.toString().padLeft(2, '0');
+    final dd = start.day.toString().padLeft(2, '0');
+    if (end == null || end == start) {
+      return '$mm/${dd}/${start.year}';
     }
-    final e = _dateRangeEnd!;
-    if (s.month == e.month && s.year == e.year) {
-      return '${mo[s.month - 1]} ${s.day}–${e.day}';
-    }
-    return '${mo[s.month - 1]} ${s.day} – ${mo[e.month - 1]} ${e.day}';
+    final emm = end.month.toString().padLeft(2, '0');
+    final edd = end.day.toString().padLeft(2, '0');
+    return '$mm/$dd – $emm/$edd';
   }
 
   String _detFilterLabel() {
@@ -922,6 +1083,14 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     }
     final label = parts.join(' + ');
     return _minAlertLevel > 0 ? '$label · L$_minAlertLevel+' : label;
+  }
+
+  String _videoDetFilterLabel() {
+    final parts = <String>[];
+    if (_videoDetectionFilter.contains('DROWSY')) parts.add('Drowsy');
+    if (_videoDetectionFilter.contains('DISTRACTED')) parts.add('Distracted');
+    if (parts.isEmpty) return 'All Detections';
+    return parts.join(' + ');
   }
 
   // ── BUILD ────────────────────────────────────────────────────────────────
@@ -1035,7 +1204,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     );
   }
 
-  // New pill-based filter row (replaces old scrollable chip row)
   Widget _buildFilterChips() {
     final hasDateFilter = _dateRangeStart != null;
     final hasDetFilter = _detectionFilter.isNotEmpty || _minAlertLevel > 0;
@@ -1048,9 +1216,21 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
       child: Row(children: [
         _buildFilterPill(
           icon: Icons.calendar_month_rounded,
-          label: hasDateFilter ? _dateRangeLabel() : 'Date Range',
+          label: hasDateFilter
+              ? _dateRangeLabel(_dateRangeStart!, _dateRangeEnd)
+              : 'Date Range',
           isActive: hasDateFilter,
-          onTap: _openCalendarFilter,
+          onTap: () => _openCalendarFilter(
+            initialStart: _dateRangeStart,
+            initialEnd: _dateRangeEnd,
+            onApply: (start, end) {
+              setState(() {
+                _dateRangeStart = start;
+                _dateRangeEnd = end;
+              });
+              _applyFilter();
+            },
+          ),
         ),
         SizedBox(width: context.rp(8)),
         _buildFilterPill(
@@ -1203,7 +1383,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(_formatDate(s['started_at']),
+                      // Changed: MM/DD/YYYY format
+                      Text(_formatDateMDY(s['started_at']),
                           style: TextStyle(
                               color: _textPrimary,
                               fontSize: context.sp(13),
@@ -1327,16 +1508,83 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     if (_clips.isEmpty) {
       return _buildVideoEmpty();
     }
-    return Stack(children: [
-      _buildClipList(),
-      if (_selectedClipIds.isNotEmpty)
-        Positioned(
-          bottom: 0,
-          left: 0,
-          right: 0,
-          child: _buildDownloadBar(),
-        ),
+    return Column(children: [
+      _buildVideoFilterChips(),
+      Expanded(
+        child: Stack(children: [
+          _filteredClips.isEmpty
+              ? _buildVideoFilterEmpty()
+              : _buildClipList(),
+          if (_selectedClipIds.isNotEmpty)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: _buildDownloadBar(),
+            ),
+        ]),
+      ),
     ]);
+  }
+
+  Widget _buildVideoFilterChips() {
+    final hasDateFilter = _videoDateRangeStart != null;
+    final hasDetFilter = _videoDetectionFilter.isNotEmpty;
+    return Container(
+      color: _surface,
+      padding: EdgeInsets.symmetric(
+          horizontal: context.rp(16), vertical: context.rs(10)),
+      child: Row(children: [
+        _buildFilterPill(
+          icon: Icons.calendar_month_rounded,
+          label: hasDateFilter
+              ? _dateRangeLabel(_videoDateRangeStart!, _videoDateRangeEnd)
+              : 'Date Range',
+          isActive: hasDateFilter,
+          onTap: () => _openCalendarFilter(
+            initialStart: _videoDateRangeStart,
+            initialEnd: _videoDateRangeEnd,
+            onApply: (start, end) {
+              setState(() {
+                _videoDateRangeStart = start;
+                _videoDateRangeEnd = end;
+              });
+              _applyVideoFilter();
+            },
+          ),
+        ),
+        SizedBox(width: context.rp(8)),
+        _buildFilterPill(
+          icon: Icons.shield_outlined,
+          label: hasDetFilter ? _videoDetFilterLabel() : 'All Detections',
+          isActive: hasDetFilter,
+          onTap: _openVideoDetectionFilter,
+        ),
+        if (hasDateFilter || hasDetFilter) ...[
+          SizedBox(width: context.rp(8)),
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                _videoDateRangeStart = null;
+                _videoDateRangeEnd = null;
+                _videoDetectionFilter.clear();
+              });
+              _applyVideoFilter();
+            },
+            child: Container(
+              padding: EdgeInsets.symmetric(
+                  horizontal: context.rp(10), vertical: context.rs(6)),
+              decoration: BoxDecoration(
+                color: _divider,
+                borderRadius: BorderRadius.circular(context.rp(20)),
+              ),
+              child: Icon(Icons.close_rounded,
+                  color: _textDim, size: context.ri(13)),
+            ),
+          ),
+        ],
+      ]),
+    );
   }
 
   Widget _buildVideoEmpty() => Center(
@@ -1363,8 +1611,28 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
         ),
       );
 
+  Widget _buildVideoFilterEmpty() => Center(
+        child: Padding(
+          padding: EdgeInsets.all(context.rp(32)),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.filter_list_off_rounded,
+                color: _textDim, size: context.ri(48)),
+            SizedBox(height: context.rs(16)),
+            Text('No videos match your filters',
+                style: TextStyle(
+                    color: _textPrimary,
+                    fontSize: context.sp(15),
+                    fontWeight: FontWeight.w600)),
+            SizedBox(height: context.rs(6)),
+            Text('Try adjusting the date range or detection type.',
+                style: TextStyle(color: _textDim, fontSize: context.sp(13)),
+                textAlign: TextAlign.center),
+          ]),
+        ),
+      );
+
   Widget _buildClipList() {
-    final groups = _groupByDate(_clips, 'created_at');
+    final groups = _groupByDate(_filteredClips, 'created_at');
     return RefreshIndicator(
       color: _cyan,
       backgroundColor: _surface,
@@ -1525,7 +1793,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
                       Icon(Icons.videocam_outlined,
                           color: _textDim, size: context.ri(11)),
                       SizedBox(width: context.rp(3)),
-                      Text('Session #$sessionId',
+                      // Changed: show MM/DD/YYYY date instead of session #
+                      Text(_formatDateMDY(createdAt),
                           style: TextStyle(
                               color: _textDim,
                               fontSize: context.sp(10))),
@@ -1644,7 +1913,15 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
 // ═══════════════════════════════════════════════════════════════════════════════
 class _VideoPlayerDialog extends StatefulWidget {
   final String filePath;
-  const _VideoPlayerDialog({required this.filePath});
+  final String createdAt;
+  final int sessionId;
+
+  const _VideoPlayerDialog({
+    required this.filePath,
+    required this.createdAt,
+    required this.sessionId,
+  });
+
   @override
   State<_VideoPlayerDialog> createState() => _VideoPlayerDialogState();
 }
@@ -1653,6 +1930,16 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
   late VideoPlayerController _controller;
   bool _initialized = false;
   bool _error = false;
+
+  String _formatDateMDY(String? iso) {
+    if (iso == null || iso.isEmpty) return '—';
+    final d = DateTime.tryParse(iso);
+    if (d == null) return '—';
+    final l = d.toLocal();
+    final mm = l.month.toString().padLeft(2, '0');
+    final dd = l.day.toString().padLeft(2, '0');
+    return '$mm/${dd}/${l.year}';
+  }
 
   @override
   void initState() {
@@ -1686,18 +1973,31 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // Header: title + date (replaces session# here)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
             child: Row(children: [
               const Icon(Icons.videocam_rounded,
                   color: Color(0xFF00D4FF), size: 18),
               const SizedBox(width: 8),
-              const Expanded(
-                child: Text('Alert Video Clip',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600)),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Alert Video Clip',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600)),
+                    // Date shown in header (MM/DD/YYYY)
+                    Text(
+                      _formatDateMDY(widget.createdAt),
+                      style: const TextStyle(
+                          color: Color(0xFF6B7A99),
+                          fontSize: 11),
+                    ),
+                  ],
+                ),
               ),
               IconButton(
                 onPressed: () => Navigator.of(context).pop(),
@@ -1708,75 +2008,107 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
               ),
             ]),
           ),
+          // Video area
           ClipRRect(
-            borderRadius:
-                const BorderRadius.vertical(bottom: Radius.circular(16)),
-            child: AspectRatio(
-              aspectRatio:
-                  _initialized ? _controller.value.aspectRatio : 9 / 16,
-              child: _error
-                  ? const Center(
-                      child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                        Icon(Icons.broken_image_outlined,
-                            color: Colors.white38, size: 40),
-                        SizedBox(height: 8),
-                        Text('Could not load video',
-                            style: TextStyle(
-                                color: Colors.white38, fontSize: 12)),
-                      ]))
-                  : _initialized
-                      ? Stack(alignment: Alignment.center, children: [
-                          Transform(
-                            alignment: Alignment.center,
-                            transform:
-                                Matrix4.diagonal3Values(-1.0, 1.0, 1.0),
-                            child: VideoPlayer(_controller),
-                          ),
-                          GestureDetector(
-                            onTap: () => setState(() {
-                              _controller.value.isPlaying
-                                  ? _controller.pause()
-                                  : _controller.play();
-                            }),
-                            child: AnimatedOpacity(
-                              opacity:
-                                  _controller.value.isPlaying ? 0.0 : 1.0,
-                              duration: const Duration(milliseconds: 200),
-                              child: Container(
-                                width: 56,
-                                height: 56,
-                                decoration: BoxDecoration(
-                                  color:
-                                      Colors.black.withValues(alpha: 0.55),
-                                  shape: BoxShape.circle,
+            borderRadius: const BorderRadius.only(
+              bottomLeft: Radius.circular(16),
+              bottomRight: Radius.circular(16),
+            ),
+            child: Column(
+              children: [
+                AspectRatio(
+                  aspectRatio:
+                      _initialized ? _controller.value.aspectRatio : 9 / 16,
+                  child: _error
+                      ? const Center(
+                          child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                            Icon(Icons.broken_image_outlined,
+                                color: Colors.white38, size: 40),
+                            SizedBox(height: 8),
+                            Text('Could not load video',
+                                style: TextStyle(
+                                    color: Colors.white38, fontSize: 12)),
+                          ]))
+                      : _initialized
+                          ? Stack(alignment: Alignment.center, children: [
+                              Transform(
+                                alignment: Alignment.center,
+                                transform:
+                                    Matrix4.diagonal3Values(-1.0, 1.0, 1.0),
+                                child: VideoPlayer(_controller),
+                              ),
+                              GestureDetector(
+                                onTap: () => setState(() {
+                                  _controller.value.isPlaying
+                                      ? _controller.pause()
+                                      : _controller.play();
+                                }),
+                                child: AnimatedOpacity(
+                                  opacity:
+                                      _controller.value.isPlaying ? 0.0 : 1.0,
+                                  duration: const Duration(milliseconds: 200),
+                                  child: Container(
+                                    width: 56,
+                                    height: 56,
+                                    decoration: BoxDecoration(
+                                      color: Colors.black
+                                          .withValues(alpha: 0.55),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(Icons.play_arrow_rounded,
+                                        color: Colors.white, size: 32),
+                                  ),
                                 ),
-                                child: const Icon(Icons.play_arrow_rounded,
-                                    color: Colors.white, size: 32),
                               ),
-                            ),
-                          ),
-                          Positioned(
-                            bottom: 0,
-                            left: 0,
-                            right: 0,
-                            child: VideoProgressIndicator(
-                              _controller,
-                              allowScrubbing: true,
-                              colors: const VideoProgressColors(
-                                playedColor: Color(0xFF00D4FF),
-                                bufferedColor: Colors.white24,
-                                backgroundColor: Colors.white12,
+                              Positioned(
+                                bottom: 0,
+                                left: 0,
+                                right: 0,
+                                child: VideoProgressIndicator(
+                                  _controller,
+                                  allowScrubbing: true,
+                                  colors: const VideoProgressColors(
+                                    playedColor: Color(0xFF00D4FF),
+                                    bufferedColor: Colors.white24,
+                                    backgroundColor: Colors.white12,
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                      vertical: 8, horizontal: 0),
+                                ),
                               ),
-                              padding: const EdgeInsets.symmetric(
-                                  vertical: 8, horizontal: 0),
-                            ),
-                          ),
-                        ])
-                      : const Center(
-                          child: CircularProgressIndicator(
-                              color: Color(0xFF00D4FF))),
+                            ])
+                          : const Center(
+                              child: CircularProgressIndicator(
+                                  color: Color(0xFF00D4FF))),
+                ),
+                // Session number moved to bottom
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 10),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF0D1627),
+                    borderRadius: BorderRadius.only(
+                      bottomLeft: Radius.circular(16),
+                      bottomRight: Radius.circular(16),
+                    ),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.folder_outlined,
+                        color: Color(0xFF6B7A99), size: 13),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Session #${widget.sessionId}',
+                      style: const TextStyle(
+                          color: Color(0xFF6B7A99),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500),
+                    ),
+                  ]),
+                ),
+              ],
             ),
           ),
         ],
@@ -1851,16 +2183,14 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     }
   }
 
-  String _formatDate(String? iso) {
+  String _formatDateMDY(String? iso) {
     if (iso == null) return '—';
     final d = DateTime.tryParse(iso);
     if (d == null) return '—';
     final l = d.toLocal();
-    const mo = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-    ];
-    return '${mo[l.month - 1]} ${l.day}, ${l.year}';
+    final mm = l.month.toString().padLeft(2, '0');
+    final dd = l.day.toString().padLeft(2, '0');
+    return '$mm/${dd}/${l.year}';
   }
 
   String _formatTime(String? iso) {
@@ -1990,7 +2320,8 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                     child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                      Text(_formatDate(widget.session['started_at']),
+                      // Changed: MM/DD/YYYY in detail sheet header
+                      Text(_formatDateMDY(widget.session['started_at']),
                           style: TextStyle(
                               color: _textPrimary,
                               fontSize: context.sp(16),
