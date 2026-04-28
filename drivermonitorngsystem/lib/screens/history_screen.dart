@@ -32,19 +32,14 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
   bool _isLoading = true;
   List<Map<String, dynamic>> _sessions = [];
   List<Map<String, dynamic>> _filtered = [];
-  int _selectedFilter = 0;
-  final TextEditingController _searchCtrl = TextEditingController();
-  final ScrollController _filterScrollCtrl = ScrollController();
-  bool _filterCanScrollRight = true;
-  bool _filterCanScrollLeft = false;
 
-  final List<String> _filters = [
-    'All',
-    'This Week',
-    'This Month',
-    'With Alerts',
-    'Safe Drives',
-  ];
+  // New filter state (replaces _selectedFilter int + _filters list)
+  DateTime? _dateRangeStart;
+  DateTime? _dateRangeEnd;
+  Set<String> _detectionFilter = {};
+  int _minAlertLevel = 0;
+
+  final TextEditingController _searchCtrl = TextEditingController();
 
   // ── VIDEO LOGS state ─────────────────────────────────────────────────────
   bool _clipsLoading = true;
@@ -56,47 +51,19 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _tabController.addListener(() {
-      if (mounted) setState(() {});
-    });
     _loadSessions();
     _loadClips();
     _searchCtrl.addListener(_applyFilter);
-    _filterScrollCtrl.addListener(_onFilterScroll);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkFilterScroll());
   }
 
   @override
   void dispose() {
     _tabController.dispose();
     _searchCtrl.dispose();
-    _filterScrollCtrl.dispose();
     super.dispose();
   }
 
   // ── SESSION LOGS helpers ─────────────────────────────────────────────────
-
-  void _onFilterScroll() {
-    final pos = _filterScrollCtrl.position;
-    final showRight = pos.extentAfter > 4;
-    final showLeft = pos.extentBefore > 4;
-    if (showRight != _filterCanScrollRight ||
-        showLeft != _filterCanScrollLeft) {
-      setState(() {
-        _filterCanScrollRight = showRight;
-        _filterCanScrollLeft = showLeft;
-      });
-    }
-  }
-
-  void _checkFilterScroll() {
-    if (_filterScrollCtrl.hasClients) {
-      setState(() {
-        _filterCanScrollRight = _filterScrollCtrl.position.maxScrollExtent > 0;
-        _filterCanScrollLeft = false;
-      });
-    }
-  }
 
   Future<void> _loadSessions() async {
     setState(() => _isLoading = true);
@@ -120,9 +87,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
 
   void _applyFilter() {
     final query = _searchCtrl.text.toLowerCase().trim();
-    final now = DateTime.now();
     List<Map<String, dynamic>> result = List.from(_sessions);
 
+    // Search query
     if (query.isNotEmpty) {
       result = result.where((s) {
         final iso = s['started_at'] as String? ?? '';
@@ -131,45 +98,24 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
         final searchables = <String>[];
         if (d != null) {
           const months = [
-            'january',
-            'february',
-            'march',
-            'april',
-            'may',
-            'june',
-            'july',
-            'august',
-            'september',
-            'october',
-            'november',
-            'december'
+            'january', 'february', 'march', 'april', 'may', 'june',
+            'july', 'august', 'september', 'october', 'november', 'december'
           ];
           const short = [
-            'jan',
-            'feb',
-            'mar',
-            'apr',
-            'may',
-            'jun',
-            'jul',
-            'aug',
-            'sep',
-            'oct',
-            'nov',
-            'dec'
+            'jan', 'feb', 'mar', 'apr', 'may', 'jun',
+            'jul', 'aug', 'sep', 'oct', 'nov', 'dec'
           ];
           searchables.addAll([
             months[d.month - 1],
             short[d.month - 1],
-            '${short[d.month - 1]} ${d.day}',
+            '${d.month}/${d.day}/${d.year}',
             '${d.day}',
-            '${d.year}',
-            '${d.month}/${d.day}/${d.year}'
+            '${d.year}'
           ]);
           final h = d.hour == 0 ? 12 : (d.hour > 12 ? d.hour - 12 : d.hour);
-          final m = d.minute.toString().padLeft(2, '0');
           final ampm = d.hour >= 12 ? 'pm' : 'am';
-          searchables.addAll(['$h:$m $ampm', ampm]);
+          searchables.addAll(
+              ['$h:${d.minute.toString().padLeft(2, '0')} $ampm', ampm]);
         }
         if (alertCount == 0) searchables.add('safe');
         if (alertCount > 0) searchables.addAll(['alert', 'alerts']);
@@ -177,31 +123,41 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
       }).toList();
     }
 
-    switch (_selectedFilter) {
-      case 1:
-        final since = now.subtract(const Duration(days: 7));
-        result = result.where((s) {
-          final d = DateTime.tryParse(s['started_at'] ?? '');
-          return d != null && d.toLocal().isAfter(since);
-        }).toList();
-        break;
-      case 2:
-        result = result.where((s) {
-          final d = DateTime.tryParse(s['started_at'] ?? '');
-          if (d == null) return false;
-          final local = d.toLocal();
-          return local.month == now.month && local.year == now.year;
-        }).toList();
-        break;
-      case 3:
-        result =
-            result.where((s) => (s['alert_count'] as int? ?? 0) > 0).toList();
-        break;
-      case 4:
-        result =
-            result.where((s) => (s['alert_count'] as int? ?? 0) == 0).toList();
-        break;
+    // Date range filter
+    if (_dateRangeStart != null) {
+      final start = DateTime(
+          _dateRangeStart!.year, _dateRangeStart!.month, _dateRangeStart!.day);
+      final end = _dateRangeEnd != null
+          ? DateTime(_dateRangeEnd!.year, _dateRangeEnd!.month,
+              _dateRangeEnd!.day, 23, 59, 59)
+          : DateTime(start.year, start.month, start.day, 23, 59, 59);
+      result = result.where((s) {
+        final d = DateTime.tryParse(s['started_at'] ?? '')?.toLocal();
+        return d != null &&
+            d.isAfter(start.subtract(const Duration(seconds: 1))) &&
+            d.isBefore(end.add(const Duration(seconds: 1)));
+      }).toList();
     }
+
+    // Detection type filter
+    if (_detectionFilter.isNotEmpty) {
+      result = result.where((s) {
+        final alertCount = s['alert_count'] as int? ?? 0;
+        if (_detectionFilter.contains('SAFE') && alertCount == 0) return true;
+        if (_detectionFilter.contains('ANY') && alertCount > 0) return true;
+        if (_detectionFilter.contains('DROWSY') ||
+            _detectionFilter.contains('DISTRACTED')) {
+          if (alertCount > 0) return true;
+        }
+        return false;
+      }).toList();
+    }
+
+    // Min severity
+    // if (_minAlertLevel > 0) {
+    //   result = result.where((s) => (s['max_alert_level'] as int? ?? 0) >= _minAlertLevel).toList();
+    // }
+
     setState(() => _filtered = result);
   }
 
@@ -217,12 +173,601 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     );
   }
 
+  // ── CALENDAR FILTER ──────────────────────────────────────────────────────
+
+  void _openCalendarFilter() {
+    DateTime viewMonth = _dateRangeStart != null
+        ? DateTime(_dateRangeStart!.year, _dateRangeStart!.month)
+        : DateTime(DateTime.now().year, DateTime.now().month);
+    DateTime? tempStart = _dateRangeStart;
+    DateTime? tempEnd = _dateRangeEnd;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.6),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => Container(
+          constraints:
+              BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.72),
+          decoration: const BoxDecoration(
+            color: Color(0xFF0D1627),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            // Handle
+            Container(
+                margin: const EdgeInsets.only(top: 12, bottom: 4),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                    color: _divider, borderRadius: BorderRadius.circular(2))),
+            // Header
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  context.rp(20), context.rs(8), context.rp(16), context.rs(12)),
+              child: Row(children: [
+                Text('Date Range',
+                    style: TextStyle(
+                        color: _textPrimary,
+                        fontSize: context.sp(15),
+                        fontWeight: FontWeight.w700)),
+                const Spacer(),
+                if (tempStart != null)
+                  GestureDetector(
+                    onTap: () =>
+                        setSheet(() {
+                          tempStart = null;
+                          tempEnd = null;
+                        }),
+                    child: Text('Clear',
+                        style: TextStyle(
+                            color: _cyan,
+                            fontSize: context.sp(12),
+                            fontWeight: FontWeight.w600)),
+                  ),
+              ]),
+            ),
+            // Month nav
+            Padding(
+              padding: EdgeInsets.symmetric(
+                  horizontal: context.rp(20), vertical: context.rs(4)),
+              child: Row(children: [
+                _calNavBtn(Icons.chevron_left_rounded, () => setSheet(() {
+                      viewMonth = DateTime(
+                          viewMonth.month == 1
+                              ? viewMonth.year - 1
+                              : viewMonth.year,
+                          viewMonth.month == 1 ? 12 : viewMonth.month - 1);
+                    })),
+                Expanded(
+                  child: Text(
+                    _monthLabel(viewMonth),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        color: _textPrimary,
+                        fontSize: context.sp(13),
+                        fontWeight: FontWeight.w600),
+                  ),
+                ),
+                _calNavBtn(Icons.chevron_right_rounded, () => setSheet(() {
+                      viewMonth = DateTime(
+                          viewMonth.month == 12
+                              ? viewMonth.year + 1
+                              : viewMonth.year,
+                          viewMonth.month == 12 ? 1 : viewMonth.month + 1);
+                    })),
+              ]),
+            ),
+            // Day names
+            Padding(
+              padding: EdgeInsets.symmetric(
+                  horizontal: context.rp(16), vertical: context.rs(4)),
+              child: Row(
+                children: ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+                    .map((d) => Expanded(
+                          child: Text(d,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                  color: _textDim,
+                                  fontSize: context.sp(10),
+                                  fontWeight: FontWeight.w600)),
+                        ))
+                    .toList(),
+              ),
+            ),
+            // Calendar grid
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: context.rp(12)),
+              child: _buildCalGrid(
+                viewMonth, tempStart, tempEnd,
+                onDayTap: (day) => setSheet(() {
+                  final tapped =
+                      DateTime(viewMonth.year, viewMonth.month, day);
+                  if (tempStart == null || tempEnd != null) {
+                    tempStart = tapped;
+                    tempEnd = null;
+                  } else if (tapped.isBefore(tempStart!)) {
+                    tempEnd = tempStart;
+                    tempStart = tapped;
+                  } else {
+                    tempEnd = tapped;
+                  }
+                }),
+              ),
+            ),
+            // Range hint
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  context.rp(20), context.rs(8), context.rp(20), context.rs(4)),
+              child: Text(
+                tempStart == null
+                    ? 'Tap to select start date'
+                    : tempEnd == null
+                        ? 'Start: ${_formatDate(tempStart!.toIso8601String())}  —  tap end date'
+                        : '${_formatDate(tempStart!.toIso8601String())}  →  ${_formatDate(tempEnd!.toIso8601String())}',
+                style: TextStyle(color: _textDim, fontSize: context.sp(11)),
+              ),
+            ),
+            // Buttons
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  context.rp(16), context.rs(8), context.rp(16), context.rs(24)),
+              child: Row(children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _textDim,
+                      side: BorderSide(color: _divider),
+                      padding:
+                          EdgeInsets.symmetric(vertical: context.rs(12)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(context.rp(12))),
+                    ),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                SizedBox(width: context.rp(12)),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () {
+                      setState(() {
+                        _dateRangeStart = tempStart;
+                        _dateRangeEnd = tempEnd;
+                      });
+                      _applyFilter();
+                      Navigator.pop(ctx);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _cyan,
+                      foregroundColor: Colors.black,
+                      padding:
+                          EdgeInsets.symmetric(vertical: context.rs(12)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(context.rp(12))),
+                    ),
+                    child: const Text('Apply Range',
+                        style: TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ]),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _calNavBtn(IconData icon, VoidCallback onTap) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: context.ri(32),
+          height: context.ri(32),
+          decoration: BoxDecoration(
+              color: _surfaceAlt,
+              borderRadius: BorderRadius.circular(context.rp(8)),
+              border: Border.all(color: _divider)),
+          child: Icon(icon, color: _textDim, size: context.ri(18)),
+        ),
+      );
+
+  String _monthLabel(DateTime d) {
+    const mo = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    return '${mo[d.month - 1]} ${d.year}';
+  }
+
+  Widget _buildCalGrid(
+    DateTime month,
+    DateTime? start,
+    DateTime? end, {
+    required void Function(int day) onDayTap,
+  }) {
+    final firstWeekday = DateTime(month.year, month.month, 1).weekday % 7;
+    final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
+    final today = DateTime.now();
+    final cells = <Widget>[];
+    for (int i = 0; i < firstWeekday; i++) cells.add(const SizedBox());
+    for (int day = 1; day <= daysInMonth; day++) {
+      final date = DateTime(month.year, month.month, day);
+      final isStart = start != null && _sameDay(date, start);
+      final isEnd = end != null && _sameDay(date, end);
+      final inRange = start != null &&
+          end != null &&
+          date.isAfter(start) &&
+          date.isBefore(end);
+      final isToday = _sameDay(date, today);
+      cells.add(GestureDetector(
+        onTap: () => onDayTap(day),
+        child: Container(
+          margin: const EdgeInsets.all(2),
+          height: 36,
+          decoration: BoxDecoration(
+            color: (isStart || isEnd)
+                ? _cyan
+                : inRange
+                    ? _cyan.withValues(alpha: 0.1)
+                    : Colors.transparent,
+            borderRadius: BorderRadius.circular(context.rp(8)),
+          ),
+          child: Stack(alignment: Alignment.center, children: [
+            Text('$day',
+                style: TextStyle(
+                    color: (isStart || isEnd) ? Colors.black : _textPrimary,
+                    fontSize: context.sp(12),
+                    fontWeight: (isStart || isEnd)
+                        ? FontWeight.w700
+                        : FontWeight.w500)),
+            if (isToday && !isStart && !isEnd)
+              Positioned(
+                bottom: 4,
+                child: Container(
+                    width: 4,
+                    height: 4,
+                    decoration: BoxDecoration(
+                        color: _cyan, shape: BoxShape.circle)),
+              ),
+          ]),
+        ),
+      ));
+    }
+    return GridView.count(
+      crossAxisCount: 7,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      childAspectRatio: 1,
+      children: cells,
+    );
+  }
+
+  bool _sameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  // ── DETECTION FILTER ─────────────────────────────────────────────────────
+
+  void _openDetectionFilter() {
+    Set<String> tempDet = Set.from(_detectionFilter);
+    int tempSev = _minAlertLevel;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.6),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFF0D1627),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+                margin: const EdgeInsets.only(top: 12, bottom: 4),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                    color: _divider, borderRadius: BorderRadius.circular(2))),
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  context.rp(20), context.rs(8), context.rp(16), context.rs(12)),
+              child: Row(children: [
+                Text('Detection Filter',
+                    style: TextStyle(
+                        color: _textPrimary,
+                        fontSize: context.sp(15),
+                        fontWeight: FontWeight.w700)),
+                const Spacer(),
+                GestureDetector(
+                  onTap: () => setSheet(() {
+                    tempDet.clear();
+                    tempSev = 0;
+                  }),
+                  child: Text('Clear all',
+                      style: TextStyle(
+                          color: _cyan,
+                          fontSize: context.sp(12),
+                          fontWeight: FontWeight.w600)),
+                ),
+              ]),
+            ),
+            Divider(color: _divider, height: 1),
+            // Section: Drive Outcome
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  context.rp(20), context.rs(14), context.rp(20), context.rs(10)),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('DRIVE OUTCOME',
+                        style: TextStyle(
+                            color: _textDim,
+                            fontSize: context.sp(10),
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 1.2)),
+                    SizedBox(height: context.rs(10)),
+                    Row(children: [
+                      Expanded(
+                          child: _detOption(
+                        isSelected: tempDet.contains('SAFE'),
+                        icon: Icons.check_circle_outline_rounded,
+                        iconColor: _green,
+                        label: 'Safe Drives',
+                        sublabel: 'No alerts triggered',
+                        onTap: () => setSheet(() => _toggleDetOption(
+                            tempDet, 'SAFE',
+                            mutuallyExclude: ['DROWSY', 'DISTRACTED', 'ANY'])),
+                      )),
+                      SizedBox(width: context.rp(10)),
+                      Expanded(
+                          child: _detOption(
+                        isSelected: tempDet.contains('ANY'),
+                        icon: Icons.shield_outlined,
+                        iconColor: _cyan,
+                        label: 'Any Alert',
+                        sublabel: '1 or more alerts',
+                        onTap: () => setSheet(() => _toggleDetOption(
+                            tempDet, 'ANY',
+                            mutuallyExclude: ['SAFE', 'DROWSY', 'DISTRACTED'])),
+                      )),
+                    ]),
+                  ]),
+            ),
+            // Section: Alert Type
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  context.rp(20), context.rs(4), context.rp(20), context.rs(10)),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('ALERT TYPE',
+                        style: TextStyle(
+                            color: _textDim,
+                            fontSize: context.sp(10),
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 1.2)),
+                    SizedBox(height: context.rs(10)),
+                    Row(children: [
+                      Expanded(
+                          child: _detOption(
+                        isSelected: tempDet.contains('DROWSY'),
+                        icon: Icons.airline_seat_flat_rounded,
+                        iconColor: _drowsy,
+                        label: 'Drowsiness',
+                        sublabel: 'Eyes closed / nodding',
+                        onTap: () => setSheet(() => _toggleDetOption(
+                            tempDet, 'DROWSY',
+                            mutuallyExclude: ['SAFE', 'ANY'])),
+                      )),
+                      SizedBox(width: context.rp(10)),
+                      Expanded(
+                          child: _detOption(
+                        isSelected: tempDet.contains('DISTRACTED'),
+                        icon: Icons.remove_red_eye_outlined,
+                        iconColor: _distracted,
+                        label: 'Distraction',
+                        sublabel: 'Looking away / phone',
+                        onTap: () => setSheet(() => _toggleDetOption(
+                            tempDet, 'DISTRACTED',
+                            mutuallyExclude: ['SAFE', 'ANY'])),
+                      )),
+                    ]),
+                  ]),
+            ),
+            // Section: Severity
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  context.rp(20), context.rs(4), context.rp(20), context.rs(10)),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('MINIMUM SEVERITY',
+                        style: TextStyle(
+                            color: _textDim,
+                            fontSize: context.sp(10),
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 1.2)),
+                    SizedBox(height: context.rs(10)),
+                    Row(
+                        children: [0, 1, 2, 3].map((lvl) {
+                      final labels = ['All', 'L1+', 'L2+', 'L3 only'];
+                      final isActive = tempSev == lvl;
+                      final activeColor = lvl == 0
+                          ? _cyan
+                          : lvl == 1
+                              ? _distracted
+                              : _drowsy;
+                      return Expanded(
+                          child: Padding(
+                        padding: EdgeInsets.only(
+                            right: lvl < 3 ? context.rp(8) : 0),
+                        child: GestureDetector(
+                          onTap: () => setSheet(() => tempSev = lvl),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            padding: EdgeInsets.symmetric(
+                                vertical: context.rs(9)),
+                            decoration: BoxDecoration(
+                              color: isActive
+                                  ? activeColor.withValues(alpha: 0.12)
+                                  : _surfaceAlt,
+                              borderRadius:
+                                  BorderRadius.circular(context.rp(10)),
+                              border: Border.all(
+                                  color: isActive
+                                      ? activeColor.withValues(alpha: 0.5)
+                                      : _divider),
+                            ),
+                            child: Text(labels[lvl],
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                    color: isActive ? activeColor : _textDim,
+                                    fontSize: context.sp(11),
+                                    fontWeight: FontWeight.w600)),
+                          ),
+                        ),
+                      ));
+                    }).toList()),
+                  ]),
+            ),
+            Divider(color: _divider, height: 1),
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  context.rp(16), context.rs(12), context.rp(16), context.rs(28)),
+              child: Row(children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _textDim,
+                      side: BorderSide(color: _divider),
+                      padding:
+                          EdgeInsets.symmetric(vertical: context.rs(12)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(context.rp(12))),
+                    ),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                SizedBox(width: context.rp(12)),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () {
+                      setState(() {
+                        _detectionFilter = tempDet;
+                        _minAlertLevel = tempSev;
+                      });
+                      _applyFilter();
+                      Navigator.pop(ctx);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _cyan,
+                      foregroundColor: Colors.black,
+                      padding:
+                          EdgeInsets.symmetric(vertical: context.rs(12)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(context.rp(12))),
+                    ),
+                    child: const Text('Apply Filter',
+                        style: TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ]),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  void _toggleDetOption(Set<String> set, String key,
+      {List<String> mutuallyExclude = const []}) {
+    if (set.contains(key)) {
+      set.remove(key);
+    } else {
+      for (final ex in mutuallyExclude) set.remove(ex);
+      set.add(key);
+    }
+  }
+
+  Widget _detOption({
+    required bool isSelected,
+    required IconData icon,
+    required Color iconColor,
+    required String label,
+    required String sublabel,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: EdgeInsets.all(context.rp(12)),
+        decoration: BoxDecoration(
+          color: isSelected ? iconColor.withValues(alpha: 0.08) : _surfaceAlt,
+          borderRadius: BorderRadius.circular(context.rp(12)),
+          border: Border.all(
+              color: isSelected
+                  ? iconColor.withValues(alpha: 0.4)
+                  : _divider),
+        ),
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Container(
+              width: context.ri(32),
+              height: context.ri(32),
+              decoration: BoxDecoration(
+                  color: iconColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(context.rp(8))),
+              child: Icon(icon, color: iconColor, size: context.ri(16)),
+            ),
+            const Spacer(),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              width: context.ri(18),
+              height: context.ri(18),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? _cyan.withValues(alpha: 0.15)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(context.rp(4)),
+                border: Border.all(
+                    color: isSelected ? _cyan : _textDim, width: 1.5),
+              ),
+              child: isSelected
+                  ? Icon(Icons.check_rounded,
+                      color: _cyan, size: context.ri(12))
+                  : null,
+            ),
+          ]),
+          SizedBox(height: context.rs(8)),
+          Text(label,
+              style: TextStyle(
+                  color: isSelected ? iconColor : _textPrimary,
+                  fontSize: context.sp(12),
+                  fontWeight: FontWeight.w600)),
+          SizedBox(height: context.rs(2)),
+          Text(sublabel,
+              style: TextStyle(color: _textDim, fontSize: context.sp(10))),
+        ]),
+      ),
+    );
+  }
+
   // ── VIDEO LOGS helpers ───────────────────────────────────────────────────
 
   Future<void> _loadClips() async {
     setState(() => _clipsLoading = true);
     final clips = await DatabaseHelper.instance.getAllVideoClips();
-    // Filter out clips whose files no longer exist on disk
     final valid = <Map<String, dynamic>>[];
     for (final c in clips) {
       if (await VideoClipService.clipExists(c['file_path'] as String)) {
@@ -243,8 +788,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     int success = 0;
     for (final clip in _clips) {
       if (!_selectedClipIds.contains(clip['id'] as int)) continue;
-      final dest =
-          await VideoClipService.exportToDownloads(clip['file_path'] as String);
+      final dest = await VideoClipService.exportToDownloads(
+          clip['file_path'] as String);
       if (dest != null) success++;
     }
 
@@ -261,8 +806,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
           success > 0
               ? '$success video${success > 1 ? 's' : ''} saved to Downloads'
               : 'Download failed — check storage permission',
-          style:
-              const TextStyle(color: Colors.black, fontWeight: FontWeight.w600),
+          style: const TextStyle(
+              color: Colors.black, fontWeight: FontWeight.w600),
         ),
       ));
     }
@@ -281,7 +826,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     showDialog(
       context: context,
       barrierColor: Colors.black87,
-      builder: (_) => _VideoPlayerDialog(filePath: clip['file_path'] as String),
+      builder: (_) =>
+          _VideoPlayerDialog(filePath: clip['file_path'] as String),
     );
   }
 
@@ -302,18 +848,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     if (d == null) return '—';
     final l = d.toLocal();
     const mo = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec'
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
     ];
     return '${mo[l.month - 1]} ${l.day}, ${l.year}';
   }
@@ -357,6 +893,37 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     return _distracted;
   }
 
+  // ── FILTER PILL HELPERS ──────────────────────────────────────────────────
+
+  String _dateRangeLabel() {
+    const mo = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    final s = _dateRangeStart!;
+    if (_dateRangeEnd == null || _dateRangeEnd == _dateRangeStart) {
+      return '${mo[s.month - 1]} ${s.day}';
+    }
+    final e = _dateRangeEnd!;
+    if (s.month == e.month && s.year == e.year) {
+      return '${mo[s.month - 1]} ${s.day}–${e.day}';
+    }
+    return '${mo[s.month - 1]} ${s.day} – ${mo[e.month - 1]} ${e.day}';
+  }
+
+  String _detFilterLabel() {
+    if (_detectionFilter.contains('SAFE')) return 'Safe Drives';
+    if (_detectionFilter.contains('ANY')) return 'With Alerts';
+    final parts = <String>[];
+    if (_detectionFilter.contains('DROWSY')) parts.add('Drowsy');
+    if (_detectionFilter.contains('DISTRACTED')) parts.add('Distracted');
+    if (parts.isEmpty) {
+      return _minAlertLevel > 0 ? 'L$_minAlertLevel+ Severity' : 'With Alerts';
+    }
+    final label = parts.join(' + ');
+    return _minAlertLevel > 0 ? '$label · L$_minAlertLevel+' : label;
+  }
+
   // ── BUILD ────────────────────────────────────────────────────────────────
 
   @override
@@ -376,8 +943,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
           child: TabBarView(
             controller: _tabController,
             children: [
-              _buildSessionLogsTab(),
-              _buildVideoLogsTab(),
+              KeepAliveWrapper(child: _buildSessionLogsTab()),
+              KeepAliveWrapper(child: _buildVideoLogsTab()),
             ],
           ),
         ),
@@ -391,10 +958,10 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
           controller: _tabController,
           labelColor: _cyan,
           unselectedLabelColor: _textDim,
-          labelStyle:
-              TextStyle(fontSize: context.sp(12), fontWeight: FontWeight.w600),
-          unselectedLabelStyle:
-              TextStyle(fontSize: context.sp(12), fontWeight: FontWeight.w500),
+          labelStyle: TextStyle(
+              fontSize: context.sp(12), fontWeight: FontWeight.w600),
+          unselectedLabelStyle: TextStyle(
+              fontSize: context.sp(12), fontWeight: FontWeight.w500),
           indicatorColor: _cyan,
           indicatorWeight: 2,
           indicatorSize: TabBarIndicatorSize.tab,
@@ -434,13 +1001,15 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
               borderRadius: BorderRadius.circular(context.rp(12))),
           child: TextField(
             controller: _searchCtrl,
-            style: TextStyle(color: _textPrimary, fontSize: context.sp(13)),
+            style:
+                TextStyle(color: _textPrimary, fontSize: context.sp(13)),
             textInputAction: TextInputAction.search,
             textAlignVertical: TextAlignVertical.center,
             onSubmitted: (_) => FocusScope.of(context).unfocus(),
             decoration: InputDecoration(
               hintText: 'Search by date, month, or "safe"...',
-              hintStyle: TextStyle(color: _textDim, fontSize: context.sp(13)),
+              hintStyle:
+                  TextStyle(color: _textDim, fontSize: context.sp(13)),
               prefixIcon: Icon(Icons.search_rounded,
                   color: _textDim, size: context.ri(18)),
               prefixIconConstraints:
@@ -454,8 +1023,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
                       child: Icon(Icons.close_rounded,
                           color: _textDim, size: context.ri(16)))
                   : null,
-              suffixIconConstraints:
-                  BoxConstraints(minWidth: context.ri(36), minHeight: barH),
+              suffixIconConstraints: BoxConstraints(
+                  minWidth: context.ri(36), minHeight: barH),
               border: InputBorder.none,
               isDense: true,
               contentPadding: EdgeInsets.zero,
@@ -466,81 +1035,93 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     );
   }
 
-  Widget _scrollArrow({required bool visible, required bool isLeft}) =>
-      AnimatedSize(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeInOut,
-        child: SizedBox(
-          width: visible ? context.rp(24) : 0,
-          child: visible
-              ? Container(
-                  alignment:
-                      isLeft ? Alignment.centerRight : Alignment.centerLeft,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: isLeft
-                          ? [_surface, _surface.withValues(alpha: 0.0)]
-                          : [_surface.withValues(alpha: 0.0), _surface],
-                      begin: Alignment.centerLeft,
-                      end: Alignment.centerRight,
-                    ),
-                  ),
-                  child: Icon(
-                      isLeft
-                          ? Icons.chevron_left_rounded
-                          : Icons.chevron_right_rounded,
-                      color: _textDim,
-                      size: context.ri(16)),
-                )
-              : const SizedBox.shrink(),
+  // New pill-based filter row (replaces old scrollable chip row)
+  Widget _buildFilterChips() {
+    final hasDateFilter = _dateRangeStart != null;
+    final hasDetFilter = _detectionFilter.isNotEmpty || _minAlertLevel > 0;
+    return Container(
+      color: _surface,
+      padding: EdgeInsets.only(
+          left: context.rp(16),
+          right: context.rp(16),
+          bottom: context.rs(10)),
+      child: Row(children: [
+        _buildFilterPill(
+          icon: Icons.calendar_month_rounded,
+          label: hasDateFilter ? _dateRangeLabel() : 'Date Range',
+          isActive: hasDateFilter,
+          onTap: _openCalendarFilter,
         ),
-      );
-
-  Widget _buildFilterChips() => Container(
-        color: _surface,
-        padding: EdgeInsets.only(bottom: context.rs(10)),
-        child: Row(children: [
-          _scrollArrow(visible: _filterCanScrollLeft, isLeft: true),
-          Expanded(
-            child: SingleChildScrollView(
-              controller: _filterScrollCtrl,
-              scrollDirection: Axis.horizontal,
-              child: Row(children: [
-                SizedBox(width: context.rp(16)),
-                ...List.generate(_filters.length, (i) {
-                  final on = i == _selectedFilter;
-                  return GestureDetector(
-                    onTap: () {
-                      setState(() => _selectedFilter = i);
-                      _applyFilter();
-                    },
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      margin: EdgeInsets.only(right: context.rp(8)),
-                      padding: EdgeInsets.symmetric(
-                          horizontal: context.rp(13), vertical: context.rs(6)),
-                      decoration: BoxDecoration(
-                        color: on ? _cyan.withValues(alpha: 0.15) : _surfaceAlt,
-                        borderRadius: BorderRadius.circular(context.rp(20)),
-                        border: Border.all(
-                            color:
-                                on ? _cyan.withValues(alpha: 0.4) : _divider),
-                      ),
-                      child: Text(_filters[i],
-                          style: TextStyle(
-                              color: on ? _cyan : _textDim,
-                              fontSize: context.sp(11),
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.5)),
-                    ),
-                  );
-                }),
-              ]),
+        SizedBox(width: context.rp(8)),
+        _buildFilterPill(
+          icon: Icons.shield_outlined,
+          label: hasDetFilter ? _detFilterLabel() : 'All Detections',
+          isActive: hasDetFilter,
+          onTap: _openDetectionFilter,
+        ),
+        if (hasDateFilter || hasDetFilter) ...[
+          SizedBox(width: context.rp(8)),
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                _dateRangeStart = null;
+                _dateRangeEnd = null;
+                _detectionFilter.clear();
+                _minAlertLevel = 0;
+              });
+              _applyFilter();
+            },
+            child: Container(
+              padding: EdgeInsets.symmetric(
+                  horizontal: context.rp(10), vertical: context.rs(6)),
+              decoration: BoxDecoration(
+                color: _divider,
+                borderRadius: BorderRadius.circular(context.rp(20)),
+              ),
+              child: Icon(Icons.close_rounded,
+                  color: _textDim, size: context.ri(13)),
             ),
           ),
-          _scrollArrow(visible: _filterCanScrollRight, isLeft: false),
+        ],
+      ]),
+    );
+  }
+
+  Widget _buildFilterPill({
+    required IconData icon,
+    required String label,
+    required bool isActive,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: EdgeInsets.symmetric(
+            horizontal: context.rp(12), vertical: context.rs(7)),
+        decoration: BoxDecoration(
+          color: isActive ? _cyan.withValues(alpha: 0.12) : _surfaceAlt,
+          borderRadius: BorderRadius.circular(context.rp(20)),
+          border: Border.all(
+              color: isActive ? _cyan.withValues(alpha: 0.4) : _divider),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon,
+              color: isActive ? _cyan : _textDim, size: context.ri(12)),
+          SizedBox(width: context.rp(5)),
+          Text(label,
+              style: TextStyle(
+                  color: isActive ? _cyan : _textDim,
+                  fontSize: context.sp(11),
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.4)),
+          SizedBox(width: context.rp(4)),
+          Icon(Icons.expand_more_rounded,
+              color: isActive ? _cyan : _textDim, size: context.ri(13)),
         ]),
-      );
+      ),
+    );
+  }
 
   Widget _buildSessionList() {
     final groups = _groupByDate(_filtered, 'started_at');
@@ -550,8 +1131,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
       onRefresh: _loadSessions,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.fromLTRB(
-            context.rp(16), context.rs(6), context.rp(16), context.rs(32)),
+        padding: EdgeInsets.fromLTRB(context.rp(16), context.rs(6),
+            context.rp(16), context.rs(32)),
         children: groups.entries
             .map((entry) => Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -597,66 +1178,72 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
           child: Padding(
             padding: EdgeInsets.symmetric(
                 horizontal: context.rp(16), vertical: context.rs(12)),
-            child:
-                Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-              Container(
-                  width: iconBoxSize,
-                  height: iconBoxSize,
-                  decoration: BoxDecoration(
-                      color: accent.withValues(alpha: 0.10),
-                      borderRadius: BorderRadius.circular(context.rp(10)),
-                      border: Border.all(
-                          color: accent.withValues(alpha: 0.2), width: 1)),
-                  child: Icon(
-                      isSafe
-                          ? Icons.check_circle_outline_rounded
-                          : Icons.warning_amber_rounded,
-                      color: accent,
-                      size: context.ri(20))),
-              SizedBox(width: context.rp(12)),
-              Expanded(
-                  child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
+            child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Text(_formatDate(s['started_at']),
-                      style: TextStyle(
-                          color: _textPrimary,
-                          fontSize: context.sp(13),
-                          fontWeight: FontWeight.w600),
-                      overflow: TextOverflow.ellipsis),
-                  SizedBox(height: context.rs(3)),
-                  Row(children: [
-                    Icon(Icons.access_time_rounded,
-                        color: _textDim, size: context.ri(11)),
+                  Container(
+                      width: iconBoxSize,
+                      height: iconBoxSize,
+                      decoration: BoxDecoration(
+                          color: accent.withValues(alpha: 0.10),
+                          borderRadius:
+                              BorderRadius.circular(context.rp(10)),
+                          border: Border.all(
+                              color: accent.withValues(alpha: 0.2),
+                              width: 1)),
+                      child: Icon(
+                          isSafe
+                              ? Icons.check_circle_outline_rounded
+                              : Icons.warning_amber_rounded,
+                          color: accent,
+                          size: context.ri(20))),
+                  SizedBox(width: context.rp(12)),
+                  Expanded(
+                      child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(_formatDate(s['started_at']),
+                          style: TextStyle(
+                              color: _textPrimary,
+                              fontSize: context.sp(13),
+                              fontWeight: FontWeight.w600),
+                          overflow: TextOverflow.ellipsis),
+                      SizedBox(height: context.rs(3)),
+                      Row(children: [
+                        Icon(Icons.access_time_rounded,
+                            color: _textDim, size: context.ri(11)),
+                        SizedBox(width: context.rp(4)),
+                        Text(_formatTime(s['started_at']),
+                            style: TextStyle(
+                                color: _textDim,
+                                fontSize: context.sp(11))),
+                        Padding(
+                            padding: EdgeInsets.symmetric(
+                                horizontal: context.rp(6)),
+                            child: Container(
+                                width: context.rp(3),
+                                height: context.rp(3),
+                                decoration: BoxDecoration(
+                                    color: _textDim,
+                                    shape: BoxShape.circle))),
+                        Icon(Icons.timer_outlined,
+                            color: _textDim, size: context.ri(11)),
+                        SizedBox(width: context.rp(4)),
+                        Text(_formatDuration(duration),
+                            style: TextStyle(
+                                color: _textDim,
+                                fontSize: context.sp(11))),
+                      ]),
+                    ],
+                  )),
+                  Row(mainAxisSize: MainAxisSize.min, children: [
+                    _buildAlertBadge(alertCount),
                     SizedBox(width: context.rp(4)),
-                    Text(_formatTime(s['started_at']),
-                        style: TextStyle(
-                            color: _textDim, fontSize: context.sp(11))),
-                    Padding(
-                        padding:
-                            EdgeInsets.symmetric(horizontal: context.rp(6)),
-                        child: Container(
-                            width: context.rp(3),
-                            height: context.rp(3),
-                            decoration: BoxDecoration(
-                                color: _textDim, shape: BoxShape.circle))),
-                    Icon(Icons.timer_outlined,
-                        color: _textDim, size: context.ri(11)),
-                    SizedBox(width: context.rp(4)),
-                    Text(_formatDuration(duration),
-                        style: TextStyle(
-                            color: _textDim, fontSize: context.sp(11))),
+                    Icon(Icons.chevron_right_rounded,
+                        color: _textDim, size: context.ri(18)),
                   ]),
-                ],
-              )),
-              Row(mainAxisSize: MainAxisSize.min, children: [
-                _buildAlertBadge(alertCount),
-                SizedBox(width: context.rp(4)),
-                Icon(Icons.chevron_right_rounded,
-                    color: _textDim, size: context.ri(18)),
-              ]),
-            ]),
+                ]),
           ),
         ),
       ),
@@ -720,10 +1307,11 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
                       fontWeight: FontWeight.w600)),
               SizedBox(height: context.rs(6)),
               Text(
-                  _selectedFilter == 0
-                      ? 'Start recording to see your drive history.'
-                      : 'Try a different filter.',
-                  style: TextStyle(color: _textDim, fontSize: context.sp(13)),
+                  (_dateRangeStart != null || _detectionFilter.isNotEmpty)
+                      ? 'Try adjusting your filters.'
+                      : 'Start recording to see your drive history.',
+                  style:
+                      TextStyle(color: _textDim, fontSize: context.sp(13)),
                   textAlign: TextAlign.center),
             ]),
           ],
@@ -767,7 +1355,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
             Text(
                 'Videos are saved automatically when a drowsiness or distraction alert is triggered during a session.\n\nSafe drives leave no videos.',
                 style: TextStyle(
-                    color: _textDim, fontSize: context.sp(13), height: 1.5),
+                    color: _textDim,
+                    fontSize: context.sp(13),
+                    height: 1.5),
                 textAlign: TextAlign.center),
           ]),
         ),
@@ -781,8 +1371,11 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
       onRefresh: _loadClips,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.fromLTRB(context.rp(16), context.rs(6),
-            context.rp(16), context.rs(_selectedClipIds.isNotEmpty ? 88 : 32)),
+        padding: EdgeInsets.fromLTRB(
+            context.rp(16),
+            context.rs(6),
+            context.rp(16),
+            context.rs(_selectedClipIds.isNotEmpty ? 88 : 32)),
         children: groups.entries
             .map((entry) => Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -853,7 +1446,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
                   TextButton(
                       onPressed: () => Navigator.of(context).pop(false),
                       child: const Text('Cancel',
-                          style: TextStyle(color: Color(0xFF64748b)))),
+                          style:
+                              TextStyle(color: Color(0xFF64748b)))),
                   TextButton(
                       onPressed: () => Navigator.of(context).pop(true),
                       child: const Text('Delete',
@@ -891,7 +1485,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
               padding: EdgeInsets.symmetric(
                   horizontal: context.rp(14), vertical: context.rs(12)),
               child: Row(children: [
-                // Play icon
                 Container(
                   width: context.ri(42),
                   height: context.ri(42),
@@ -910,7 +1503,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(children: [
-                      Icon(chipIcon, color: chipColor, size: context.ri(12)),
+                      Icon(chipIcon,
+                          color: chipColor, size: context.ri(12)),
                       SizedBox(width: context.rp(4)),
                       Flexible(
                           child: Text(chipLabel,
@@ -933,24 +1527,26 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
                       SizedBox(width: context.rp(3)),
                       Text('Session #$sessionId',
                           style: TextStyle(
-                              color: _textDim, fontSize: context.sp(10))),
+                              color: _textDim,
+                              fontSize: context.sp(10))),
                       if (duration > 0) ...[
                         Padding(
-                            padding:
-                                EdgeInsets.symmetric(horizontal: context.rp(5)),
+                            padding: EdgeInsets.symmetric(
+                                horizontal: context.rp(5)),
                             child: Container(
                                 width: context.rp(3),
                                 height: context.rp(3),
                                 decoration: BoxDecoration(
-                                    color: _textDim, shape: BoxShape.circle))),
+                                    color: _textDim,
+                                    shape: BoxShape.circle))),
                         Text(_formatDuration(duration),
                             style: TextStyle(
-                                color: _textDim, fontSize: context.sp(10))),
+                                color: _textDim,
+                                fontSize: context.sp(10))),
                       ],
                     ]),
                   ],
                 )),
-                // Checkbox
                 GestureDetector(
                   onTap: () => setState(() {
                     if (isSelected) {
@@ -969,7 +1565,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
                           : Colors.transparent,
                       borderRadius: BorderRadius.circular(context.rp(6)),
                       border: Border.all(
-                          color: isSelected ? _cyan : _textDim, width: 1.5),
+                          color: isSelected ? _cyan : _textDim,
+                          width: 1.5),
                     ),
                     child: isSelected
                         ? Icon(Icons.check_rounded,
@@ -988,8 +1585,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
   Widget _buildDownloadBar() {
     final count = _selectedClipIds.length;
     return Container(
-      padding: EdgeInsets.fromLTRB(
-          context.rp(16), context.rs(10), context.rp(16), context.rs(18)),
+      padding: EdgeInsets.fromLTRB(context.rp(16), context.rs(10),
+          context.rp(16), context.rs(18)),
       decoration: BoxDecoration(
         color: _surface,
         border: Border(top: BorderSide(color: _divider, width: 1)),
@@ -1011,7 +1608,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
         TextButton(
           onPressed: () => setState(() => _selectedClipIds.clear()),
           child: Text('Clear',
-              style: TextStyle(color: _textDim, fontSize: context.sp(12))),
+              style:
+                  TextStyle(color: _textDim, fontSize: context.sp(12))),
         ),
         SizedBox(width: context.rp(8)),
         ElevatedButton.icon(
@@ -1033,7 +1631,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
               : Icon(Icons.download_rounded, size: context.ri(16)),
           label: Text(_isDownloading ? 'Saving...' : 'Download',
               style: TextStyle(
-                  fontSize: context.sp(12), fontWeight: FontWeight.w700)),
+                  fontSize: context.sp(12),
+                  fontWeight: FontWeight.w700)),
         ),
       ]),
     );
@@ -1087,7 +1686,6 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Title bar
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
             child: Row(children: [
@@ -1110,8 +1708,6 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
               ),
             ]),
           ),
-
-          // Video area
           ClipRRect(
             borderRadius:
                 const BorderRadius.vertical(bottom: Radius.circular(16)),
@@ -1120,22 +1716,24 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
                   _initialized ? _controller.value.aspectRatio : 9 / 16,
               child: _error
                   ? const Center(
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.broken_image_outlined,
-                          color: Colors.white38, size: 40),
-                      SizedBox(height: 8),
-                      Text('Could not load video',
-                          style:
-                              TextStyle(color: Colors.white38, fontSize: 12)),
-                    ]))
+                      child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                        Icon(Icons.broken_image_outlined,
+                            color: Colors.white38, size: 40),
+                        SizedBox(height: 8),
+                        Text('Could not load video',
+                            style: TextStyle(
+                                color: Colors.white38, fontSize: 12)),
+                      ]))
                   : _initialized
                       ? Stack(alignment: Alignment.center, children: [
                           Transform(
                             alignment: Alignment.center,
-                            transform: Matrix4.diagonal3Values(-1.0, 1.0, 1.0),
+                            transform:
+                                Matrix4.diagonal3Values(-1.0, 1.0, 1.0),
                             child: VideoPlayer(_controller),
                           ),
-                          // Play/Pause overlay
                           GestureDetector(
                             onTap: () => setState(() {
                               _controller.value.isPlaying
@@ -1143,13 +1741,15 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
                                   : _controller.play();
                             }),
                             child: AnimatedOpacity(
-                              opacity: _controller.value.isPlaying ? 0.0 : 1.0,
+                              opacity:
+                                  _controller.value.isPlaying ? 0.0 : 1.0,
                               duration: const Duration(milliseconds: 200),
                               child: Container(
                                 width: 56,
                                 height: 56,
                                 decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: 0.55),
+                                  color:
+                                      Colors.black.withValues(alpha: 0.55),
                                   shape: BoxShape.circle,
                                 ),
                                 child: const Icon(Icons.play_arrow_rounded,
@@ -1157,7 +1757,6 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
                               ),
                             ),
                           ),
-                          // Progress bar
                           Positioned(
                             bottom: 0,
                             left: 0,
@@ -1223,8 +1822,10 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     super.initState();
     _animCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 320));
-    _scaleAnim = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOutBack);
-    _fadeAnim = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut);
+    _scaleAnim =
+        CurvedAnimation(parent: _animCtrl, curve: Curves.easeOutBack);
+    _fadeAnim =
+        CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut);
     _animCtrl.forward();
     _loadDetail();
   }
@@ -1256,18 +1857,8 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     if (d == null) return '—';
     final l = d.toLocal();
     const mo = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec'
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
     ];
     return '${mo[l.month - 1]} ${l.day}, ${l.year}';
   }
@@ -1326,7 +1917,9 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
           '${d.minute.toString().padLeft(2, '0')}:'
           '${d.second.toString().padLeft(2, '0')}';
     } catch (_) {
-      return isoOrTime.length >= 19 ? isoOrTime.substring(11, 19) : isoOrTime;
+      return isoOrTime.length >= 19
+          ? isoOrTime.substring(11, 19)
+          : isoOrTime;
     }
   }
 
@@ -1349,7 +1942,8 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
               maxHeight: MediaQuery.of(context).size.height * 0.88),
           decoration: BoxDecoration(
             color: _sheetBg,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(24)),
             boxShadow: [
               BoxShadow(
                   color: Colors.black.withValues(alpha: 0.5),
@@ -1363,13 +1957,14 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
           ),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Padding(
-              padding:
-                  EdgeInsets.only(top: context.rs(12), bottom: context.rs(4)),
+              padding: EdgeInsets.only(
+                  top: context.rs(12), bottom: context.rs(4)),
               child: Container(
                   width: context.rp(40),
                   height: context.rs(4),
                   decoration: BoxDecoration(
-                      color: _divider, borderRadius: BorderRadius.circular(2))),
+                      color: _divider,
+                      borderRadius: BorderRadius.circular(2))),
             ),
             Padding(
               padding: EdgeInsets.fromLTRB(context.rp(20), context.rs(8),
@@ -1421,9 +2016,11 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                         decoration: BoxDecoration(
                             color: _surfaceAlt,
                             shape: BoxShape.circle,
-                            border: Border.all(color: _divider, width: 1)),
+                            border:
+                                Border.all(color: _divider, width: 1)),
                         child: Icon(Icons.close_rounded,
-                            color: _textMuted, size: context.ri(18)))),
+                            color: _textMuted,
+                            size: context.ri(18)))),
               ]),
             ),
             Divider(color: _divider, height: 1, thickness: 1),
@@ -1431,10 +2028,14 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
               child: _loading
                   ? const Padding(
                       padding: EdgeInsets.all(40),
-                      child: CircularProgressIndicator(color: _cyan))
+                      child:
+                          CircularProgressIndicator(color: _cyan))
                   : SingleChildScrollView(
-                      padding: EdgeInsets.fromLTRB(context.rp(20),
-                          context.rs(16), context.rp(20), context.rs(32)),
+                      padding: EdgeInsets.fromLTRB(
+                          context.rp(20),
+                          context.rs(16),
+                          context.rp(20),
+                          context.rs(32)),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -1480,8 +2081,8 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
               borderRadius: BorderRadius.circular(context.rp(12))),
           child: Center(
               child: Text('No state data recorded',
-                  style:
-                      TextStyle(color: _textDim, fontSize: context.sp(13)))));
+                  style: TextStyle(
+                      color: _textDim, fontSize: context.sp(13)))));
     }
 
     final nPct = (neutral / total * 100).round();
@@ -1524,7 +2125,8 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
           SizedBox(width: context.rp(8)),
           Expanded(child: _statePill(_drowsy, 'Drowsy', '$dPct%')),
           SizedBox(width: context.rp(8)),
-          Expanded(child: _statePill(_distracted, 'Distracted', '$xPct%')),
+          Expanded(
+              child: _statePill(_distracted, 'Distracted', '$xPct%')),
         ]),
       ]),
     );
@@ -1536,7 +2138,8 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
         decoration: BoxDecoration(
             color: color.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(context.rp(8)),
-            border: Border.all(color: color.withValues(alpha: 0.2), width: 1)),
+            border: Border.all(
+                color: color.withValues(alpha: 0.2), width: 1)),
         child: Column(children: [
           Text(pct,
               style: TextStyle(
@@ -1564,7 +2167,8 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
               color: _green, size: context.ri(18)),
           SizedBox(width: context.rp(10)),
           Text('No alerts triggered — safe drive!',
-              style: TextStyle(color: _green, fontSize: context.sp(13))),
+              style:
+                  TextStyle(color: _green, fontSize: context.sp(13))),
         ]),
       );
     }
@@ -1589,12 +2193,15 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
               child: Row(children: [
                 Container(
                     padding: EdgeInsets.symmetric(
-                        horizontal: context.rp(7), vertical: context.rs(3)),
+                        horizontal: context.rp(7),
+                        vertical: context.rs(3)),
                     decoration: BoxDecoration(
                         color: color.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(context.rp(6)),
+                        borderRadius:
+                            BorderRadius.circular(context.rp(6)),
                         border: Border.all(
-                            color: color.withValues(alpha: 0.3), width: 1)),
+                            color: color.withValues(alpha: 0.3),
+                            width: 1)),
                     child: Text(_alertLevelLabel(level),
                         style: TextStyle(
                             color: color,
@@ -1611,8 +2218,8 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
                             fontSize: context.sp(13),
                             fontWeight: FontWeight.w500))),
                 Text(time,
-                    style:
-                        TextStyle(color: _textDim, fontSize: context.sp(11))),
+                    style: TextStyle(
+                        color: _textDim, fontSize: context.sp(11))),
               ]),
             ),
             if (!isLast)
@@ -1635,7 +2242,8 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
               color: _surfaceAlt,
               borderRadius: BorderRadius.circular(context.rp(12))),
           child: Text('No log entries.',
-              style: TextStyle(color: _textDim, fontSize: context.sp(13))));
+              style:
+                  TextStyle(color: _textDim, fontSize: context.sp(13))));
     }
     return Container(
       decoration: BoxDecoration(
@@ -1652,23 +2260,46 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
           final timeStr = _formatLogTime(rawTime);
           return Padding(
             padding: EdgeInsets.only(bottom: context.rs(8)),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('[$timeStr]',
-                  style: TextStyle(
-                      color: _textDim,
-                      fontSize: context.sp(10),
-                      fontFamily: 'monospace')),
-              SizedBox(width: context.rp(8)),
-              Expanded(
-                  child: Text(message,
+            child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('[$timeStr]',
                       style: TextStyle(
-                          color: color,
+                          color: _textDim,
                           fontSize: context.sp(10),
-                          fontFamily: 'monospace'))),
-            ]),
+                          fontFamily: 'monospace')),
+                  SizedBox(width: context.rp(8)),
+                  Expanded(
+                      child: Text(message,
+                          style: TextStyle(
+                              color: color,
+                              fontSize: context.sp(10),
+                              fontFamily: 'monospace'))),
+                ]),
           );
         }).toList(),
       ),
     );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// KEEP ALIVE WRAPPER — prevents TabBarView children from being disposed
+// ═══════════════════════════════════════════════════════════════════════════════
+class KeepAliveWrapper extends StatefulWidget {
+  final Widget child;
+  const KeepAliveWrapper({super.key, required this.child});
+  @override
+  State<KeepAliveWrapper> createState() => _KeepAliveWrapperState();
+}
+
+class _KeepAliveWrapperState extends State<KeepAliveWrapper>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
   }
 }
