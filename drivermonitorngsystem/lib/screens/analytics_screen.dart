@@ -19,43 +19,94 @@ final analyticsFilterProvider = NotifierProvider<_FilterNotifier, int?>(
 );
 
 final analyticsDataProvider =
-    FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
+    FutureProvider.family.autoDispose<Map<String, dynamic>, int?>((ref, days) async {
   ref.watch(dbChangeCounterProvider);
-  final days = ref.watch(analyticsFilterProvider);
   return DatabaseHelper.instance.getAnalyticsSummary(days: days);
 });
 
-class AnalyticsScreen extends ConsumerWidget {
+class AnalyticsScreen extends ConsumerStatefulWidget {
   const AnalyticsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final asyncData = ref.watch(analyticsDataProvider);
-    final selDays   = ref.watch(analyticsFilterProvider);
+  ConsumerState<AnalyticsScreen> createState() => _AnalyticsScreenState();
+}
+
+class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
+  static const _pages = <int?>[7, 30, null];
+  late final PageController _pageCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageCtrl = PageController(initialPage: 0);
+  }
+
+  @override
+  void dispose() {
+    _pageCtrl.dispose();
+    super.dispose();
+  }
+
+  void _selectDays(int? days) {
+    final idx = _pages.indexOf(days);
+    if (idx < 0) return;
+    ref.read(analyticsFilterProvider.notifier).set(days);
+    _pageCtrl.animateToPage(
+      idx,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOutCubic,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selDays = ref.watch(analyticsFilterProvider);
     return ColoredBox(
       color: const Color(0xFF080E1A),
-      child: asyncData.when(
-        loading: () => const Center(
-            child: CircularProgressIndicator(color: Color(0xFF22d3ee))),
-        error: (e, stack) => Center(
-            child: Text('Error loading analytics: $e',
-                style: const TextStyle(color: Colors.white54),
-                textAlign: TextAlign.center)),
-        data: (data) => _Content(
-          data: data,
-          selDays: selDays,
-          filterTabs: _FilterTabs(selectedDays: selDays, ref: ref),
-        ),
+      child: Column(
+        children: [
+          _FilterTabs(selectedDays: selDays, onSelect: _selectDays),
+          Expanded(
+            child: PageView(
+              controller: _pageCtrl,
+              onPageChanged: (idx) =>
+                  ref.read(analyticsFilterProvider.notifier).set(_pages[idx]),
+              children: _pages
+                  .map((days) => _PageContent(days: days))
+                  .toList(),
+            ),
+          ),
+        ],
       ),
+    );
+  }
+}
+
+// ── PER-PAGE LOADER ───────────────────────────────────────────────────────────
+class _PageContent extends ConsumerWidget {
+  final int? days;
+  const _PageContent({required this.days});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final asyncData = ref.watch(analyticsDataProvider(days));
+    return asyncData.when(
+      loading: () => const Center(
+          child: CircularProgressIndicator(color: Color(0xFF22d3ee))),
+      error: (e, _) => Center(
+          child: Text('Error loading analytics: $e',
+              style: const TextStyle(color: Colors.white54),
+              textAlign: TextAlign.center)),
+      data: (data) => _Content(data: data, selDays: days),
     );
   }
 }
 
 // ── FILTER TABS ───────────────────────────────────────────────────────────────
 class _FilterTabs extends StatelessWidget {
-  final int?      selectedDays;
-  final WidgetRef ref;
-  const _FilterTabs({required this.selectedDays, required this.ref});
+  final int?              selectedDays;
+  final void Function(int?) onSelect;
+  const _FilterTabs({required this.selectedDays, required this.onSelect});
 
   @override
   Widget build(BuildContext context) {
@@ -63,7 +114,9 @@ class _FilterTabs extends StatelessWidget {
       padding: EdgeInsets.fromLTRB(
           context.rp(20), context.rs(16),
           context.rp(20), context.rs(12)),
-      child: Container(
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
         padding: EdgeInsets.all(context.rp(4)),
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
@@ -73,16 +126,14 @@ class _FilterTabs extends StatelessWidget {
         ),
         child: IntrinsicWidth(
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            _tab(context, '7 Days',   selectedDays == 7,
-                () => ref.read(analyticsFilterProvider.notifier).set(7)),
+            _tab(context, '7 Days',   selectedDays == 7,   () => onSelect(7)),
             SizedBox(width: context.rp(4)),
-            _tab(context, '30 Days',  selectedDays == 30,
-                () => ref.read(analyticsFilterProvider.notifier).set(30)),
+            _tab(context, '30 Days',  selectedDays == 30,  () => onSelect(30)),
             SizedBox(width: context.rp(4)),
-            _tab(context, 'All Time', selectedDays == null,
-                () => ref.read(analyticsFilterProvider.notifier).set(null)),
+            _tab(context, 'All Time', selectedDays == null, () => onSelect(null)),
           ]),
         ),
+      ),
       ),
     );
   }
@@ -112,11 +163,7 @@ class _FilterTabs extends StatelessWidget {
 class _Content extends StatelessWidget {
   final Map<String, dynamic> data;
   final int? selDays;
-  final Widget filterTabs;
-  const _Content({
-    required this.data,
-    required this.selDays, required this.filterTabs,
-  });
+  const _Content({required this.data, required this.selDays});
 
   @override
   Widget build(BuildContext context) {
@@ -139,7 +186,6 @@ class _Content extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            filterTabs,
             SizedBox(height: context.rs(16)),
             _SummaryCards(
               sessions: sessions, alerts: alerts,
