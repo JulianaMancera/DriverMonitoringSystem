@@ -130,7 +130,7 @@ const double _kDistPctHigh = 40.0;
 const double _kDistBestHigh = 25.0;
 const int _kDistThreshHigh = 6; // 1.2s
 
-const double _kDistPctMod = 22.0;
+const double _kDistPctMod = 22.0; 
 const double _kDistBestMod = 12.0;
 const int _kDistThreshMod = 12; // 2.4s
 
