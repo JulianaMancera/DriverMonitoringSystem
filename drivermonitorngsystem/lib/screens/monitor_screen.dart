@@ -955,8 +955,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   Future<void> _saveVideoClip(String alertType, int alertLevel) async {
     if (_currentSessionId == null) return;
     if (_isCapturingClip) return;
-    if (_cameraController == null || !_cameraController!.value.isInitialized)
+    if (_cameraController == null || !_cameraController!.value.isInitialized) {
       return;
+    }
     if (_camDisposing) return;
 
     final sessionId = _currentSessionId!;

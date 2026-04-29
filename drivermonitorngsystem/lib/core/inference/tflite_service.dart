@@ -384,8 +384,9 @@ class TfliteService {
 
   // ── Main inference entry point ───────────────────────────────────────────────
   Future<InferenceResult?> runInference(CameraImage image) async {
-    if (!_isInitialized || _interpreter == null || _isolateInterpreter == null)
+    if (!_isInitialized || _interpreter == null || _isolateInterpreter == null) {
       return null;
+    }
     if (_isRunning) return null;
 
     final nowMs = DateTime.now().millisecondsSinceEpoch;

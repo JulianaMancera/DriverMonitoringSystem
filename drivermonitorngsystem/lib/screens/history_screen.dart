@@ -182,9 +182,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
       result = result.where((c) {
         final alertTypes = c['alert_types'] as String? ?? '';
         if (_videoDetectionFilter.contains('DROWSY') &&
-            alertTypes.contains('DROWSY')) return true;
+            alertTypes.contains('DROWSY')) { return true; }
         if (_videoDetectionFilter.contains('DISTRACTED') &&
-            alertTypes.contains('DISTRACTED')) return true;
+            alertTypes.contains('DISTRACTED')) { return true; }
         return false;
       }).toList();
     }
@@ -416,7 +416,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
     final today = DateTime.now();
     final cells = <Widget>[];
-    for (int i = 0; i < firstWeekday; i++) cells.add(const SizedBox());
+    for (int i = 0; i < firstWeekday; i++) { cells.add(const SizedBox()); }
     for (int day = 1; day <= daysInMonth; day++) {
       final date = DateTime(month.year, month.month, day);
       final isStart = start != null && _sameDay(date, start);
@@ -855,7 +855,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     if (set.contains(key)) {
       set.remove(key);
     } else {
-      for (final ex in mutuallyExclude) set.remove(ex);
+      for (final ex in mutuallyExclude) { set.remove(ex); }
       set.add(key);
     }
   }
@@ -1017,7 +1017,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     final l = d.toLocal();
     final mm = l.month.toString().padLeft(2, '0');
     final dd = l.day.toString().padLeft(2, '0');
-    return '$mm/${dd}/${l.year}';
+    return '$mm/$dd/${l.year}';
   }
 
   String _formatTime(String? iso) {
@@ -1065,7 +1065,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     final mm = start.month.toString().padLeft(2, '0');
     final dd = start.day.toString().padLeft(2, '0');
     if (end == null || end == start) {
-      return '$mm/${dd}/${start.year}';
+      return '$mm/$dd/${start.year}';
     }
     final emm = end.month.toString().padLeft(2, '0');
     final edd = end.day.toString().padLeft(2, '0');
@@ -1671,7 +1671,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     final alertTypes = clip['alert_types'] as String? ?? '';
     final createdAt = clip['created_at'] as String? ?? '';
     final duration = clip['duration_sec'] as int? ?? 0;
-    final sessionId = clip['session_id'] as int? ?? 0;
     final isSelected = _selectedClipIds.contains(id);
 
     final hasDrowsy = alertTypes.contains('DROWSY');
@@ -1938,7 +1937,7 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
     final l = d.toLocal();
     final mm = l.month.toString().padLeft(2, '0');
     final dd = l.day.toString().padLeft(2, '0');
-    return '$mm/${dd}/${l.year}';
+    return '$mm/$dd/${l.year}';
   }
 
   @override
@@ -2190,7 +2189,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     final l = d.toLocal();
     final mm = l.month.toString().padLeft(2, '0');
     final dd = l.day.toString().padLeft(2, '0');
-    return '$mm/${dd}/${l.year}';
+    return '$mm/$dd/${l.year}';
   }
 
   String _formatTime(String? iso) {
