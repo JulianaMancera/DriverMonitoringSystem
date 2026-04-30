@@ -725,6 +725,33 @@ class DatabaseHelper {
     };
   }
 
+  /// Per-day alert breakdown by type and level for the Analytics drill-down.
+  /// [date] is a local-date string in YYYY-MM-DD format.
+  Future<Map<String, dynamic>> getDayAlertBreakdown(String date) async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT
+        SUM(CASE WHEN alert_type='DROWSY'     AND alert_level=1 THEN 1 ELSE 0 END) AS l1_drowsy,
+        SUM(CASE WHEN alert_type='DROWSY'     AND alert_level=2 THEN 1 ELSE 0 END) AS l2_drowsy,
+        SUM(CASE WHEN alert_type='DROWSY'     AND alert_level=3 THEN 1 ELSE 0 END) AS l3_drowsy,
+        SUM(CASE WHEN alert_type='DISTRACTED' AND alert_level=1 THEN 1 ELSE 0 END) AS l1_distracted,
+        SUM(CASE WHEN alert_type='DISTRACTED' AND alert_level=2 THEN 1 ELSE 0 END) AS l2_distracted,
+        SUM(CASE WHEN alert_type='DISTRACTED' AND alert_level=3 THEN 1 ELSE 0 END) AS l3_distracted
+      FROM alert_events
+      WHERE DATE(datetime(triggered_at, 'localtime')) = ?
+    ''', [date]);
+    if (rows.isEmpty) return {};
+    final r = rows.first;
+    return {
+      'l1_drowsy':     (r['l1_drowsy']     as int?) ?? 0,
+      'l2_drowsy':     (r['l2_drowsy']     as int?) ?? 0,
+      'l3_drowsy':     (r['l3_drowsy']     as int?) ?? 0,
+      'l1_distracted': (r['l1_distracted'] as int?) ?? 0,
+      'l2_distracted': (r['l2_distracted'] as int?) ?? 0,
+      'l3_distracted': (r['l3_distracted'] as int?) ?? 0,
+    };
+  }
+
   // ── VIDEO CLIPS — CRUD ────────────────────────────────────────────────────
 
   /// Called by monitor_screen after a session with alerts ends.

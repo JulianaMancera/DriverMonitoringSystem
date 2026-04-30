@@ -254,12 +254,17 @@ class _SummaryCards extends StatelessWidget {
 }
 
 // ── LINE CHART CARD ───────────────────────────────────────────────────────────
-class _LineCard extends StatelessWidget {
+class _LineCard extends StatefulWidget {
   final List<Map<String, dynamic>> dailyTrends;
   final int? selDays;
   const _LineCard({required this.dailyTrends, required this.selDays});
 
-  bool get _is7Day => selDays == 7;
+  @override
+  State<_LineCard> createState() => _LineCardState();
+}
+
+class _LineCardState extends State<_LineCard> {
+  bool get _is7Day => widget.selDays == 7;
 
   @override
   Widget build(BuildContext context) {
@@ -289,8 +294,10 @@ class _LineCard extends StatelessWidget {
             SizedBox(height: context.rs(10)),
             Expanded(
               child: _is7Day
-                  ? _sevenDayChart(context, parsed, context.sp(9))
-                  : _scrollableChart(context, parsed, context.sp(9)),
+                  ? _sevenDayChart(context, parsed, context.sp(9),
+                      (idx) => _showDayBreakdown(context, idx))
+                  : _scrollableChart(context, parsed, context.sp(9),
+                      (idx) => _showDayBreakdown(context, idx)),
             ),
           ],
         ),
@@ -305,47 +312,71 @@ class _LineCard extends StatelessWidget {
       barrierColor: Colors.black.withValues(alpha: 0.75),
       useSafeArea: true,
       builder: (ctx) => _ChartModal(
-        title: 'Drowsiness vs Distraction',
-        subtitle: _is7Day
-            ? 'Tap a point to see its value'
-            : 'Swipe chart sideways  •  Tap point to see value',
-        child: Column(children: [
-          Row(children: [
-            _legend(ctx, 'Drowsiness', _kDrowsyColor),
-            SizedBox(width: ctx.rp(16)),
-            _legend(ctx, 'Distraction', _kDistractedColor),
-          ]),
-          SizedBox(height: ctx.rs(12)),
-          Expanded(
-            child: _is7Day
-                ? _sevenDayChart(ctx, d, ctx.sp(11))
-                : _scrollableChart(ctx, d, ctx.sp(11)),
-          ),
-          ...(!_is7Day ? [
-            SizedBox(height: ctx.rs(6)),
-            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Icon(Icons.swipe_rounded,
-                  color: const Color(0xFF475569), size: ctx.ri(13)),
-              SizedBox(width: ctx.rp(4)),
-              Text('Swipe to see all dates',
-                  style: TextStyle(color: const Color(0xFF475569),
-                      fontSize: ctx.sp(10))),
+          title: 'Drowsiness vs Distraction',
+          subtitle: _is7Day
+              ? 'Tap a point to see that day\'s breakdown'
+              : 'Swipe chart  •  Tap a point for day breakdown',
+          child: Column(children: [
+            Row(children: [
+              _legend(ctx, 'Drowsiness', _kDrowsyColor),
+              SizedBox(width: ctx.rp(16)),
+              _legend(ctx, 'Distraction', _kDistractedColor),
             ]),
-            SizedBox(height: ctx.rs(8)),
-          ] : [
-            SizedBox(height: ctx.rs(8)),
+            SizedBox(height: ctx.rs(12)),
+            Expanded(
+              child: _is7Day
+                  ? _sevenDayChart(ctx, d, ctx.sp(11),
+                      (idx) => _showDayBreakdown(ctx, idx))
+                  : _scrollableChart(ctx, d, ctx.sp(11),
+                      (idx) => _showDayBreakdown(ctx, idx)),
+            ),
+            ...(!_is7Day ? [
+              SizedBox(height: ctx.rs(6)),
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Icon(Icons.swipe_rounded,
+                    color: const Color(0xFF475569), size: ctx.ri(13)),
+                SizedBox(width: ctx.rp(4)),
+                Text('Swipe to see all dates',
+                    style: TextStyle(color: const Color(0xFF475569),
+                        fontSize: ctx.sp(10))),
+              ]),
+              SizedBox(height: ctx.rs(8)),
+            ] : [
+              SizedBox(height: ctx.rs(8)),
+            ]),
           ]),
-        ]),
+        ),
+    );
+  }
+
+  void _showDayBreakdown(BuildContext context, int index) {
+    if (index < 0 || index >= widget.dailyTrends.length) return;
+    final row        = widget.dailyTrends[index];
+    final rawDate    = row['date'] as String? ?? '';
+    final drowsy     = row['drowsy_count']     as int? ?? 0;
+    final distracted = row['distracted_count'] as int? ?? 0;
+    showModalBottomSheet(
+      context: context, isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.75),
+      useSafeArea: true,
+      builder: (_) => _DayBreakdownModal(
+        date:        _fullDate(rawDate),
+        rawDate:     rawDate,
+        drowsy:      drowsy,
+        distracted:  distracted,
       ),
     );
   }
 
-  Widget _sevenDayChart(BuildContext ctx, _LineData d, double fs) =>
+  Widget _sevenDayChart(BuildContext ctx, _LineData d, double fs,
+          void Function(int) onDayTap) =>
       LayoutBuilder(builder: (ctx, con) => SizedBox(
             width: con.maxWidth, height: con.maxHeight,
-            child: _lineWidget(ctx, d, fs)));
+            child: _lineWidget(ctx, d, fs, onDayTap)));
 
-  Widget _scrollableChart(BuildContext ctx, _LineData d, double fs) =>
+  Widget _scrollableChart(BuildContext ctx, _LineData d, double fs,
+          void Function(int) onDayTap) =>
       LayoutBuilder(builder: (ctx, con) {
         final pointCount = d.labels.length;
         final spacing    = pointCount <= 30 ? 48.0 : 40.0;
@@ -354,11 +385,13 @@ class _LineCard extends StatelessWidget {
           scrollDirection: Axis.horizontal,
           physics: const AlwaysScrollableScrollPhysics(),
           child: SizedBox(width: minW, height: con.maxHeight,
-              child: _lineWidget(ctx, d, fs)),
+              child: _lineWidget(ctx, d, fs, onDayTap)),
         );
       });
 
-  Widget _lineWidget(BuildContext ctx, _LineData d, double fs) => LineChart(
+  Widget _lineWidget(BuildContext ctx, _LineData d, double fs,
+      void Function(int) onDayTap) =>
+      LineChart(
         LineChartData(
           clipData: const FlClipData.all(),
           gridData: FlGridData(
@@ -411,6 +444,13 @@ class _LineCard extends StatelessWidget {
           ],
           lineTouchData: LineTouchData(
             handleBuiltInTouches: true,
+            touchCallback: (event, response) {
+              if (event is FlTapUpEvent &&
+                  response?.lineBarSpots?.isNotEmpty == true) {
+                final x = response!.lineBarSpots!.first.x.round();
+                onDayTap(x);
+              }
+            },
             touchTooltipData: LineTouchTooltipData(
               getTooltipColor: (_) => const Color(0xFF0f172a),
               tooltipBorderRadius: BorderRadius.circular(ctx.rp(12)),
@@ -442,7 +482,7 @@ class _LineCard extends StatelessWidget {
       );
 
   _LineData _parse() {
-    if (dailyTrends.isEmpty) {
+    if (widget.dailyTrends.isEmpty) {
       final empty = List.generate(7, (i) => FlSpot(i.toDouble(), 0));
       return _LineData(
         drowsy: empty, distracted: List.from(empty),
@@ -451,8 +491,8 @@ class _LineCard extends StatelessWidget {
       );
     }
     final drowsy = <FlSpot>[], dist = <FlSpot>[], labels = <String>[];
-    for (int i = 0; i < dailyTrends.length; i++) {
-      final r = dailyTrends[i];
+    for (int i = 0; i < widget.dailyTrends.length; i++) {
+      final r = widget.dailyTrends[i];
       drowsy.add(FlSpot(i.toDouble(),
           (r['drowsy_count'] as int? ?? 0).toDouble()));
       dist.add(FlSpot(i.toDouble(),
@@ -480,6 +520,20 @@ class _LineCard extends StatelessWidget {
       return iso.length >= 7 ? iso.substring(5) : iso;
     }
   }
+
+  String _fullDate(String iso) {
+    try {
+      final d = DateTime.parse(iso).toLocal();
+      const months = [
+        'January','February','March','April','May','June',
+        'July','August','September','October','November','December'
+      ];
+      const weekdays = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+      return '${weekdays[d.weekday - 1]}, ${months[d.month - 1]} ${d.day}, ${d.year}';
+    } catch (_) {
+      return iso;
+    }
+  }
 }
 
 class _LineData {
@@ -490,6 +544,211 @@ class _LineData {
     required this.drowsy, required this.distracted, required this.labels,
     required this.maxX,   required this.maxY,       required this.yInterval,
   });
+}
+
+// ── DAY BREAKDOWN MODAL ───────────────────────────────────────────────────────
+class _DayBreakdownModal extends StatefulWidget {
+  final String date;
+  final String rawDate;
+  final int    drowsy;
+  final int    distracted;
+  const _DayBreakdownModal({
+    required this.date, required this.rawDate,
+    required this.drowsy, required this.distracted,
+  });
+
+  @override
+  State<_DayBreakdownModal> createState() => _DayBreakdownModalState();
+}
+
+class _DayBreakdownModalState extends State<_DayBreakdownModal> {
+  Map<String, dynamic>? _breakdown;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final result =
+          await DatabaseHelper.instance.getDayAlertBreakdown(widget.rawDate);
+      if (mounted) setState(() { _breakdown = result; _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() { _loading = false; });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final total = widget.drowsy + widget.distracted;
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D1627),
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(context.rp(24))),
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Center(child: Padding(
+          padding: EdgeInsets.only(
+              top: context.rs(12), bottom: context.rs(8)),
+          child: Container(
+            width: context.rp(40), height: context.rs(4),
+            decoration: BoxDecoration(
+                color: const Color(0xFF1E2D45),
+                borderRadius: BorderRadius.circular(context.rp(2))),
+          ),
+        )),
+        Padding(
+          padding: EdgeInsets.fromLTRB(
+              context.rp(20), context.rs(4), context.rp(16), 0),
+          child: Row(children: [
+            Expanded(child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(widget.date, style: TextStyle(
+                    color: Colors.white, fontSize: context.sp(15),
+                    fontWeight: FontWeight.w700)),
+                SizedBox(height: context.rs(3)),
+                Text('$total alert${total == 1 ? '' : 's'} detected',
+                    style: TextStyle(color: const Color(0xFF6B7A99),
+                        fontSize: context.sp(11))),
+              ],
+            )),
+            GestureDetector(
+              onTap: () => Navigator.pop(context),
+              child: Container(
+                  width: context.ri(34), height: context.ri(34),
+                  decoration: BoxDecoration(
+                      color: const Color(0xFF1A2235),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: const Color(0xFF1E2D45))),
+                  child: Icon(Icons.close_rounded,
+                      color: const Color(0xFF94A3B8),
+                      size: context.ri(18))),
+            ),
+          ]),
+        ),
+        Divider(color: const Color(0xFF1E2D45).withValues(alpha: 0.6),
+            height: context.rs(20)),
+        if (_loading)
+          Padding(
+            padding: EdgeInsets.all(context.rp(32)),
+            child: const CircularProgressIndicator(
+                color: Color(0xFF22d3ee)),
+          )
+        else
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+                context.rp(16), 0, context.rp(16), context.rs(28)),
+            child: Column(children: [
+              if (widget.drowsy > 0) ...[
+                _TypeRow(
+                  label: 'Drowsiness', total: widget.drowsy,
+                  color: _kDrowsyColor, icon: Icons.bedtime_outlined,
+                  l1: _breakdown?['l1_drowsy']     as int? ?? 0,
+                  l2: _breakdown?['l2_drowsy']     as int? ?? 0,
+                  l3: _breakdown?['l3_drowsy']     as int? ?? 0,
+                ),
+                SizedBox(height: context.rs(10)),
+              ],
+              if (widget.distracted > 0) ...[
+                _TypeRow(
+                  label: 'Distraction', total: widget.distracted,
+                  color: _kDistractedColor, icon: Icons.visibility_off_outlined,
+                  l1: _breakdown?['l1_distracted'] as int? ?? 0,
+                  l2: _breakdown?['l2_distracted'] as int? ?? 0,
+                  l3: _breakdown?['l3_distracted'] as int? ?? 0,
+                ),
+                SizedBox(height: context.rs(10)),
+              ],
+              if (widget.drowsy == 0 && widget.distracted == 0)
+                Padding(
+                  padding: EdgeInsets.symmetric(vertical: context.rs(16)),
+                  child: Text('No alerts on this day',
+                      style: TextStyle(color: const Color(0xFF64748b),
+                          fontSize: context.sp(13))),
+                ),
+            ]),
+          ),
+      ]),
+    );
+  }
+}
+
+class _TypeRow extends StatelessWidget {
+  final String   label;
+  final int      total, l1, l2, l3;
+  final Color    color;
+  final IconData icon;
+  const _TypeRow({
+    required this.label, required this.total, required this.color,
+    required this.icon,  required this.l1,    required this.l2,
+    required this.l3,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(context.rp(14)),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0f172a),
+        borderRadius: BorderRadius.circular(context.rp(14)),
+        border: Border.all(color: const Color(0xFF1E2D45)),
+      ),
+      child: Row(children: [
+        Container(
+          padding: EdgeInsets.all(context.rp(8)),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(context.rp(10)),
+          ),
+          child: Icon(icon, color: color, size: context.ri(18)),
+        ),
+        SizedBox(width: context.rp(12)),
+        Expanded(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Text(label, style: TextStyle(
+                  color: const Color(0xFFcbd5e1), fontSize: context.sp(13),
+                  fontWeight: FontWeight.w600)),
+              const Spacer(),
+              Text('$total total', style: TextStyle(
+                  color: color, fontSize: context.sp(13),
+                  fontWeight: FontWeight.w700)),
+            ]),
+            SizedBox(height: context.rs(8)),
+            Row(children: [
+              if (l1 > 0) _pill(context, 'L1', l1, const Color(0xFFf59e0b)),
+              if (l1 > 0 && (l2 > 0 || l3 > 0))
+                SizedBox(width: context.rp(6)),
+              if (l2 > 0) _pill(context, 'L2', l2, const Color(0xFFef8c34)),
+              if (l2 > 0 && l3 > 0) SizedBox(width: context.rp(6)),
+              if (l3 > 0) _pill(context, 'L3', l3, const Color(0xFFef4444)),
+              if (l1 == 0 && l2 == 0 && l3 == 0)
+                Text('—', style: TextStyle(
+                    color: const Color(0xFF475569), fontSize: context.sp(11))),
+            ]),
+          ],
+        )),
+      ]),
+    );
+  }
+
+  Widget _pill(BuildContext ctx, String lvl, int count, Color c) => Container(
+        padding: EdgeInsets.symmetric(
+            horizontal: ctx.rp(8), vertical: ctx.rs(3)),
+        decoration: BoxDecoration(
+          color: c.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(ctx.rp(20)),
+          border: Border.all(color: c.withValues(alpha: 0.35)),
+        ),
+        child: Text('$lvl  $count', style: TextStyle(
+            color: c, fontSize: ctx.sp(10), fontWeight: FontWeight.w600)),
+      );
 }
 
 // ── BAR CHART CARD ────────────────────────────────────────────────────────────
