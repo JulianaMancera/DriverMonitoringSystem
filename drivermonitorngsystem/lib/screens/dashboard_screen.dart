@@ -7,6 +7,13 @@ import '../core/database/db_change_notifier.dart';
 import '../core/providers.dart';
 import '../utils/responsive.dart';
 
+Color _scoreColor(double score) {
+  if (score >= 90) return const Color(0xFF10b981);
+  if (score >= 75) return const Color(0xFF22d3ee);
+  if (score >= 60) return const Color(0xFFf59e0b);
+  return const Color(0xFFef4444);
+}
+
 // PROVIDER
 final dashboardProvider =
     FutureProvider<Map<String, dynamic>>((ref) async {
@@ -82,6 +89,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final alertnessSnapshots = (data['alertness_snapshots'] as List?)
         ?.cast<Map<String, dynamic>>() ?? [];
 
+    final double? lastSessionScore = data['last_session_score'] as double?;
+    final double? prevSessionScore = data['prev_session_score'] as double?;
+    final double? trendDelta = (lastSessionScore != null && prevSessionScore != null)
+        ? lastSessionScore - prevSessionScore
+        : null;
+
     final bool isRecording    = ref.watch(isRecordingProvider);
     final bool hasAnySessions = dailyScores.isNotEmpty;
 
@@ -107,7 +120,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           // Safety score + stat cards
           Column(children: [
             _buildSafetyScoreCard(
-                context, safetyScore, scoreLabel, hasAnySessions),
+                context, safetyScore, scoreLabel, hasAnySessions,
+                trendDelta: trendDelta),
             SizedBox(height: context.rs(24)),
             hasAnySessions
                 ? _buildQuickStatsGrid(context,
@@ -134,8 +148,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     BuildContext context,
     double score,
     String label,
-    bool hasAnySessions,
-  ) {
+    bool hasAnySessions, {
+    double? trendDelta,
+  }) {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
@@ -174,7 +189,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 SizedBox(height: context.rs(20)),
                 _buildCircularScoreIndicator(
                     context, hasAnySessions ? score : 100.0,
-                    hasAnySessions ? label : '—', hasAnySessions),
+                    hasAnySessions ? label : '—', hasAnySessions,
+                    trendDelta: hasAnySessions ? trendDelta : null),
                 if (!hasAnySessions) ...[
                   SizedBox(height: context.rs(12)),
                   Text('Start a session to see your score',
@@ -195,13 +211,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     BuildContext context,
     double score,
     String label,
-    bool hasAnySessions,
-  ) {
+    bool hasAnySessions, {
+    double? trendDelta,
+  }) {
     final outerSize = context.forTier<double>(
         base: 160.0, compact: 130.0, small: 140.0, large: 170.0,
         xlarge: 180.0);
     final progressSize = outerSize * 0.88;
     final innerSize    = outerSize * 0.73;
+    final scoreColor   = hasAnySessions ? _scoreColor(score) : const Color(0xFF1e293b);
 
     return SizedBox(
       width: outerSize, height: outerSize,
@@ -226,10 +244,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             strokeWidth:     context.forTier(
                 base: 6.0, compact: 5.0, large: 7.0),
             backgroundColor: const Color(0xFF1e293b),
-            valueColor:      AlwaysStoppedAnimation<Color>(
-                hasAnySessions
-                    ? const Color(0xFF22d3ee)
-                    : const Color(0xFF1e293b)),
+            valueColor:      AlwaysStoppedAnimation<Color>(scoreColor),
             strokeCap: StrokeCap.round,
           ),
         ),
@@ -252,9 +267,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 fontSize:   context.forTier(
                     base: 34.0, compact: 26.0, small: 30.0, large: 38.0),
                 fontWeight: FontWeight.bold,
-                color:      hasAnySessions
-                    ? const Color(0xFF22d3ee)
-                    : const Color(0xFF1e293b),
+                color:      scoreColor,
               ),
             ),
             SizedBox(height: context.rs(2)),
@@ -264,10 +277,38 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   color:         const Color(0xFF64748b),
                   letterSpacing: 1,
                 )),
+            if (hasAnySessions && trendDelta != null) ...[
+              SizedBox(height: context.rs(4)),
+              _buildTrendRow(context, trendDelta),
+            ],
           ]),
         ),
       ]),
     );
+  }
+
+  Widget _buildTrendRow(BuildContext context, double delta) {
+    final improved = delta > 0.5;
+    final declined = delta < -0.5;
+    final color = improved ? const Color(0xFF10b981)
+                : declined ? const Color(0xFFef4444)
+                : const Color(0xFF64748b);
+    final icon  = improved ? Icons.arrow_upward_rounded
+                : declined ? Icons.arrow_downward_rounded
+                : Icons.remove_rounded;
+    final text  = delta.abs() < 0.5
+        ? 'same'
+        : '${delta > 0 ? '+' : ''}${delta.toStringAsFixed(0)} pts';
+
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, size: context.ri(9), color: color),
+      SizedBox(width: context.rp(2)),
+      Text(text, style: TextStyle(
+        fontSize:   context.sp(9),
+        color:      color,
+        fontWeight: FontWeight.w600,
+      )),
+    ]);
   }
 
   // SHARED STATS GRID HELPER — single source of truth for GridView layout config
@@ -461,16 +502,23 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       ),
       child: Center(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.show_chart_rounded,
-              color: const Color(0xFF1e293b), size: context.ri(44)),
-          SizedBox(height: context.rs(12)),
+          Container(
+            padding: EdgeInsets.all(context.rp(12)),
+            decoration: BoxDecoration(
+              color:        const Color(0xFF1e293b),
+              borderRadius: BorderRadius.circular(context.rp(12)),
+            ),
+            child: Icon(Icons.show_chart_rounded,
+                color: const Color(0xFF334155), size: context.ri(28)),
+          ),
+          SizedBox(height: context.rs(14)),
           Text('No drive history yet',
               style: TextStyle(
                   color:      const Color(0xFF475569),
                   fontSize:   context.sp(14),
                   fontWeight: FontWeight.w600)),
-          SizedBox(height: context.rs(4)),
-          Text('Complete a session in Monitor to see your score',
+          SizedBox(height: context.rs(5)),
+          Text('Complete a session in Monitor to begin tracking',
               style: TextStyle(
                   color:    const Color(0xFF334155),
                   fontSize: context.sp(11)),

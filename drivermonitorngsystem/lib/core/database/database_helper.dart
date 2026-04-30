@@ -658,6 +658,17 @@ class DatabaseHelper {
 
   // ── COMBINED QUERIES ──────────────────────────────────────────────────────
 
+  /// Last two completed sessions' safety scores — used for trend arrow on Dashboard.
+  Future<List<Map<String, dynamic>>> _getLastTwoSessionScores() async {
+    final db = await database;
+    return await db.rawQuery('''
+      SELECT safety_score FROM sessions
+      WHERE ended_at IS NOT NULL
+      ORDER BY started_at DESC
+      LIMIT 2
+    ''');
+  }
+
   /// All data needed by dashboard_screen in one parallel fetch.
   /// Called by dashboard_screen on init and every 30 seconds.
   Future<Map<String, dynamic>> getDashboardSummary() async {
@@ -669,7 +680,10 @@ class DatabaseHelper {
       getAvgSafetyScore(days: 30),         // index 4
       getLatestSessionSnapshots(),          // index 5
       getDailySafetyScores(days: 30),      // index 6
+      _getLastTwoSessionScores(),           // index 7
     ]);
+
+    final twoScores = results[7] as List<Map<String, dynamic>>;
 
     return {
       'total_drive_hrs':     (results[0] as int) / 3600,
@@ -679,6 +693,8 @@ class DatabaseHelper {
       'safety_score':        results[4] as double,
       'alertness_snapshots': results[5] as List<Map<String, dynamic>>,
       'daily_safety_scores': results[6] as List<Map<String, dynamic>>,
+      'last_session_score':  twoScores.isNotEmpty ? twoScores[0]['safety_score'] as double? : null,
+      'prev_session_score':  twoScores.length > 1 ? twoScores[1]['safety_score'] as double? : null,
     };
   }
 
