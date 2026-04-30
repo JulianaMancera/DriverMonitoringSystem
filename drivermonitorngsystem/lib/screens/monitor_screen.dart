@@ -49,6 +49,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   int? _currentSessionId;
   DateTime? _sessionStartTime;
   Timer? _snapshotTimer;
+  Timer? _sessionTimer;
+  int _sessionElapsedSec = 0;
 
   int _consecutiveDrowsy = 0;
   int _consecutiveDistracted = 0;
@@ -143,6 +145,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     FlutterForegroundTask.removeTaskDataCallback(_onReceiveTaskData);
     WidgetsBinding.instance.removeObserver(this);
     _snapshotTimer?.cancel();
+    _sessionTimer?.cancel();
     _warningController.dispose();
     _notifController?.dispose();
     _pipSubscription?.cancel();
@@ -591,6 +594,17 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     _snapshotTimer = Timer.periodic(
         const Duration(seconds: 5), (_) => _saveAlertnessSnapshot());
+
+    _sessionElapsedSec = 0;
+    _sessionTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && _sessionStartTime != null) {
+        setState(() {
+          _sessionElapsedSec =
+              DateTime.now().difference(_sessionStartTime!).inSeconds;
+        });
+      }
+    });
+
     ref.read(dbChangeCounterProvider.notifier).increment();
   }
 
@@ -652,6 +666,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       }
 
       _snapshotTimer?.cancel();
+      _sessionTimer?.cancel();
+      _sessionTimer = null;
+      if (mounted) setState(() => _sessionElapsedSec = 0);
 
       await _saveAlertnessSnapshot();
 
@@ -1351,6 +1368,23 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                     final roll = pose.$1;
                     final hasFace = pose.$2;
                     final inRed = _isInRedZone(roll, hasFace);
+
+                    final String statusLabel;
+                    final Color statusColor;
+                    if (!hasFace) {
+                      statusLabel = 'No Face';
+                      statusColor = Colors.white38;
+                    } else if (inRed) {
+                      statusLabel = 'Reposition';
+                      statusColor = const Color(0xFFef4444);
+                    } else if (roll.abs() >= 30) {
+                      statusLabel = 'Angle OK';
+                      statusColor = const Color(0xFFfbbf24);
+                    } else {
+                      statusLabel = 'Aligned';
+                      statusColor = const Color(0xFF22c55e);
+                    }
+
                     return Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.center,
@@ -1381,6 +1415,25 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                           roll: roll,
                           hasFace: hasFace,
                           size: 75,
+                        ),
+                        SizedBox(height: context.rs(4)),
+                        Container(
+                          padding: EdgeInsets.symmetric(
+                              horizontal: context.rp(6),
+                              vertical: context.rs(2)),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.45),
+                            borderRadius: BorderRadius.circular(context.rp(4)),
+                          ),
+                          child: Text(
+                            statusLabel,
+                            style: TextStyle(
+                              color: statusColor,
+                              fontSize: context.sp(8),
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
                         ),
                       ],
                     );
@@ -1494,6 +1547,16 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         ),
       );
 
+  String _formatDuration(int seconds) {
+    final h = seconds ~/ 3600;
+    final m = (seconds % 3600) ~/ 60;
+    final s = seconds % 60;
+    if (h > 0) {
+      return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    }
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
   Widget _buildRecBadge() => Positioned(
         top: context.rs(10),
         right: context.rp(10),
@@ -1516,6 +1579,19 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                     fontSize: context.sp(10),
                     fontWeight: FontWeight.bold,
                     letterSpacing: 1.2)),
+            Container(
+              width: 1,
+              height: context.rs(10),
+              color: Colors.white38,
+              margin: EdgeInsets.symmetric(horizontal: context.rp(6)),
+            ),
+            Text(
+              _formatDuration(_sessionElapsedSec),
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: context.sp(10),
+                  fontWeight: FontWeight.w600),
+            ),
           ]),
         ),
       );
