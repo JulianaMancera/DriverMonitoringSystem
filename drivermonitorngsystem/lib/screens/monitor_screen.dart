@@ -980,53 +980,75 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final sessionId = _currentSessionId!;
     _isCapturingClip = true;
 
+    // startVideoRecording and startImageStream are mutually exclusive, so we
+    // alternate: record a chunk → save it → briefly resume inference to check
+    // if the alert is still active → repeat until clear or 3-min cap.
+    // Each chunk is saved as its own clip entry so its file length always
+    // matches the displayed duration.
+    const chunkDuration    = Duration(seconds: 10);
+    const inferenceWindow  = Duration(milliseconds: 1000);
+    const maxTotalDuration = Duration(minutes: 3);
+    final clipStart        = DateTime.now();
+
     try {
-      // startVideoRecording and startImageStream are mutually exclusive —
-      // pause inference, record a 5-second clip, then resume.
-      if (_cameraController!.value.isStreamingImages) {
-        await _cameraController!.stopImageStream();
-      }
+      bool keepRecording = true;
 
-      await _cameraController!.startVideoRecording();
-      await Future.delayed(const Duration(seconds: 5));
+      while (keepRecording) {
+        if (_camDisposing || !ref.read(isRecordingProvider)) break;
+        if (DateTime.now().difference(clipStart) >= maxTotalDuration) break;
 
-      if (_camDisposing) {
-        try {
-          await _cameraController!.stopVideoRecording();
-        } catch (_) {}
-        return;
-      }
-
-      final XFile videoFile = await _cameraController!.stopVideoRecording();
-
-      // Restart inference stream if session is still active
-      if (!_camDisposing && ref.read(isRecordingProvider)) {
-        try {
-          if (!_cameraController!.value.isStreamingImages) {
-            await _cameraController!.startImageStream(_onCameraFrame);
-          }
-        } catch (e) {
-          debugPrint('[Camera] restart stream after clip: $e');
+        if (_cameraController!.value.isStreamingImages) {
+          await _cameraController!.stopImageStream();
         }
-      }
 
-      final savedPath = await VideoClipService.saveClip(
-        sourcePath: videoFile.path,
-        sessionId: sessionId,
-      );
+        await _cameraController!.startVideoRecording();
+        await Future.delayed(chunkDuration);
 
-      if (savedPath != null && mounted) {
-        await DatabaseHelper.instance.insertVideoClip(
+        if (_camDisposing) {
+          try { await _cameraController!.stopVideoRecording(); } catch (_) {}
+          break;
+        }
+
+        final XFile videoFile = await _cameraController!.stopVideoRecording();
+
+        final savedPath = await VideoClipService.saveClip(
+          sourcePath: videoFile.path,
           sessionId: sessionId,
-          filePath: savedPath,
-          alertTypes: alertType,
-          durationSec: 5,
         );
-        ref.read(dbChangeCounterProvider.notifier).increment();
+        if (savedPath != null && mounted) {
+          await DatabaseHelper.instance.insertVideoClip(
+            sessionId: sessionId,
+            filePath: savedPath,
+            alertTypes: alertType,
+            durationSec: chunkDuration.inSeconds,
+          );
+          ref.read(dbChangeCounterProvider.notifier).increment();
+        }
+
+        // Brief inference window: check whether the alert is still active.
+        if (!_camDisposing && ref.read(isRecordingProvider)) {
+          try {
+            await _cameraController!.startImageStream(_onCameraFrame);
+            await Future.delayed(inferenceWindow);
+            if (_cameraController!.value.isStreamingImages) {
+              await _cameraController!.stopImageStream();
+            }
+          } catch (e) {
+            debugPrint('[VideoClip] inference check error: $e');
+            keepRecording = false;
+            break;
+          }
+          final thresholds =
+              _sensitivityThresholds[_prefAlertSensitivity] ?? [3, 6, 9];
+          keepRecording = _consecutiveDrowsy >= thresholds[0] ||
+              _consecutiveDistracted >= thresholds[0];
+        } else {
+          keepRecording = false;
+        }
       }
     } catch (e) {
       debugPrint('[VideoClip] _saveVideoClip error: $e');
-      // Ensure inference stream is restored on failure
+    } finally {
       if (!_camDisposing && ref.read(isRecordingProvider)) {
         try {
           if (!_cameraController!.value.isStreamingImages) {
@@ -1034,7 +1056,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           }
         } catch (_) {}
       }
-    } finally {
       _isCapturingClip = false;
     }
   }
