@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:shimmer/shimmer.dart';
 import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
 import '../utils/responsive.dart';
@@ -91,8 +92,7 @@ class _PageContent extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final asyncData = ref.watch(analyticsDataProvider(days));
     return asyncData.when(
-      loading: () => const Center(
-          child: CircularProgressIndicator(color: Color(0xFF22d3ee))),
+      loading: () => const _AnalyticsSkeleton(),
       error: (e, _) => Center(
           child: Text('Error loading analytics: $e',
               style: const TextStyle(color: Colors.white54),
@@ -1108,3 +1108,64 @@ Widget _expandBadge(BuildContext ctx) => Container(
       child: Icon(Icons.open_in_full_rounded,
           color: const Color(0xFF22d3ee), size: ctx.ri(13)),
     );
+
+// ── ANALYTICS SKELETON ────────────────────────────────────────────────────────
+class _AnalyticsSkeleton extends StatelessWidget {
+  const _AnalyticsSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Shimmer.fromColors(
+      baseColor:      const Color(0xFF1A2235),
+      highlightColor: const Color(0xFF263350),
+      child: SingleChildScrollView(
+        physics: const NeverScrollableScrollPhysics(),
+        padding: EdgeInsets.only(bottom: context.rs(32)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(height: context.rs(16)),
+            // Summary cards — 2 × 2 grid
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: context.rp(20)),
+              child: GridView.count(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisCount:   2,
+                mainAxisSpacing:  context.rs(10),
+                crossAxisSpacing: context.rp(10),
+                childAspectRatio: context.forTier(
+                    base: 0.95, compact: 0.85, small: 0.90, large: 1.0),
+                children: List.generate(
+                    4, (_) => _box(context, double.infinity, double.infinity)),
+              ),
+            ),
+            SizedBox(height: context.rs(24)),
+            // Line chart card
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: context.rp(20)),
+              child: _box(context, double.infinity,
+                  context.rs(context.isSmallPhone ? 260 : 295)),
+            ),
+            SizedBox(height: context.rs(24)),
+            // Bar chart card
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: context.rp(20)),
+              child: _box(context, double.infinity,
+                  context.rs(context.isSmallPhone ? 210 : 235)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _box(BuildContext ctx, double w, double h, {double r = 18}) =>
+      Container(
+        width: w, height: h,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(ctx.rp(r)),
+        ),
+      );
+}

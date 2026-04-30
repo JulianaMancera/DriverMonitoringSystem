@@ -58,6 +58,9 @@ dependencies:
   # Video playback for alert clip review
   video_player: ^2.9.2
 
+  # Loading skeletons
+  shimmer: ^3.0.0
+
 
 dev_dependencies:
   flutter_test:

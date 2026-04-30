@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:shimmer/shimmer.dart';
 import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
 import '../core/providers.dart';
@@ -51,8 +52,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       child: Column(children: [
         Expanded(
           child: dashAsync.when(
-            loading: () => const Center(
-                child: CircularProgressIndicator(color: Color(0xFF22d3ee))),
+            loading: () => const _DashboardSkeleton(),
             error: (e, _) => Center(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 Icon(Icons.error_outline,
@@ -947,4 +947,71 @@ class _EmptyStatCard extends StatelessWidget {
       ),
     );
   }
+}
+
+// ── DASHBOARD SKELETON ────────────────────────────────────────────────────────
+class _DashboardSkeleton extends StatelessWidget {
+  const _DashboardSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Shimmer.fromColors(
+      baseColor:      const Color(0xFF1A2235),
+      highlightColor: const Color(0xFF263350),
+      child: SingleChildScrollView(
+        physics: const NeverScrollableScrollPhysics(),
+        padding: EdgeInsets.symmetric(
+            horizontal: context.hPad, vertical: context.rs(10)),
+        child: Column(children: [
+          // Safety score card
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.symmetric(vertical: context.rs(36)),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(context.rp(20)),
+            ),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              _box(context, context.rp(90), context.rs(10)),
+              SizedBox(height: context.rs(20)),
+              Container(
+                width:  context.ri(140),
+                height: context.ri(140),
+                decoration: const BoxDecoration(
+                    color: Colors.white, shape: BoxShape.circle),
+              ),
+              SizedBox(height: context.rs(12)),
+              _box(context, context.rp(48), context.rs(12)),
+            ]),
+          ),
+          SizedBox(height: context.rs(24)),
+          // Stats grid — 2 × 2
+          GridView.count(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisCount:   2,
+            mainAxisSpacing:  context.rs(12),
+            crossAxisSpacing: context.rp(12),
+            childAspectRatio: context.forTier(
+                base: 1.0, compact: 0.90, small: 0.95, large: 1.05),
+            children: List.generate(
+                4, (_) => _box(context, double.infinity, double.infinity)),
+          ),
+          SizedBox(height: context.rs(24)),
+          // Chart card
+          _box(context, double.infinity, context.rs(210)),
+          SizedBox(height: context.rs(20)),
+        ]),
+      ),
+    );
+  }
+
+  Widget _box(BuildContext ctx, double w, double h, {double r = 14}) =>
+      Container(
+        width: w, height: h,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(ctx.rp(r)),
+        ),
+      );
 }
