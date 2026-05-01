@@ -30,6 +30,7 @@
 //   • settings_screen.dart  — calls deleteSessionsOlderThan() + clearAllData()
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:io';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
@@ -52,7 +53,7 @@ class DatabaseHelper {
     final path = join(dbPath, fileName);
     return await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: _createTables,
       onUpgrade: _migrateDB,
     );
@@ -124,6 +125,22 @@ class DatabaseHelper {
       )
     ''');
 
+    // Video clips — one row per saved alert video clip.
+    // file_path   : absolute path inside app documents / alert_clips/
+    // alert_types : comma-separated list e.g. 'DROWSY,DISTRACTED'
+    // created_at  : UTC ISO-8601 timestamp when the clip was saved
+    await db.execute('''
+      CREATE TABLE video_clips (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id   INTEGER NOT NULL,
+        file_path    TEXT NOT NULL,
+        alert_types  TEXT NOT NULL DEFAULT '',
+        created_at   TEXT NOT NULL,
+        duration_sec INTEGER DEFAULT 0,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+      )
+    ''');
+
     // Indexes on timestamp columns to speed up date-range queries used by
     // Analytics and Dashboard screens as session history grows.
     await db.execute(
@@ -146,6 +163,21 @@ class DatabaseHelper {
       try {
         await db.execute(
             'CREATE INDEX idx_alerts_triggered ON alert_events(triggered_at)');
+      } catch (_) {}
+    }
+    if (oldVersion < 4) {
+      try {
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS video_clips (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id   INTEGER NOT NULL,
+            file_path    TEXT NOT NULL,
+            alert_types  TEXT NOT NULL DEFAULT '',
+            created_at   TEXT NOT NULL,
+            duration_sec INTEGER DEFAULT 0,
+            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+          )
+        ''');
       } catch (_) {}
     }
   }
@@ -626,6 +658,17 @@ class DatabaseHelper {
 
   // ── COMBINED QUERIES ──────────────────────────────────────────────────────
 
+  /// Last two completed sessions' safety scores — used for trend arrow on Dashboard.
+  Future<List<Map<String, dynamic>>> _getLastTwoSessionScores() async {
+    final db = await database;
+    return await db.rawQuery('''
+      SELECT safety_score FROM sessions
+      WHERE ended_at IS NOT NULL
+      ORDER BY started_at DESC
+      LIMIT 2
+    ''');
+  }
+
   /// All data needed by dashboard_screen in one parallel fetch.
   /// Called by dashboard_screen on init and every 30 seconds.
   Future<Map<String, dynamic>> getDashboardSummary() async {
@@ -637,7 +680,10 @@ class DatabaseHelper {
       getAvgSafetyScore(days: 30),         // index 4
       getLatestSessionSnapshots(),          // index 5
       getDailySafetyScores(days: 30),      // index 6
+      _getLastTwoSessionScores(),           // index 7
     ]);
+
+    final twoScores = results[7] as List<Map<String, dynamic>>;
 
     return {
       'total_drive_hrs':     (results[0] as int) / 3600,
@@ -647,6 +693,8 @@ class DatabaseHelper {
       'safety_score':        results[4] as double,
       'alertness_snapshots': results[5] as List<Map<String, dynamic>>,
       'daily_safety_scores': results[6] as List<Map<String, dynamic>>,
+      'last_session_score':  twoScores.isNotEmpty ? twoScores[0]['safety_score'] as double? : null,
+      'prev_session_score':  twoScores.length > 1 ? twoScores[1]['safety_score'] as double? : null,
     };
   }
 
@@ -677,6 +725,108 @@ class DatabaseHelper {
     };
   }
 
+  /// Per-day alert breakdown by type and level for the Analytics drill-down.
+  /// [date] is a local-date string in YYYY-MM-DD format.
+  Future<Map<String, dynamic>> getDayAlertBreakdown(String date) async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT
+        SUM(CASE WHEN alert_type='DROWSY'     AND alert_level=1 THEN 1 ELSE 0 END) AS l1_drowsy,
+        SUM(CASE WHEN alert_type='DROWSY'     AND alert_level=2 THEN 1 ELSE 0 END) AS l2_drowsy,
+        SUM(CASE WHEN alert_type='DROWSY'     AND alert_level=3 THEN 1 ELSE 0 END) AS l3_drowsy,
+        SUM(CASE WHEN alert_type='DISTRACTED' AND alert_level=1 THEN 1 ELSE 0 END) AS l1_distracted,
+        SUM(CASE WHEN alert_type='DISTRACTED' AND alert_level=2 THEN 1 ELSE 0 END) AS l2_distracted,
+        SUM(CASE WHEN alert_type='DISTRACTED' AND alert_level=3 THEN 1 ELSE 0 END) AS l3_distracted
+      FROM alert_events
+      WHERE DATE(datetime(triggered_at, 'localtime')) = ?
+    ''', [date]);
+    if (rows.isEmpty) return {};
+    final r = rows.first;
+    return {
+      'l1_drowsy':     (r['l1_drowsy']     as int?) ?? 0,
+      'l2_drowsy':     (r['l2_drowsy']     as int?) ?? 0,
+      'l3_drowsy':     (r['l3_drowsy']     as int?) ?? 0,
+      'l1_distracted': (r['l1_distracted'] as int?) ?? 0,
+      'l2_distracted': (r['l2_distracted'] as int?) ?? 0,
+      'l3_distracted': (r['l3_distracted'] as int?) ?? 0,
+    };
+  }
+
+  // ── VIDEO CLIPS — CRUD ────────────────────────────────────────────────────
+
+  /// Called by monitor_screen after a session with alerts ends.
+  /// alertTypes: comma-separated string e.g. 'DROWSY,DISTRACTED'
+  Future<int> insertVideoClip({
+    required int sessionId,
+    required String filePath,
+    required String alertTypes,
+    int durationSec = 0,
+  }) async {
+    final db = await database;
+    return await db.insert('video_clips', {
+      'session_id':   sessionId,
+      'file_path':    filePath,
+      'alert_types':  alertTypes,
+      'created_at':   DateTime.now().toUtc().toIso8601String(),
+      'duration_sec': durationSec,
+    });
+  }
+
+  /// All clips across all sessions — Video Logs tab in history_screen.
+  /// Joins sessions so callers get session start time for grouping by date.
+  Future<List<Map<String, dynamic>>> getAllVideoClips() async {
+    final db = await database;
+    return await db.rawQuery('''
+      SELECT vc.*, s.started_at AS session_started_at
+      FROM video_clips vc
+      JOIN sessions s ON vc.session_id = s.id
+      ORDER BY vc.created_at DESC
+    ''');
+  }
+
+  /// Clips for one session — used in session detail sheet.
+  Future<List<Map<String, dynamic>>> getVideoClipsBySession(
+    int sessionId,
+  ) async {
+    final db = await database;
+    return await db.query(
+      'video_clips',
+      where: 'session_id = ?',
+      whereArgs: [sessionId],
+      orderBy: 'created_at ASC',
+    );
+  }
+
+  /// Deletes a single clip row. Caller is responsible for deleting the file.
+  Future<void> deleteVideoClip(int id) async {
+    final db = await database;
+    await db.delete('video_clips', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Returns all file paths stored in video_clips — used by clearAllData
+  /// so the caller can delete files before wiping the table.
+  Future<List<String>> getAllVideoClipPaths() async {
+    final db = await database;
+    final rows = await db.query('video_clips', columns: ['file_path']);
+    return rows.map((r) => r['file_path'] as String).toList();
+  }
+
+  /// File paths for clips belonging to sessions older than [days].
+  Future<List<String>> getVideoClipPathsOlderThan(int days) async {
+    final db = await database;
+    final cutoff = DateTime.now()
+        .toUtc()
+        .subtract(Duration(days: days))
+        .toIso8601String();
+    final rows = await db.rawQuery('''
+      SELECT vc.file_path
+      FROM video_clips vc
+      JOIN sessions s ON vc.session_id = s.id
+      WHERE s.started_at < ?
+    ''', [cutoff]);
+    return rows.map((r) => r['file_path'] as String).toList();
+  }
+
   // ── UTILITY ───────────────────────────────────────────────────────────────
 
   /// Called by settings_screen when user changes retention period.
@@ -697,7 +847,18 @@ class DatabaseHelper {
     final ids          = rows.map((r) => r['id'] as int).toList();
     final placeholders = ids.map((_) => '?').join(',');
 
+    // Collect video file paths before deleting rows
+    final clipRows = await db.rawQuery(
+      "SELECT file_path FROM video_clips WHERE session_id IN ($placeholders)",
+      ids,
+    );
+    final clipPaths = clipRows.map((r) => r['file_path'] as String).toList();
+
     await db.transaction((txn) async {
+      await txn.rawDelete(
+        "DELETE FROM video_clips WHERE session_id IN ($placeholders)",
+        ids,
+      );
       await txn.rawDelete(
         "DELETE FROM alertness_snapshots WHERE session_id IN ($placeholders)",
         ids,
@@ -719,6 +880,13 @@ class DatabaseHelper {
         ids,
       );
     });
+
+    for (final path in clipPaths) {
+      try {
+        final f = File(path);
+        if (await f.exists()) await f.delete();
+      } catch (_) {}
+    }
   }
 
   /// Alert count per session — used by history_screen to show alert badge.
@@ -734,16 +902,26 @@ class DatabaseHelper {
   }
 
   /// Called by settings_screen "Clear All History" button.
-  /// Wipes ALL data from ALL tables.
+  /// Wipes ALL data from ALL tables and deletes video files from disk.
   Future<void> clearAllData() async {
     final db = await database;
+    // Collect file paths before wiping the table
+    final paths = await getAllVideoClipPaths();
     await db.transaction((txn) async {
+      await txn.delete('video_clips');
       await txn.delete('alertness_snapshots');
       await txn.delete('system_logs');
       await txn.delete('alert_events');
       await txn.delete('state_counts');
       await txn.delete('sessions');
     });
+    // Delete files after DB is clean
+    for (final path in paths) {
+      try {
+        final f = File(path);
+        if (await f.exists()) await f.delete();
+      } catch (_) {}
+    }
   }
 
   Future<void> close() async {

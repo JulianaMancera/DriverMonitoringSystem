@@ -11,6 +11,7 @@ import '../core/inference/tflite_service.dart';
 import '../core/providers.dart';
 import '../core/services/notifications.dart';
 import '../core/services/pip_service.dart';
+import '../core/services/video_clip_service.dart';
 import '../core/services/head_pose_service.dart';
 import '../core/session_state.dart';
 import '../widgets/head_pose_indicator.dart';
@@ -32,59 +33,59 @@ class MonitorScreen extends ConsumerStatefulWidget {
 
 class _MonitorScreenState extends ConsumerState<MonitorScreen>
     with TickerProviderStateMixin, WidgetsBindingObserver {
-
   final GlobalKey _cameraKey = GlobalKey();
   CameraController? _cameraController;
   List<CameraDescription> _cameras = [];
-  bool    _cameraInitialized  = false;
+  bool _cameraInitialized = false;
   String? _cameraError;
-  bool    _camDisposing       = false;
-  bool    _cameraResuming     = false;
-  bool    _cameraReconnecting = false;
-  bool    _isInPipRecovery    = false;
-  bool    _pipResumeHandled   = false;
+  bool _camDisposing = false;
+  bool _cameraResuming = false;
+  bool _cameraReconnecting = false;
+  bool _isInPipRecovery = false;
+  bool _pipResumeHandled = false;
 
   StreamSubscription<Map<String, dynamic>>? _pipSubscription;
 
-  int?      _currentSessionId;
+  int? _currentSessionId;
   DateTime? _sessionStartTime;
-  Timer?    _snapshotTimer;
+  Timer? _snapshotTimer;
+  Timer? _sessionTimer;
+  int _sessionElapsedSec = 0;
 
-  int _consecutiveDrowsy     = 0;
+  int _consecutiveDrowsy = 0;
   int _consecutiveDistracted = 0;
-  int _alertLevel            = 0;
+  int _alertLevel = 0;
 
-  final List<Map<String, dynamic>> _systemLogs  = [];
+  final List<Map<String, dynamic>> _systemLogs = [];
   final List<Map<String, dynamic>> _pendingLogs = [];
 
   final AudioPlayer _audioPlayer = AudioPlayer();
   final AudioPlayer _alarmPlayer = AudioPlayer();
 
   late AnimationController _warningController;
-  late Animation<double>   _warningAnimation;
-  AnimationController?     _notifController;
-  Animation<Offset>?       _notifSlide;
-  Animation<double>?       _notifFade;
+  late Animation<double> _warningAnimation;
+  AnimationController? _notifController;
+  Animation<Offset>? _notifSlide;
+  Animation<double>? _notifFade;
 
-  int  _prefAlertSensitivity = 1;
-  bool _prefAutoStart        = false;
+  int _prefAlertSensitivity = 1;
+  bool _prefAutoStart = false;
 
   static const bool _mirrorCamera = false;
 
   static const Map<int, List<int>> _sensitivityThresholds = {
     0: [5, 10, 15],
-    1: [3,  6,  9],
-    2: [2,  4,  6],
+    1: [3, 6, 9],
+    2: [2, 4, 6],
   };
 
   bool _modelLoaded = false;
 
   // HEAD POSE — (roll in degrees, hasFace)
-  final ValueNotifier<(double, bool)> _headPose =
-      ValueNotifier((0.0, false));
+  final ValueNotifier<(double, bool)> _headPose = ValueNotifier((0.0, false));
   CameraImage? _latestFrame;
-  Timer?       _headPoseTimer;
-  bool         _isHeadPoseRunning = false;
+  Timer? _headPoseTimer;
+  bool _isHeadPoseRunning = false;
 
   // ── LIFECYCLE ────────────────────────────────────────────────────────────────
   @override
@@ -101,12 +102,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final nc = AnimationController(
         duration: const Duration(milliseconds: 550), vsync: this);
     _notifController = nc;
-    _notifSlide = Tween<Offset>(
-            begin: const Offset(0, -1.5), end: Offset.zero)
+    _notifSlide = Tween<Offset>(begin: const Offset(0, -1.5), end: Offset.zero)
         .animate(CurvedAnimation(parent: nc, curve: Curves.elasticOut));
-    _notifFade = Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(parent: nc,
-            curve: const Interval(0.0, 0.35, curve: Curves.easeIn)));
+    _notifFade = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(
+        parent: nc, curve: const Interval(0.0, 0.35, curve: Curves.easeIn)));
 
     _loadPreferencesAndInit();
     _activeMonitorState = this;
@@ -116,7 +115,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     _pipSubscription = PipService.pipEventStream.listen((event) {
       if (!mounted) return;
-      final type  = event['type'] as String?;
+      final type = event['type'] as String?;
       final value = event['value'];
       if (type == 'pip') {
         final inPip = value as bool;
@@ -146,6 +145,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     FlutterForegroundTask.removeTaskDataCallback(_onReceiveTaskData);
     WidgetsBinding.instance.removeObserver(this);
     _snapshotTimer?.cancel();
+    _sessionTimer?.cancel();
     _warningController.dispose();
     _notifController?.dispose();
     _pipSubscription?.cancel();
@@ -168,8 +168,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       _cameraController?.dispose();
     } catch (_) {}
     _cameraController = null;
-    try { _audioPlayer.dispose(); } catch (_) {}
-    try { _alarmPlayer.dispose(); } catch (_) {}
+    try {
+      _audioPlayer.dispose();
+    } catch (_) {}
+    try {
+      _alarmPlayer.dispose();
+    } catch (_) {}
     super.dispose();
   }
 
@@ -203,7 +207,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       return;
     }
 
-    if (!mounted && (_activeMonitorState == null || _activeMonitorState == this)) {
+    if (!mounted &&
+        (_activeMonitorState == null || _activeMonitorState == this)) {
       debugPrint('[Monitor] no mounted instance — stopping service only');
       BantayDriveService.stopService();
       PipService.setRecording(false);
@@ -216,7 +221,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       if (restored) {
         _currentSessionId = ActiveSession.sessionId;
         _sessionStartTime = ActiveSession.startTime;
-        debugPrint('[Monitor] restored sessionId from prefs: $_currentSessionId');
+        debugPrint(
+            '[Monitor] restored sessionId from prefs: $_currentSessionId');
       }
     }
 
@@ -250,7 +256,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       case AppLifecycleState.paused:
         if (ref.read(isRecordingProvider)) {
           if (mounted) ref.read(isInPipProvider.notifier).set(true);
-          _isInPipRecovery  = true;
+          _isInPipRecovery = true;
           _pipResumeHandled = false;
         } else {
           await _pauseCameraStream();
@@ -308,7 +314,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (!ref.read(isRecordingProvider)) return;
     if (_cameraResuming) return;
 
-    if (mounted) setState(() { _cameraResuming = true; _cameraReconnecting = true; });
+    if (mounted) {
+      setState(() {
+        _cameraResuming = true;
+        _cameraReconnecting = true;
+      });
+    }
 
     await Future.delayed(const Duration(milliseconds: 300));
 
@@ -319,9 +330,15 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         await _cameraController!.startImageStream(_onCameraFrame);
       }
       _isInPipRecovery = false;
-      if (mounted) setState(() { _cameraResuming = false; _cameraReconnecting = false; });
+      if (mounted) {
+        setState(() {
+          _cameraResuming = false;
+          _cameraReconnecting = false;
+        });
+      }
     } catch (e) {
-      debugPrint('[Camera] startImageStream during recovery: $e — waiting for CameraX');
+      debugPrint(
+          '[Camera] startImageStream during recovery: $e — waiting for CameraX');
       if (mounted) setState(() => _cameraResuming = false);
       Future.delayed(const Duration(milliseconds: 800), () async {
         if (!mounted || _camDisposing || _cameraController == null) return;
@@ -344,7 +361,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   Future<void> _loadPreferencesAndInit() async {
     final prefs = PreferencesHelper.instance;
     _prefAlertSensitivity = await prefs.getAlertSensitivity();
-    _prefAutoStart        = await prefs.getAutoStart();
+    _prefAutoStart = await prefs.getAutoStart();
     final success = await TfliteService.instance.initialize();
     if (mounted) setState(() => _modelLoaded = success);
     if (!await _ensureCameraPermission()) return;
@@ -366,8 +383,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         barrierDismissible: false,
         builder: (_) => AlertDialog(
           backgroundColor: const Color(0xFF0f172a),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Text('Camera Access Needed',
               style: TextStyle(color: Colors.white)),
           content: const Text(
@@ -405,8 +422,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: const Color(0xFF0f172a),
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Camera Permission Required',
             style: TextStyle(color: Colors.white)),
         content: const Text(
@@ -459,7 +475,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       await _cameraController!.initialize();
 
       if (!mounted || _camDisposing) return;
-      setState(() { _cameraInitialized = true; _cameraError = null; });
+      setState(() {
+        _cameraInitialized = true;
+        _cameraError = null;
+      });
 
       HeadPoseService.instance.init(cam.sensorOrientation);
       _startHeadPoseUpdates();
@@ -483,8 +502,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       if (_currentSessionId != null) {
         DatabaseHelper.instance.insertSystemLog(
           sessionId: _currentSessionId!,
-          message:   entry['message'] as String,
-          logType:   entry['type'] as String,
+          message: entry['message'] as String,
+          logType: entry['type'] as String,
         );
       }
     }
@@ -538,15 +557,15 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       if (!proceed || !mounted) return;
     }
 
-    _currentSessionId      = await DatabaseHelper.instance.insertSession();
+    _currentSessionId = await DatabaseHelper.instance.insertSession();
     await DatabaseHelper.instance.insertStateCount(_currentSessionId!);
-    _sessionStartTime      = DateTime.now();
+    _sessionStartTime = DateTime.now();
     await ActiveSession.start(_currentSessionId!);
 
-    _consecutiveDrowsy     = 0;
+    _consecutiveDrowsy = 0;
     _consecutiveDistracted = 0;
-    _alertLevel            = 0;
-    _isStopping            = false; // reset guard in case it got stuck
+    _alertLevel = 0;
+    _isStopping = false; // reset guard in case it got stuck
     TfliteService.instance.resetSession();
 
     if (_cameraInitialized && _modelLoaded && !_camDisposing) {
@@ -575,6 +594,17 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     _snapshotTimer = Timer.periodic(
         const Duration(seconds: 5), (_) => _saveAlertnessSnapshot());
+
+    _sessionElapsedSec = 0;
+    _sessionTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && _sessionStartTime != null) {
+        setState(() {
+          _sessionElapsedSec =
+              DateTime.now().difference(_sessionStartTime!).inSeconds;
+        });
+      }
+    });
+
     ref.read(dbChangeCounterProvider.notifier).increment();
   }
 
@@ -607,11 +637,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // The double-call happens when the Stop button is tapped AND the notification
   // stop button fires at the same time (both call _stopRecording).
   bool _isStopping = false;
+  bool _isCapturingClip = false;
 
   Future<void> _stopRecording() async {
     // Prevent double-call: if already stopping, bail immediately
     if (_isStopping) {
-      debugPrint('[Monitor] _stopRecording called while already stopping — ignoring');
+      debugPrint(
+          '[Monitor] _stopRecording called while already stopping — ignoring');
       return;
     }
     _isStopping = true;
@@ -634,6 +666,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       }
 
       _snapshotTimer?.cancel();
+      _sessionTimer?.cancel();
+      _sessionTimer = null;
+      if (mounted) setState(() => _sessionElapsedSec = 0);
 
       await _saveAlertnessSnapshot();
 
@@ -642,21 +677,23 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       _alertLevel = _consecutiveDrowsy = _consecutiveDistracted = 0;
 
       final durationSec = _sessionStartTime != null
-          ? DateTime.now().difference(_sessionStartTime!).inSeconds : 0;
+          ? DateTime.now().difference(_sessionStartTime!).inSeconds
+          : 0;
 
       final snapshots = await DatabaseHelper.instance
           .getAlertnessSnapshots(_currentSessionId!);
-      final alertness = _computeAlertnessAvg(snapshots, ref.read(alertnessPctProvider));
+      final alertness =
+          _computeAlertnessAvg(snapshots, ref.read(alertnessPctProvider));
 
       final alerts =
           await DatabaseHelper.instance.getAlertsBySession(_currentSessionId!);
       final safetyScore = _computeSafetyScore(alerts, durationSec);
 
       await DatabaseHelper.instance.endSession(
-        sessionId:    _currentSessionId!,
-        durationSec:  durationSec,
+        sessionId: _currentSessionId!,
+        durationSec: durationSec,
         alertnessAvg: alertness,
-        safetyScore:  safetyScore,
+        safetyScore: safetyScore,
       );
 
       debugPrint('[Monitor] Session $_currentSessionId ended — '
@@ -675,10 +712,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       _currentSessionId = null;
       _sessionStartTime = null;
       _pipResumeHandled = false;
-      _isInPipRecovery  = false;
+      _isInPipRecovery = false;
 
-      final drowsyAlerts     = alerts.where((a) => a['alert_type'] == 'DROWSY').length;
-      final distractedAlerts = alerts.where((a) => a['alert_type'] == 'DISTRACTED').length;
+      final drowsyAlerts =
+          alerts.where((a) => a['alert_type'] == 'DROWSY').length;
+      final distractedAlerts =
+          alerts.where((a) => a['alert_type'] == 'DISTRACTED').length;
 
       ref.read(isRecordingProvider.notifier).set(false);
       ref.read(driverStateProvider.notifier).set('neutral');
@@ -696,9 +735,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             await PreferencesHelper.instance.getShowSessionSummary();
         if (mounted && showSummary) {
           _showSessionSummaryModal(
-            durationSec:      durationSec,
-            safetyScore:      safetyScore,
-            drowsyAlerts:     drowsyAlerts,
+            durationSec: durationSec,
+            safetyScore: safetyScore,
+            drowsyAlerts: drowsyAlerts,
             distractedAlerts: distractedAlerts,
           );
         }
@@ -709,21 +748,21 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   void _showSessionSummaryModal({
-    required int    durationSec,
+    required int durationSec,
     required double safetyScore,
-    required int    drowsyAlerts,
-    required int    distractedAlerts,
+    required int drowsyAlerts,
+    required int distractedAlerts,
   }) {
     showModalBottomSheet(
-      context:             context,
-      isScrollControlled:  true,
-      backgroundColor:     Colors.transparent,
-      barrierColor:        Colors.black.withValues(alpha: 0.6),
-      enableDrag:          true,
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.6),
+      enableDrag: true,
       builder: (_) => _SessionSummaryModal(
-        durationSec:      durationSec,
-        safetyScore:      safetyScore,
-        drowsyAlerts:     drowsyAlerts,
+        durationSec: durationSec,
+        safetyScore: safetyScore,
+        drowsyAlerts: drowsyAlerts,
         distractedAlerts: distractedAlerts,
       ),
     );
@@ -743,13 +782,16 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       if (result != null && mounted && ref.read(isRecordingProvider)) {
         onModelOutput(result);
       }
-    }).catchError((_) { _isInferring = false; });
+    }).catchError((_) {
+      _isInferring = false;
+    });
   }
 
   // ── HEAD POSE UPDATES ─────────────────────────────────────────────────────────
   void _startHeadPoseUpdates() {
     _headPoseTimer?.cancel();
-    _headPoseTimer = Timer.periodic(const Duration(milliseconds: 100), (_) async {
+    _headPoseTimer =
+        Timer.periodic(const Duration(milliseconds: 100), (_) async {
       final frame = _latestFrame;
       if (frame == null || _isHeadPoseRunning || _camDisposing) return;
       _isHeadPoseRunning = true;
@@ -763,11 +805,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
         if (result != null) {
           TfliteService.instance.updateFaceData(
-            earL:       result.earL,
-            earR:       result.earR,
-            mar:        result.mar,
-            pitch:      result.pitch,
-            yaw:        result.yaw,
+            earL: result.earL,
+            earR: result.earR,
+            mar: result.mar,
+            pitch: result.pitch,
+            yaw: result.yaw,
             rollEulerZ: result.roll,
           );
         }
@@ -816,8 +858,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(activeSubclassIndexProvider.notifier).set(r.subclassIndex);
 
     if (_currentSessionId != null) {
-      DatabaseHelper.instance.incrementStateCount(
-          sessionId: _currentSessionId!, state: r.state);
+      DatabaseHelper.instance
+          .incrementStateCount(sessionId: _currentSessionId!, state: r.state);
     }
 
     switch (r.state) {
@@ -825,8 +867,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         _consecutiveDrowsy++;
         _consecutiveDistracted = (_consecutiveDistracted - 1).clamp(0, 999);
         _addLogSync(
-          '[${modelSourceLabel(r.modelSource)}] '
-          '${r.subclass} — ${r.drowsyPct.toInt()}% drowsy', 'WARNING');
+            '[${modelSourceLabel(r.modelSource)}] '
+                '${r.subclass} — ${r.drowsyPct.toInt()}% drowsy',
+            'WARNING');
         _checkAndTriggerAlert('DROWSY', _consecutiveDrowsy);
         BantayDriveService.updateState('drowsy');
         break;
@@ -834,19 +877,22 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         _consecutiveDistracted++;
         _consecutiveDrowsy = (_consecutiveDrowsy - 1).clamp(0, 999);
         _addLogSync(
-          '[${modelSourceLabel(r.modelSource)}] '
-          '${r.subclass} — ${r.distractedPct.toInt()}% distracted', 'WARNING');
+            '[${modelSourceLabel(r.modelSource)}] '
+                '${r.subclass} — ${r.distractedPct.toInt()}% distracted',
+            'WARNING');
         _checkAndTriggerAlert('DISTRACTED', _consecutiveDistracted);
         BantayDriveService.updateState('distracted');
         break;
       default:
-        _consecutiveDrowsy     = (_consecutiveDrowsy     - 1).clamp(0, 999);
+        _consecutiveDrowsy = (_consecutiveDrowsy - 1).clamp(0, 999);
         _consecutiveDistracted = (_consecutiveDistracted - 1).clamp(0, 999);
         // Only clear an active L1/L2 alert once both counters drop below the
         // L1 threshold. A single neutral frame during borderline drowsiness was
         // previously zeroing _alertLevel immediately, making L2/L3 unreachable.
-        final thresholds = _sensitivityThresholds[_prefAlertSensitivity] ?? [3, 6, 9];
-        if (_alertLevel > 0 && _alertLevel < 3 &&
+        final thresholds =
+            _sensitivityThresholds[_prefAlertSensitivity] ?? [3, 6, 9];
+        if (_alertLevel > 0 &&
+            _alertLevel < 3 &&
             _consecutiveDrowsy < thresholds[0] &&
             _consecutiveDistracted < thresholds[0]) {
           _alertLevel = 0;
@@ -878,13 +924,18 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     ref.read(alertBannerTypeProvider.notifier).set(type);
     if (newLevel < 3) _notifController?.forward(from: 0.0);
 
+    if (_currentSessionId != null && newLevel >= 2) {
+      _saveVideoClip(type, newLevel);
+    }
+
     if (_currentSessionId != null) {
       await DatabaseHelper.instance.insertAlertEvent(
           sessionId: _currentSessionId!, alertType: type, alertLevel: newLevel);
       _addLogSync(
-        'ALERT Level $newLevel — '
-        '${type == 'DROWSY' ? 'Drowsiness' : 'Distraction'} '
-        '($consecutive consecutive frames)', 'WARNING');
+          'ALERT Level $newLevel — '
+              '${type == 'DROWSY' ? 'Drowsiness' : 'Distraction'} '
+              '($consecutive consecutive frames)',
+          'WARNING');
       ref.read(dbChangeCounterProvider.notifier).increment();
     }
     await _playAlertSound(newLevel);
@@ -913,9 +964,97 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   Future<void> _saveAlertnessSnapshot() async {
     if (_currentSessionId == null) return;
     await DatabaseHelper.instance.insertAlertnessSnapshot(
-        sessionId:    _currentSessionId!,
+        sessionId: _currentSessionId!,
         alertnessPct: ref.read(alertnessPctProvider).clamp(0.0, 100.0));
     if (mounted) ref.read(dbChangeCounterProvider.notifier).increment();
+  }
+
+  Future<void> _saveVideoClip(String alertType, int alertLevel) async {
+    if (_currentSessionId == null) return;
+    if (_isCapturingClip) return;
+    if (_cameraController == null || !_cameraController!.value.isInitialized) {
+      return;
+    }
+    if (_camDisposing) return;
+
+    final sessionId = _currentSessionId!;
+    _isCapturingClip = true;
+
+    // startVideoRecording and startImageStream are mutually exclusive, so we
+    // alternate: record a chunk → save it → briefly resume inference to check
+    // if the alert is still active → repeat until clear or 3-min cap.
+    // Each chunk is saved as its own clip entry so its file length always
+    // matches the displayed duration.
+    const chunkDuration    = Duration(seconds: 10);
+    const inferenceWindow  = Duration(milliseconds: 1000);
+    const maxTotalDuration = Duration(minutes: 3);
+    final clipStart        = DateTime.now();
+
+    try {
+      bool keepRecording = true;
+
+      while (keepRecording) {
+        if (_camDisposing || !ref.read(isRecordingProvider)) break;
+        if (DateTime.now().difference(clipStart) >= maxTotalDuration) break;
+
+        if (_cameraController!.value.isStreamingImages) {
+          await _cameraController!.stopImageStream();
+        }
+
+        await _cameraController!.startVideoRecording();
+        await Future.delayed(chunkDuration);
+
+        if (_camDisposing) {
+          try { await _cameraController!.stopVideoRecording(); } catch (_) {}
+          break;
+        }
+
+        final XFile videoFile = await _cameraController!.stopVideoRecording();
+
+        final savedPath = await VideoClipService.saveClip(
+          sourcePath: videoFile.path,
+          sessionId: sessionId,
+        );
+        if (savedPath != null && mounted) {
+          await DatabaseHelper.instance.insertVideoClip(
+            sessionId: sessionId,
+            filePath: savedPath,
+            alertTypes: alertType,
+            durationSec: chunkDuration.inSeconds,
+          );
+          ref.read(dbChangeCounterProvider.notifier).increment();
+        }
+
+        // Brief inference window: check whether the alert is still active.
+        if (!_camDisposing && ref.read(isRecordingProvider)) {
+          try {
+            await _cameraController!.startImageStream(_onCameraFrame);
+            await Future.delayed(inferenceWindow);
+            if (_cameraController!.value.isStreamingImages) {
+              await _cameraController!.stopImageStream();
+            }
+          } catch (e) {
+            debugPrint('[VideoClip] inference check error: $e');
+            keepRecording = false;
+            break;
+          }
+          keepRecording = _alertLevel > 0;
+        } else {
+          keepRecording = false;
+        }
+      }
+    } catch (e) {
+      debugPrint('[VideoClip] _saveVideoClip error: $e');
+    } finally {
+      if (!_camDisposing && ref.read(isRecordingProvider)) {
+        try {
+          if (!_cameraController!.value.isStreamingImages) {
+            await _cameraController!.startImageStream(_onCameraFrame);
+          }
+        } catch (_) {}
+      }
+      _isCapturingClip = false;
+    }
   }
 
   // ── BUILD ────────────────────────────────────────────────────────────────────
@@ -931,18 +1070,19 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     final showAlert = ref.watch(showAlertBannerProvider);
     final alertType = ref.watch(alertBannerTypeProvider);
-    final isLevel3  = _alertLevel == 3;
+    final isLevel3 = _alertLevel == 3;
 
     return ColoredBox(
       color: const Color(0xFF080E1A),
       child: Stack(children: [
         SafeArea(bottom: false, child: _buildPortraitLayout()),
-
         if (showAlert && !isLevel3)
-          Positioned(top: 0, left: 0, right: 0,
-            child: SafeArea(bottom: false,
-                child: _buildAlertBanner(alertType))),
-
+          Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child:
+                  SafeArea(bottom: false, child: _buildAlertBanner(alertType))),
         if (showAlert && isLevel3)
           Positioned.fill(child: _buildWarningOverlay(alertType)),
       ]),
@@ -961,8 +1101,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             Icon(Icons.stop_circle_outlined, color: Colors.white54, size: 28),
             SizedBox(height: 6),
             Text('Monitoring Stopped',
-                style: TextStyle(color: Colors.white,
-                    fontSize: 11, fontWeight: FontWeight.bold)),
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold)),
             SizedBox(height: 4),
             Text('Tap here to close',
                 style: TextStyle(color: Colors.white54, fontSize: 9)),
@@ -972,50 +1114,56 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
 
     final driverState = ref.watch(driverStateProvider);
-    final showAlert   = ref.watch(showAlertBannerProvider);
-    final alertType   = ref.watch(alertBannerTypeProvider);
+    final showAlert = ref.watch(showAlertBannerProvider);
+    final alertType = ref.watch(alertBannerTypeProvider);
 
     final String stateLabel = switch (driverState) {
-      'drowsy'     => 'Drowsy Detected',
+      'drowsy' => 'Drowsy Detected',
       'distracted' => 'Distracted',
-      _            => 'Alert',
+      _ => 'Alert',
     };
     final alertColor = alertType == 'DROWSY' ? Colors.orange : Colors.red;
 
     return ColoredBox(
       color: Colors.black,
       child: Stack(fit: StackFit.expand, children: [
-
-        if (_cameraInitialized && !_camDisposing && _cameraController != null &&
+        if (_cameraInitialized &&
+            !_camDisposing &&
+            _cameraController != null &&
             _cameraController!.value.isInitialized)
           Positioned.fill(
             child: FittedBox(
               fit: BoxFit.cover,
               clipBehavior: Clip.hardEdge,
               child: SizedBox(
-                width:  _cameraController!.value.previewSize?.height ?? 480,
-                height: _cameraController!.value.previewSize?.width  ?? 640,
+                width: _cameraController!.value.previewSize?.height ?? 480,
+                height: _cameraController!.value.previewSize?.width ?? 640,
                 child: CameraPreview(_cameraController!),
               ),
             ),
           ),
-
         Positioned(
-          bottom: 0, left: 0, right: 0,
+          bottom: 0,
+          left: 0,
+          right: 0,
           child: Container(
             height: 48,
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                begin: Alignment.bottomCenter, end: Alignment.topCenter,
-                colors: [Colors.black.withValues(alpha: 0.85), Colors.transparent],
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: [
+                  Colors.black.withValues(alpha: 0.85),
+                  Colors.transparent
+                ],
               ),
             ),
           ),
         ),
-
         if (isRecording)
           Positioned(
-            top: 6, left: 6,
+            top: 6,
+            left: 6,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
               decoration: BoxDecoration(
@@ -1025,15 +1173,19 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               child: const Row(mainAxisSize: MainAxisSize.min, children: [
                 Icon(Icons.circle, color: Colors.white, size: 5),
                 SizedBox(width: 3),
-                Text('REC', style: TextStyle(
-                    color: Colors.white, fontSize: 9,
-                    fontWeight: FontWeight.bold, letterSpacing: 1.0)),
+                Text('REC',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.0)),
               ]),
             ),
           ),
-
         Positioned(
-          bottom: 6, left: 6, right: 6,
+          bottom: 6,
+          left: 6,
+          right: 6,
           child: Center(
             child: Container(
               constraints: const BoxConstraints(maxWidth: 140),
@@ -1046,14 +1198,20 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               ),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
                 Icon(
-                  showAlert ? Icons.warning_amber_rounded
-                      : Icons.check_circle_outline_rounded,
-                  color: Colors.white, size: 11),
+                    showAlert
+                        ? Icons.warning_amber_rounded
+                        : Icons.check_circle_outline_rounded,
+                    color: Colors.white,
+                    size: 11),
                 const SizedBox(width: 4),
-                Flexible(child: Text(stateLabel,
-                    style: const TextStyle(color: Colors.white, fontSize: 10,
-                        fontWeight: FontWeight.bold),
-                    overflow: TextOverflow.ellipsis, maxLines: 1)),
+                Flexible(
+                    child: Text(stateLabel,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1)),
               ]),
             ),
           ),
@@ -1064,31 +1222,31 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   // ── LAYOUTS ──────────────────────────────────────────────────────────────────
   Widget _buildPortraitLayout() => LayoutBuilder(
-      builder: (context, constraints) {
-        final availH = constraints.maxHeight;
-        final camH = availH * (context.isSmallPhone ? 0.50 : 0.52);
+        builder: (context, constraints) {
+          final availH = constraints.maxHeight;
+          final camH = availH * (context.isSmallPhone ? 0.50 : 0.52);
 
-        return SingleChildScrollView(
-          physics: const NeverScrollableScrollPhysics(),
-          child: SizedBox(
-            height: availH,
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: context.rp(14)),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(height: context.rs(20)),
-                  _buildCameraWithOverlay(height: camH),
-                  SizedBox(height: context.rs(10)),
-                  _buildMetricsSidebar(),
-                  SizedBox(height: context.rs(14)),
-                ],
+          return SingleChildScrollView(
+            physics: const NeverScrollableScrollPhysics(),
+            child: SizedBox(
+              height: availH,
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: context.rp(14)),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(height: context.rs(20)),
+                    _buildCameraWithOverlay(height: camH),
+                    SizedBox(height: context.rs(10)),
+                    _buildMetricsSidebar(),
+                    SizedBox(height: context.rs(14)),
+                  ],
+                ),
               ),
             ),
-          ),
-        );
-      },
-    );
+          );
+        },
+      );
 
   Widget _buildCameraChild(double camW, double camH) {
     final ctrl = _cameraController;
@@ -1100,14 +1258,15 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (canShow) {
       return Stack(children: [
         CameraPreview(key: _cameraKey, ctrl),
-
         if (_cameraReconnecting)
           Positioned.fill(
             child: Container(
               color: Colors.black.withValues(alpha: 0.55),
-              child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+              child: Center(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
                 const SizedBox(
-                  width: 24, height: 24,
+                  width: 24,
+                  height: 24,
                   child: CircularProgressIndicator(
                       color: Color(0xFF22d3ee), strokeWidth: 2),
                 ),
@@ -1133,7 +1292,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
     double camAspect;
     final ctrl = _cameraController;
-    if (_cameraInitialized && ctrl != null &&
+    if (_cameraInitialized &&
+        ctrl != null &&
         ctrl.value.isInitialized &&
         ctrl.value.previewSize != null) {
       final ps = ctrl.value.previewSize!;
@@ -1148,19 +1308,23 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         final boxH = constraints.maxHeight;
         double camW, camH;
         if (boxW / boxH > camAspect) {
-          camW = boxW; camH = boxW / camAspect;
+          camW = boxW;
+          camH = boxW / camAspect;
         } else {
-          camH = boxH; camW = boxH * camAspect;
+          camH = boxH;
+          camW = boxH * camAspect;
         }
         return ClipRect(
           child: OverflowBox(
-            maxWidth: camW, maxHeight: camH,
+            maxWidth: camW,
+            maxHeight: camH,
             child: Transform(
               alignment: Alignment.center,
-              transform: Matrix4.diagonal3Values(
-                  _mirrorCamera ? -1.0 : 1.0, 1.0, 1.0),
+              transform:
+                  Matrix4.diagonal3Values(_mirrorCamera ? -1.0 : 1.0, 1.0, 1.0),
               child: SizedBox(
-                width: camW, height: camH,
+                width: camW,
+                height: camH,
                 child: _buildCameraChild(camW, camH),
               ),
             ),
@@ -1174,7 +1338,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       child: Stack(fit: StackFit.expand, children: [
         cameraWidget,
         _buildGradientOverlay(),
-
         SafeArea(
           child: Stack(fit: StackFit.expand, children: [
             if (isRecording) _buildRecBadge(),
@@ -1195,29 +1358,51 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   ),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
                     Container(
-                      width: context.ri(6), height: context.ri(6),
-                      decoration: const BoxDecoration(
-                          color: Colors.white, shape: BoxShape.circle)),
+                        width: context.ri(6),
+                        height: context.ri(6),
+                        decoration: const BoxDecoration(
+                            color: Colors.white, shape: BoxShape.circle)),
                     SizedBox(width: context.rp(4)),
                     Text(_modelLoaded ? 'AI ON' : 'DEMO',
                         style: TextStyle(
-                            color: Colors.white, fontSize: context.sp(9),
-                            fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+                            color: Colors.white,
+                            fontSize: context.sp(9),
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.8)),
                   ]),
                 ),
               ),
 
             // Head pose indicator — always visible when camera is active
-            if (!ref.watch(isInPipProvider) && _cameraInitialized && !_camDisposing)
+            if (!ref.watch(isInPipProvider) &&
+                _cameraInitialized &&
+                !_camDisposing)
               Positioned(
                 bottom: context.rs(58),
                 right: context.rp(10),
                 child: ValueListenableBuilder<(double, bool)>(
                   valueListenable: _headPose,
                   builder: (_, pose, __) {
-                    final roll    = pose.$1;
+                    final roll = pose.$1;
                     final hasFace = pose.$2;
-                    final inRed   = _isInRedZone(roll, hasFace);
+                    final inRed = _isInRedZone(roll, hasFace);
+
+                    final String statusLabel;
+                    final Color statusColor;
+                    if (!hasFace) {
+                      statusLabel = 'No Face';
+                      statusColor = Colors.white38;
+                    } else if (inRed) {
+                      statusLabel = 'Reposition';
+                      statusColor = const Color(0xFFef4444);
+                    } else if (roll.abs() >= 30) {
+                      statusLabel = 'Angle OK';
+                      statusColor = const Color(0xFFfbbf24);
+                    } else {
+                      statusLabel = 'Aligned';
+                      statusColor = const Color(0xFF22c55e);
+                    }
+
                     return Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.center,
@@ -1226,10 +1411,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                           Container(
                             margin: EdgeInsets.only(bottom: context.rs(4)),
                             padding: EdgeInsets.symmetric(
-                                horizontal: context.rp(6), vertical: context.rs(3)),
+                                horizontal: context.rp(6),
+                                vertical: context.rs(3)),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFef4444).withValues(alpha: 0.92),
-                              borderRadius: BorderRadius.circular(context.rp(6)),
+                              color: const Color(0xFFef4444)
+                                  .withValues(alpha: 0.92),
+                              borderRadius:
+                                  BorderRadius.circular(context.rp(6)),
                             ),
                             child: Text(
                               'Camera position not\nsuitable for detection',
@@ -1242,9 +1430,28 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                             ),
                           ),
                         HeadPoseIndicator(
-                          roll:    roll,
+                          roll: roll,
                           hasFace: hasFace,
-                          size:    75,
+                          size: 75,
+                        ),
+                        SizedBox(height: context.rs(4)),
+                        Container(
+                          padding: EdgeInsets.symmetric(
+                              horizontal: context.rp(6),
+                              vertical: context.rs(2)),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.45),
+                            borderRadius: BorderRadius.circular(context.rp(4)),
+                          ),
+                          child: Text(
+                            statusLabel,
+                            style: TextStyle(
+                              color: statusColor,
+                              fontSize: context.sp(8),
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
                         ),
                       ],
                     );
@@ -1255,7 +1462,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             if (!ref.watch(isInPipProvider))
               Positioned(
                 bottom: context.rs(12),
-                left: 0, right: 0,
+                left: 0,
+                right: 0,
                 child: Center(
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(context.rp(24)),
@@ -1265,18 +1473,23 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                         padding: EdgeInsets.symmetric(
                             horizontal: context.rp(5), vertical: context.rs(5)),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF0f172a).withValues(alpha: 0.65),
+                          color:
+                              const Color(0xFF0f172a).withValues(alpha: 0.65),
                           borderRadius: BorderRadius.circular(context.rp(24)),
                           border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.08), width: 1),
+                              color: Colors.white.withValues(alpha: 0.08),
+                              width: 1),
                         ),
                         child: _CameraOverlayButton(
                           icon: isRecording
-                              ? Icons.stop_circle : Icons.fiber_manual_record,
+                              ? Icons.stop_circle
+                              : Icons.fiber_manual_record,
                           label: isRecording ? 'Stop' : 'Record',
-                          isActive: isRecording, activeColor: Colors.red,
+                          isActive: isRecording,
+                          activeColor: Colors.red,
                           onTap: () => isRecording
-                              ? _stopRecording() : _startRecording(),
+                              ? _stopRecording()
+                              : _startRecording(),
                         ),
                       ),
                     ),
@@ -1289,7 +1502,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     );
 
     return Container(
-      height: height, width: double.infinity,
+      height: height,
+      width: double.infinity,
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.all(Radius.circular(context.rp(18))),
@@ -1304,31 +1518,34 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     if (_cameraError != null) {
       return Container(
         color: Colors.black,
-        child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        child: Center(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.videocam_off,
               color: const Color(0xFF64748b), size: context.ri(44)),
           SizedBox(height: context.rs(12)),
           Text(_cameraError!,
-              style: TextStyle(color: const Color(0xFF64748b),
-                  fontSize: context.sp(12)),
+              style: TextStyle(
+                  color: const Color(0xFF64748b), fontSize: context.sp(12)),
               textAlign: TextAlign.center),
           SizedBox(height: context.rs(12)),
           TextButton(
               onPressed: _initCamera,
               child: Text('Retry',
-                  style: TextStyle(color: const Color(0xFF22d3ee),
+                  style: TextStyle(
+                      color: const Color(0xFF22d3ee),
                       fontSize: context.sp(13)))),
         ])),
       );
     }
     return ColoredBox(
       color: Colors.black,
-      child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+      child: Center(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
         const CircularProgressIndicator(color: Color(0xFF22d3ee)),
         SizedBox(height: context.rs(12)),
         Text('Initializing camera...',
-            style: TextStyle(color: const Color(0xFF64748b),
-                fontSize: context.sp(12))),
+            style: TextStyle(
+                color: const Color(0xFF64748b), fontSize: context.sp(12))),
       ])),
     );
   }
@@ -1337,16 +1554,28 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         child: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              begin: Alignment.topCenter, end: Alignment.bottomCenter,
-              colors: [Colors.transparent,
-                  const Color(0xFF0f172a).withValues(alpha: 0.5)],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.transparent,
+                const Color(0xFF0f172a).withValues(alpha: 0.5)
+              ],
             ),
           ),
         ),
       );
 
-  Widget _buildRecBadge() =>
-      Positioned(
+  String _formatDuration(int seconds) {
+    final h = seconds ~/ 3600;
+    final m = (seconds % 3600) ~/ 60;
+    final s = seconds % 60;
+    if (h > 0) {
+      return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    }
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  Widget _buildRecBadge() => Positioned(
         top: context.rs(10),
         right: context.rp(10),
         child: Container(
@@ -1357,22 +1586,39 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               borderRadius: BorderRadius.circular(context.rp(16))),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Container(
-              width: context.ri(7), height: context.ri(7),
-              decoration: const BoxDecoration(
-                  color: Colors.white, shape: BoxShape.circle)),
+                width: context.ri(7),
+                height: context.ri(7),
+                decoration: const BoxDecoration(
+                    color: Colors.white, shape: BoxShape.circle)),
             SizedBox(width: context.rp(5)),
-            Text('REC', style: TextStyle(
-                color: Colors.white, fontSize: context.sp(10),
-                fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+            Text('REC',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: context.sp(10),
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2)),
+            Container(
+              width: 1,
+              height: context.rs(10),
+              color: Colors.white38,
+              margin: EdgeInsets.symmetric(horizontal: context.rp(6)),
+            ),
+            Text(
+              _formatDuration(_sessionElapsedSec),
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: context.sp(10),
+                  fontWeight: FontWeight.w600),
+            ),
           ]),
         ),
       );
 
   // ── ALERT BANNER — L1/L2 ────────────────────────────────────────────────────
   Widget _buildAlertBanner(String type) {
-    final isDrowsy  = type == 'DROWSY';
+    final isDrowsy = type == 'DROWSY';
     final slideAnim = _notifSlide ?? AlwaysStoppedAnimation(Offset.zero);
-    final fadeAnim  = _notifFade  ?? const AlwaysStoppedAnimation(1.0);
+    final fadeAnim = _notifFade ?? const AlwaysStoppedAnimation(1.0);
 
     return SlideTransition(
       position: slideAnim,
@@ -1398,11 +1644,15 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       color: Colors.red.withValues(alpha: 0.25 + 0.35 * pulse),
                       width: 1.2),
                   boxShadow: [
-                    BoxShadow(color: Colors.black.withValues(alpha: 0.55),
-                        blurRadius: 28, offset: const Offset(0, 8)),
                     BoxShadow(
-                        color: Colors.red.withValues(alpha: 0.12 + 0.18 * pulse),
-                        blurRadius: 20, spreadRadius: 1,
+                        color: Colors.black.withValues(alpha: 0.55),
+                        blurRadius: 28,
+                        offset: const Offset(0, 8)),
+                    BoxShadow(
+                        color:
+                            Colors.red.withValues(alpha: 0.12 + 0.18 * pulse),
+                        blurRadius: 20,
+                        spreadRadius: 1,
                         offset: const Offset(0, 2)),
                   ],
                 ),
@@ -1415,45 +1665,60 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                           horizontal: context.rp(12), vertical: context.rs(10)),
                       child: Row(children: [
                         Container(
-                          width: context.ri(40), height: context.ri(40),
+                          width: context.ri(40),
+                          height: context.ri(40),
                           decoration: BoxDecoration(
                             color: Colors.red.shade800,
                             borderRadius: BorderRadius.circular(context.rp(10)),
-                            boxShadow: [BoxShadow(
-                                color: Colors.red.withValues(alpha: 0.3 + 0.4 * pulse),
-                                blurRadius: 14, spreadRadius: 1)],
+                            boxShadow: [
+                              BoxShadow(
+                                  color: Colors.red
+                                      .withValues(alpha: 0.3 + 0.4 * pulse),
+                                  blurRadius: 14,
+                                  spreadRadius: 1)
+                            ],
                           ),
                           child: Icon(Icons.warning_amber_rounded,
                               color: Colors.white, size: context.ri(22)),
                         ),
                         SizedBox(width: context.rp(10)),
-                        Expanded(child: Column(
+                        Expanded(
+                            child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text('BANTAY DRIVE', style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.45),
-                                    fontSize: context.sp(10),
-                                    fontWeight: FontWeight.w600,
-                                    letterSpacing: 0.8)),
-                                Text('now', style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.35),
-                                    fontSize: context.sp(10))),
+                                Text('BANTAY DRIVE',
+                                    style: TextStyle(
+                                        color: Colors.white
+                                            .withValues(alpha: 0.45),
+                                        fontSize: context.sp(10),
+                                        fontWeight: FontWeight.w600,
+                                        letterSpacing: 0.8)),
+                                Text('now',
+                                    style: TextStyle(
+                                        color: Colors.white
+                                            .withValues(alpha: 0.35),
+                                        fontSize: context.sp(10))),
                               ],
                             ),
                             SizedBox(height: context.rs(3)),
-                            Text(isDrowsy ? 'Drowsiness Detected' : 'Distraction Detected',
-                                style: TextStyle(color: Colors.white,
+                            Text(
+                                isDrowsy
+                                    ? 'Drowsiness Detected'
+                                    : 'Distraction Detected',
+                                style: TextStyle(
+                                    color: Colors.white,
                                     fontSize: context.sp(14),
                                     fontWeight: FontWeight.w700,
                                     letterSpacing: 0.2)),
                             SizedBox(height: context.rs(2)),
-                            Text(isDrowsy
-                                ? 'Stay alert — tap to dismiss'
-                                : 'Focus on the road — tap to dismiss',
+                            Text(
+                                isDrowsy
+                                    ? 'Stay alert — tap to dismiss'
+                                    : 'Focus on the road — tap to dismiss',
                                 style: TextStyle(
                                     color: Colors.white.withValues(alpha: 0.5),
                                     fontSize: context.sp(11))),
@@ -1461,7 +1726,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                         )),
                         SizedBox(width: context.rp(6)),
                         Container(
-                          width: context.ri(20), height: context.ri(20),
+                          width: context.ri(20),
+                          height: context.ri(20),
                           decoration: BoxDecoration(
                               color: Colors.white.withValues(alpha: 0.1),
                               shape: BoxShape.circle),
@@ -1491,43 +1757,59 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           animation: _warningAnimation,
           builder: (context, _) {
             final pulse = _warningAnimation.value;
-            final p     = (pulse - 0.8) / 0.2;
+            final p = (pulse - 0.8) / 0.2;
             return Stack(fit: StackFit.expand, children: [
               BackdropFilter(
                 filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
                 child: Container(color: Colors.red.withValues(alpha: 0.15)),
               ),
-              Container(decoration: BoxDecoration(
+              Container(
+                  decoration: BoxDecoration(
                 border: Border.all(
-                    color: Colors.red.withValues(alpha: 0.3 + 0.5 * p), width: 5),
-                gradient: RadialGradient(center: Alignment.center, radius: 1.2,
-                  colors: [Colors.transparent,
-                      Colors.red.withValues(alpha: 0.06 + 0.10 * p)]),
+                    color: Colors.red.withValues(alpha: 0.3 + 0.5 * p),
+                    width: 5),
+                gradient: RadialGradient(
+                    center: Alignment.center,
+                    radius: 1.2,
+                    colors: [
+                      Colors.transparent,
+                      Colors.red.withValues(alpha: 0.06 + 0.10 * p)
+                    ]),
               )),
-              Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Center(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
                 Container(
-                  width: context.ri(80), height: context.ri(80),
+                  width: context.ri(80),
+                  height: context.ri(80),
                   decoration: BoxDecoration(
                     color: Colors.red.shade900.withValues(alpha: 0.85),
                     shape: BoxShape.circle,
                     border: Border.all(
-                        color: Colors.red.shade400.withValues(alpha: 0.6), width: 2),
-                    boxShadow: [BoxShadow(
-                        color: Colors.red.withValues(alpha: 0.2 + 0.2 * p),
-                        blurRadius: 30, spreadRadius: 4)],
+                        color: Colors.red.shade400.withValues(alpha: 0.6),
+                        width: 2),
+                    boxShadow: [
+                      BoxShadow(
+                          color: Colors.red.withValues(alpha: 0.2 + 0.2 * p),
+                          blurRadius: 30,
+                          spreadRadius: 4)
+                    ],
                   ),
                   child: Icon(Icons.warning_amber_rounded,
                       size: context.ri(42), color: Colors.red.shade300),
                 ),
                 SizedBox(height: context.rs(18)),
                 Text(isDrowsy ? 'DROWSINESS' : 'DISTRACTION',
-                    style: TextStyle(fontSize: context.sp(24),
-                        fontWeight: FontWeight.w900, color: Colors.red.shade300,
+                    style: TextStyle(
+                        fontSize: context.sp(24),
+                        fontWeight: FontWeight.w900,
+                        color: Colors.red.shade300,
                         letterSpacing: 4)),
-                Text('DETECTED', style: TextStyle(fontSize: context.sp(16),
-                    fontWeight: FontWeight.w700,
-                    color: Colors.red.shade400.withValues(alpha: 0.8),
-                    letterSpacing: 6)),
+                Text('DETECTED',
+                    style: TextStyle(
+                        fontSize: context.sp(16),
+                        fontWeight: FontWeight.w700,
+                        color: Colors.red.shade400.withValues(alpha: 0.8),
+                        letterSpacing: 6)),
                 SizedBox(height: context.rs(24)),
                 Container(
                   padding: EdgeInsets.symmetric(
@@ -1535,39 +1817,52 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(context.rp(24)),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+                    border:
+                        Border.all(color: Colors.white.withValues(alpha: 0.15)),
                   ),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
                     Icon(Icons.touch_app_rounded,
-                        size: context.ri(15), color: Colors.white.withValues(alpha: 0.6)),
+                        size: context.ri(15),
+                        color: Colors.white.withValues(alpha: 0.6)),
                     SizedBox(width: context.rp(7)),
-                    Text('Tap anywhere to dismiss', style: TextStyle(
-                        fontSize: context.sp(12),
-                        color: Colors.white.withValues(alpha: 0.6),
-                        fontWeight: FontWeight.w500, letterSpacing: 0.3)),
+                    Text('Tap anywhere to dismiss',
+                        style: TextStyle(
+                            fontSize: context.sp(12),
+                            color: Colors.white.withValues(alpha: 0.6),
+                            fontWeight: FontWeight.w500,
+                            letterSpacing: 0.3)),
                   ]),
                 ),
               ])),
               Positioned(
-                top: context.rs(10), right: context.rp(10),
+                top: context.rs(10),
+                right: context.rp(10),
                 child: Container(
                   padding: EdgeInsets.symmetric(
                       horizontal: context.rp(9), vertical: context.rs(5)),
                   decoration: BoxDecoration(
                     color: Colors.red.shade800.withValues(alpha: 0.9),
                     borderRadius: BorderRadius.circular(context.rp(16)),
-                    boxShadow: [BoxShadow(
-                        color: Colors.red.withValues(alpha: 0.4 * pulse),
-                        blurRadius: 10)],
+                    boxShadow: [
+                      BoxShadow(
+                          color: Colors.red.withValues(alpha: 0.4 * pulse),
+                          blurRadius: 10)
+                    ],
                   ),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Container(width: context.ri(6), height: context.ri(6),
+                    Container(
+                        width: context.ri(6),
+                        height: context.ri(6),
                         decoration: BoxDecoration(
-                            color: Colors.red.shade200, shape: BoxShape.circle)),
+                            color: Colors.red.shade200,
+                            shape: BoxShape.circle)),
                     SizedBox(width: context.rp(5)),
-                    Text('ALARM ACTIVE', style: TextStyle(
-                        color: Colors.red.shade100, fontSize: context.sp(9),
-                        fontWeight: FontWeight.bold, letterSpacing: 1.0)),
+                    Text('ALARM ACTIVE',
+                        style: TextStyle(
+                            color: Colors.red.shade100,
+                            fontSize: context.sp(9),
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.0)),
                   ]),
                 ),
               ),
@@ -1580,28 +1875,41 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   // ── METRICS + SYSTEM LOG ─────────────────────────────────────────────────────
   Widget _buildMetricsSidebar() {
-    final alertness   = ref.watch(alertnessPctProvider);
-    final drowsiness  = ref.watch(drowsinessPctProvider);
+    final alertness = ref.watch(alertnessPctProvider);
+    final drowsiness = ref.watch(drowsinessPctProvider);
     final distraction = ref.watch(distractionPctProvider);
 
     return Column(children: [
       ClipRect(
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Expanded(child: _MetricGauge(label: 'Alertness', value: alertness,
-              color: const Color(0xFF22d3ee), icon: Icons.bolt)),
+          Expanded(
+              child: _MetricGauge(
+                  label: 'Alertness',
+                  value: alertness,
+                  color: const Color(0xFF22d3ee),
+                  icon: Icons.bolt)),
           SizedBox(width: context.rp(10)),
-          Expanded(child: GestureDetector(
+          Expanded(
+              child: GestureDetector(
             onTap: drowsiness > 0 ? () => _showSubclassSheet('drowsy') : null,
-            child: _MetricGauge(label: 'Drowsiness', value: drowsiness,
+            child: _MetricGauge(
+                label: 'Drowsiness',
+                value: drowsiness,
                 color: const Color(0xFFef4444),
-                icon: Icons.visibility_off, tapHint: drowsiness > 0),
+                icon: Icons.visibility_off,
+                tapHint: drowsiness > 0),
           )),
           SizedBox(width: context.rp(10)),
-          Expanded(child: GestureDetector(
-            onTap: distraction > 0 ? () => _showSubclassSheet('distracted') : null,
-            child: _MetricGauge(label: 'Distraction', value: distraction,
+          Expanded(
+              child: GestureDetector(
+            onTap:
+                distraction > 0 ? () => _showSubclassSheet('distracted') : null,
+            child: _MetricGauge(
+                label: 'Distraction',
+                value: distraction,
                 color: const Color(0xFFfbbf24),
-                icon: Icons.visibility, tapHint: distraction > 0),
+                icon: Icons.visibility,
+                tapHint: distraction > 0),
           )),
         ]),
       ),
@@ -1611,40 +1919,49 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   void _showSubclassSheet(String mainClass) {
-    final subclass  = ref.read(activeSubclassProvider) ?? 'safe_driving';
-    final isDrowsy  = mainClass == 'drowsy';
-    final mainColor = isDrowsy ? const Color(0xFFef4444) : const Color(0xFFfbbf24);
+    final subclass = ref.read(activeSubclassProvider) ?? 'safe_driving';
+    final isDrowsy = mainClass == 'drowsy';
+    final mainColor =
+        isDrowsy ? const Color(0xFFef4444) : const Color(0xFFfbbf24);
 
     showModalBottomSheet(
-      context: context, backgroundColor: Colors.transparent,
+      context: context,
+      backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (_) => Container(
-        padding: EdgeInsets.fromLTRB(context.rp(20), context.rs(12),
-            context.rp(20), context.rs(28)),
+        padding: EdgeInsets.fromLTRB(
+            context.rp(20), context.rs(12), context.rp(20), context.rs(28)),
         decoration: BoxDecoration(
           color: const Color(0xFF0D1627),
-          borderRadius: BorderRadius.vertical(top: Radius.circular(context.rp(22))),
+          borderRadius:
+              BorderRadius.vertical(top: Radius.circular(context.rp(22))),
         ),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Center(child: Container(
-            width: context.rp(36), height: context.rs(4),
+          Center(
+              child: Container(
+            width: context.rp(36),
+            height: context.rs(4),
             margin: EdgeInsets.only(bottom: context.rs(14)),
-            decoration: BoxDecoration(color: const Color(0xFF1E2D45),
+            decoration: BoxDecoration(
+                color: const Color(0xFF1E2D45),
                 borderRadius: BorderRadius.circular(context.rp(2))),
           )),
           Text(isDrowsy ? 'Drowsiness Detected' : 'Distraction Detected',
-              style: TextStyle(color: Colors.white,
-                  fontSize: context.sp(16), fontWeight: FontWeight.w700)),
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: context.sp(16),
+                  fontWeight: FontWeight.w700)),
           SizedBox(height: context.rs(4)),
           Text('Current: $subclass',
               style: TextStyle(color: mainColor, fontSize: context.sp(12))),
           SizedBox(height: context.rs(14)),
-          Text(isDrowsy
-              ? 'Drowsy: Yawning, Head Droop, Eyes Closed (PERCLOS)'
-              : 'Distracted: Texting, Phone Call, Radio, Drinking,\n'
-                'Reaching Behind, Hair/Makeup, Talking to Passenger',
-              style: TextStyle(color: const Color(0xFF94a3b8),
-                  fontSize: context.sp(12)),
+          Text(
+              isDrowsy
+                  ? 'Drowsy: Yawning, Head Droop, Eyes Closed (PERCLOS)'
+                  : 'Distracted: Texting, Phone Call, Radio, Drinking,\n'
+                      'Reaching Behind, Hair/Makeup, Talking to Passenger',
+              style: TextStyle(
+                  color: const Color(0xFF94a3b8), fontSize: context.sp(12)),
               textAlign: TextAlign.center),
         ]),
       ),
@@ -1661,12 +1978,16 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       ),
       padding: EdgeInsets.all(context.rp(12)),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Row(children: [
-            Text('SYSTEM LOG', style: TextStyle(
-                color: const Color(0xFF94a3b8), fontSize: context.sp(10),
-                fontWeight: FontWeight.w600, letterSpacing: 1.5)),
+            Text('SYSTEM LOG',
+                style: TextStyle(
+                    color: const Color(0xFF94a3b8),
+                    fontSize: context.sp(10),
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1.5)),
             const Spacer(),
             if (ref.watch(isRecordingProvider))
               Container(
@@ -1676,9 +1997,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   color: const Color(0xFF10b981).withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(context.rp(6)),
                 ),
-                child: Text('● LIVE', style: TextStyle(
-                    color: const Color(0xFF10b981),
-                    fontSize: context.sp(9), fontWeight: FontWeight.w600)),
+                child: Text('● LIVE',
+                    style: TextStyle(
+                        color: const Color(0xFF10b981),
+                        fontSize: context.sp(9),
+                        fontWeight: FontWeight.w600)),
               ),
           ]),
           SizedBox(height: context.rs(8)),
@@ -1686,13 +2009,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             Align(
               alignment: Alignment.topCenter,
               child: Text('No logs yet. Start recording to begin.',
-                  style: TextStyle(color: Colors.white24, fontSize: context.sp(11)),
+                  style: TextStyle(
+                      color: Colors.white24, fontSize: context.sp(11)),
                   textAlign: TextAlign.center),
             )
           else
             Builder(builder: (context) {
-              final recentLogs =
-                  _systemLogs.reversed.take(20).toList();
+              final recentLogs = _systemLogs.reversed.take(20).toList();
               return SizedBox(
                 height: context.rs(context.isSmallPhone ? 90 : 115),
                 child: ListView.builder(
@@ -1703,7 +2026,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                     final textColor = switch (log['type']) {
                       'SUCCESS' => const Color(0xFF10b981),
                       'WARNING' => const Color(0xFFfbbf24),
-                      _         => const Color(0xFF94a3b8),
+                      _ => const Color(0xFF94a3b8),
                     };
                     return Padding(
                       padding: EdgeInsets.only(bottom: context.rs(5)),
@@ -1711,12 +2034,17 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text('[${log['time']}]',
-                              style: TextStyle(color: const Color(0xFF475569),
-                                  fontSize: context.sp(9), fontFamily: 'monospace')),
+                              style: TextStyle(
+                                  color: const Color(0xFF475569),
+                                  fontSize: context.sp(9),
+                                  fontFamily: 'monospace')),
                           SizedBox(width: context.rp(6)),
-                          Expanded(child: Text(log['message'],
-                              style: TextStyle(color: textColor,
-                                  fontSize: context.sp(9), fontFamily: 'monospace'))),
+                          Expanded(
+                              child: Text(log['message'],
+                                  style: TextStyle(
+                                      color: textColor,
+                                      fontSize: context.sp(9),
+                                      fontFamily: 'monospace'))),
                         ],
                       ),
                     );
@@ -1734,25 +2062,33 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 // METRIC GAUGE
 // ─────────────────────────────────────────────────────────────────────────────
 class _MetricGauge extends StatelessWidget {
-  final String label; final double value;
-  final Color color;  final IconData icon;
+  final String label;
+  final double value;
+  final Color color;
+  final IconData icon;
   final bool tapHint;
-  const _MetricGauge({required this.label, required this.value,
-      required this.color, required this.icon, this.tapHint = false});
+  const _MetricGauge(
+      {required this.label,
+      required this.value,
+      required this.color,
+      required this.icon,
+      this.tapHint = false});
 
   @override
   Widget build(BuildContext context) {
     final clamped = value.clamp(0.0, 100.0);
-    final gaugeD  = context.ri(context.isSmallPhone ? 60.0 : 68.0);
-    final fSize   = context.sp(context.isSmallPhone ? 18.0 : 20.0);
-    final pSize   = context.sp(9.0);
+    final gaugeD = context.ri(context.isSmallPhone ? 60.0 : 68.0);
+    final fSize = context.sp(context.isSmallPhone ? 18.0 : 20.0);
+    final pSize = context.sp(9.0);
 
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0f172a),
         borderRadius: BorderRadius.circular(context.rp(14)),
         border: Border.all(
-          color: clamped >= 100.0 ? color.withValues(alpha: 0.5) : const Color(0xFF1E2D45),
+          color: clamped >= 100.0
+              ? color.withValues(alpha: 0.5)
+              : const Color(0xFF1E2D45),
           width: 1,
         ),
       ),
@@ -1762,9 +2098,13 @@ class _MetricGauge extends StatelessWidget {
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(icon, size: context.ri(11), color: color),
           SizedBox(width: context.rp(3)),
-          Flexible(child: Text(label, overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: const Color(0xFF94a3b8),
-                  fontSize: context.sp(9), fontWeight: FontWeight.w500))),
+          Flexible(
+              child: Text(label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: const Color(0xFF94a3b8),
+                      fontSize: context.sp(9),
+                      fontWeight: FontWeight.w500))),
           if (tapHint) ...[
             SizedBox(width: context.rp(3)),
             Icon(Icons.touch_app_rounded,
@@ -1772,25 +2112,37 @@ class _MetricGauge extends StatelessWidget {
           ],
         ]),
         SizedBox(height: context.rs(8)),
-        SizedBox(width: gaugeD, height: gaugeD,
+        SizedBox(
+          width: gaugeD,
+          height: gaugeD,
           child: Stack(alignment: Alignment.center, children: [
-            SizedBox(width: gaugeD, height: gaugeD,
-              child: CircularProgressIndicator(value: 1.0,
-                strokeWidth: context.isSmallPhone ? 3.0 : 4.0,
-                backgroundColor: Colors.transparent,
-                valueColor: AlwaysStoppedAnimation<Color>(
-                    color.withValues(alpha: 0.18)),
-                strokeCap: StrokeCap.round)),
+            SizedBox(
+                width: gaugeD,
+                height: gaugeD,
+                child: CircularProgressIndicator(
+                    value: 1.0,
+                    strokeWidth: context.isSmallPhone ? 3.0 : 4.0,
+                    backgroundColor: Colors.transparent,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                        color.withValues(alpha: 0.18)),
+                    strokeCap: StrokeCap.round)),
             TweenAnimationBuilder<double>(
               tween: Tween<double>(begin: 0, end: clamped),
               duration: const Duration(milliseconds: 600),
               curve: Curves.easeOut,
-              builder: (_, v, __) => Column(mainAxisSize: MainAxisSize.min, children: [
-                Text('${v.toInt()}', style: TextStyle(color: color,
-                    fontSize: fSize, fontWeight: FontWeight.bold,
-                    fontFamily: 'monospace')),
-                Text('%', style: TextStyle(color: color.withValues(alpha: 0.7),
-                    fontSize: pSize, fontWeight: FontWeight.w500)),
+              builder: (_, v, __) =>
+                  Column(mainAxisSize: MainAxisSize.min, children: [
+                Text('${v.toInt()}',
+                    style: TextStyle(
+                        color: color,
+                        fontSize: fSize,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'monospace')),
+                Text('%',
+                    style: TextStyle(
+                        color: color.withValues(alpha: 0.7),
+                        fontSize: pSize,
+                        fontWeight: FontWeight.w500)),
               ]),
             ),
           ]),
@@ -1804,11 +2156,17 @@ class _MetricGauge extends StatelessWidget {
 // CAMERA OVERLAY BUTTON
 // ─────────────────────────────────────────────────────────────────────────────
 class _CameraOverlayButton extends StatelessWidget {
-  final IconData icon; final String label;
-  final bool isActive; final Color activeColor;
+  final IconData icon;
+  final String label;
+  final bool isActive;
+  final Color activeColor;
   final VoidCallback onTap;
-  const _CameraOverlayButton({required this.icon, required this.label,
-      required this.isActive, required this.activeColor, required this.onTap});
+  const _CameraOverlayButton(
+      {required this.icon,
+      required this.label,
+      required this.isActive,
+      required this.activeColor,
+      required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -1819,17 +2177,21 @@ class _CameraOverlayButton extends StatelessWidget {
         padding: EdgeInsets.symmetric(
             horizontal: context.rp(12), vertical: context.rs(7)),
         decoration: BoxDecoration(
-          color: isActive ? activeColor.withValues(alpha: 0.18) : Colors.transparent,
+          color: isActive
+              ? activeColor.withValues(alpha: 0.18)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(context.rp(18)),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: context.ri(16),
+          Icon(icon,
+              size: context.ri(16),
               color: isActive ? activeColor : Colors.white60),
           SizedBox(width: context.rp(5)),
-          Text(label, style: TextStyle(
-              color: isActive ? activeColor : Colors.white60,
-              fontSize: context.sp(11),
-              fontWeight: isActive ? FontWeight.w600 : FontWeight.w400)),
+          Text(label,
+              style: TextStyle(
+                  color: isActive ? activeColor : Colors.white60,
+                  fontSize: context.sp(11),
+                  fontWeight: isActive ? FontWeight.w600 : FontWeight.w400)),
         ]),
       ),
     );
@@ -1840,10 +2202,10 @@ class _CameraOverlayButton extends StatelessWidget {
 // SESSION SUMMARY MODAL
 // ─────────────────────────────────────────────────────────────────────────────
 class _SessionSummaryModal extends StatefulWidget {
-  final int    durationSec;
+  final int durationSec;
   final double safetyScore;
-  final int    drowsyAlerts;
-  final int    distractedAlerts;
+  final int drowsyAlerts;
+  final int distractedAlerts;
 
   const _SessionSummaryModal({
     required this.durationSec,
@@ -1858,35 +2220,38 @@ class _SessionSummaryModal extends StatefulWidget {
 
 class _SessionSummaryModalState extends State<_SessionSummaryModal>
     with SingleTickerProviderStateMixin {
-  static const Color _bg       = Color(0xFF0D1627);
-  static const Color _surface  = Color(0xFF1A2235);
-  static const Color _divider  = Color(0xFF1E2D45);
-  static const Color _cyan     = Color(0xFF00D4FF);
-  static const Color _green    = Color(0xFF00FF88);
-  static const Color _amber    = Color(0xFFF59E0B);
-  static const Color _red      = Color(0xFFEF4444);
-  static const Color _drowsy   = Color(0xFFF59E0B);
-  static const Color _dist     = Color(0xFFA855F7);
-  static const Color _txtPri   = Color(0xFFEEF2FF);
+  static const Color _bg = Color(0xFF0D1627);
+  static const Color _surface = Color(0xFF1A2235);
+  static const Color _divider = Color(0xFF1E2D45);
+  static const Color _cyan = Color(0xFF00D4FF);
+  static const Color _green = Color(0xFF00FF88);
+  static const Color _amber = Color(0xFFF59E0B);
+  static const Color _red = Color(0xFFEF4444);
+  static const Color _drowsy = Color(0xFFF59E0B);
+  static const Color _dist = Color(0xFFA855F7);
+  static const Color _txtPri = Color(0xFFEEF2FF);
   static const Color _txtMuted = Color(0xFF94A3B8);
-  static const Color _txtDim   = Color(0xFF6B7A99);
+  static const Color _txtDim = Color(0xFF6B7A99);
 
   late AnimationController _ctrl;
-  late Animation<double>    _fade;
-  late Animation<double>    _scale;
+  late Animation<double> _fade;
+  late Animation<double> _scale;
 
   @override
   void initState() {
     super.initState();
-    _ctrl  = AnimationController(vsync: this,
-        duration: const Duration(milliseconds: 340));
-    _fade  = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    _ctrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 340));
+    _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
     _scale = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack);
     _ctrl.forward();
   }
 
   @override
-  void dispose() { _ctrl.dispose(); super.dispose(); }
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   Color get _scoreColor {
     if (widget.safetyScore >= 80) return _green;
@@ -1906,7 +2271,7 @@ class _SessionSummaryModalState extends State<_SessionSummaryModal>
   @override
   Widget build(BuildContext context) {
     final totalAlerts = widget.drowsyAlerts + widget.distractedAlerts;
-    final allClear    = totalAlerts == 0;
+    final allClear = totalAlerts == 0;
     final headerColor = _scoreColor;
 
     return FadeTransition(
@@ -1919,10 +2284,14 @@ class _SessionSummaryModalState extends State<_SessionSummaryModal>
             color: _bg,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
             boxShadow: [
-              BoxShadow(color: Colors.black.withValues(alpha: 0.55),
-                  blurRadius: 40, offset: const Offset(0, -8)),
-              BoxShadow(color: headerColor.withValues(alpha: 0.05),
-                  blurRadius: 60, spreadRadius: 4),
+              BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.55),
+                  blurRadius: 40,
+                  offset: const Offset(0, -8)),
+              BoxShadow(
+                  color: headerColor.withValues(alpha: 0.05),
+                  blurRadius: 60,
+                  spreadRadius: 4),
             ],
           ),
           child: SafeArea(
@@ -1931,51 +2300,58 @@ class _SessionSummaryModalState extends State<_SessionSummaryModal>
               Padding(
                 padding: const EdgeInsets.only(top: 12, bottom: 4),
                 child: Container(
-                    width: 40, height: 4,
+                    width: 40,
+                    height: 4,
                     decoration: BoxDecoration(
                         color: _divider,
                         borderRadius: BorderRadius.circular(2))),
               ),
-
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 10, 16, 14),
                 child: Row(children: [
                   Container(
-                    width: 48, height: 48,
-                    decoration: BoxDecoration(
-                      color: headerColor.withValues(alpha: 0.12),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                          color: headerColor.withValues(alpha: 0.35), width: 2)),
-                    child: Icon(
-                      allClear
-                          ? Icons.check_circle_outline_rounded
-                          : Icons.warning_amber_rounded,
-                      color: headerColor, size: 24)),
-                  const SizedBox(width: 14),
-                  Expanded(child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('Session Complete',
-                        style: TextStyle(color: _txtPri,
-                            fontSize: 17, fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 2),
-                    Text(_formatDuration(widget.durationSec),
-                        style: TextStyle(color: _txtMuted, fontSize: 13)),
-                  ])),
-                  GestureDetector(
-                    onTap: () => Navigator.of(context).pop(),
-                    child: Container(
-                      width: 34, height: 34,
+                      width: 48,
+                      height: 48,
                       decoration: BoxDecoration(
-                          color: _surface, shape: BoxShape.circle,
-                          border: Border.all(color: _divider, width: 1)),
-                      child: Icon(Icons.close_rounded,
-                          color: _txtMuted, size: 18))),
+                          color: headerColor.withValues(alpha: 0.12),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                              color: headerColor.withValues(alpha: 0.35),
+                              width: 2)),
+                      child: Icon(
+                          allClear
+                              ? Icons.check_circle_outline_rounded
+                              : Icons.warning_amber_rounded,
+                          color: headerColor,
+                          size: 24)),
+                  const SizedBox(width: 14),
+                  Expanded(
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                        Text('Session Complete',
+                            style: TextStyle(
+                                color: _txtPri,
+                                fontSize: 17,
+                                fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 2),
+                        Text(_formatDuration(widget.durationSec),
+                            style: TextStyle(color: _txtMuted, fontSize: 13)),
+                      ])),
+                  GestureDetector(
+                      onTap: () => Navigator.of(context).pop(),
+                      child: Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                              color: _surface,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: _divider, width: 1)),
+                          child: Icon(Icons.close_rounded,
+                              color: _txtMuted, size: 18))),
                 ]),
               ),
-
               Divider(color: _divider, height: 1, thickness: 1),
-
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
                 child: Column(children: [
@@ -1990,51 +2366,59 @@ class _SessionSummaryModalState extends State<_SessionSummaryModal>
                           color: headerColor.withValues(alpha: 0.25), width: 1),
                     ),
                     child: Row(children: [
-                      Expanded(child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                        Text('SAFETY SCORE',
-                            style: TextStyle(color: _txtDim,
-                                fontSize: 11, letterSpacing: 1.2,
-                                fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 6),
-                        Row(crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                          Text('${widget.safetyScore.toInt()}',
-                              style: TextStyle(color: headerColor,
-                                  fontSize: 42, fontWeight: FontWeight.w800,
-                                  height: 1)),
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 6, left: 3),
-                            child: Text('%', style: TextStyle(
-                                color: headerColor.withValues(alpha: 0.7),
-                                fontSize: 20, fontWeight: FontWeight.w600))),
-                        ]),
-                      ])),
+                      Expanded(
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                            Text('SAFETY SCORE',
+                                style: TextStyle(
+                                    color: _txtDim,
+                                    fontSize: 11,
+                                    letterSpacing: 1.2,
+                                    fontWeight: FontWeight.w600)),
+                            const SizedBox(height: 6),
+                            Row(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text('${widget.safetyScore.toInt()}',
+                                      style: TextStyle(
+                                          color: headerColor,
+                                          fontSize: 42,
+                                          fontWeight: FontWeight.w800,
+                                          height: 1)),
+                                  Padding(
+                                      padding: const EdgeInsets.only(
+                                          bottom: 6, left: 3),
+                                      child: Text('%',
+                                          style: TextStyle(
+                                              color: headerColor.withValues(
+                                                  alpha: 0.7),
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.w600))),
+                                ]),
+                          ])),
                       _ScoreRing(score: widget.safetyScore, color: headerColor),
                     ]),
                   ),
-
                   const SizedBox(height: 14),
-
                   Row(children: [
-                    Expanded(child: _AlertChip(
+                    Expanded(
+                        child: _AlertChip(
                       label: 'Drowsy',
                       count: widget.drowsyAlerts,
                       color: _drowsy,
                       icon: Icons.bedtime_outlined,
                     )),
                     const SizedBox(width: 10),
-                    Expanded(child: _AlertChip(
+                    Expanded(
+                        child: _AlertChip(
                       label: 'Distracted',
                       count: widget.distractedAlerts,
                       color: _dist,
                       icon: Icons.visibility_off_outlined,
                     )),
                   ]),
-
                   const SizedBox(height: 20),
-
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
@@ -2045,9 +2429,10 @@ class _SessionSummaryModalState extends State<_SessionSummaryModal>
                         elevation: 0,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          side: BorderSide(
-                              color: _cyan.withValues(alpha: 0.35), width: 1)),
+                            borderRadius: BorderRadius.circular(12),
+                            side: BorderSide(
+                                color: _cyan.withValues(alpha: 0.35),
+                                width: 1)),
                       ),
                       child: const Text('Done',
                           style: TextStyle(
@@ -2066,16 +2451,18 @@ class _SessionSummaryModalState extends State<_SessionSummaryModal>
 
 class _ScoreRing extends StatelessWidget {
   final double score;
-  final Color  color;
+  final Color color;
   const _ScoreRing({required this.score, required this.color});
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 64, height: 64,
+      width: 64,
+      height: 64,
       child: Stack(alignment: Alignment.center, children: [
         SizedBox(
-          width: 64, height: 64,
+          width: 64,
+          height: 64,
           child: CircularProgressIndicator(
             value: score / 100,
             strokeWidth: 5,
@@ -2085,17 +2472,17 @@ class _ScoreRing extends StatelessWidget {
           ),
         ),
         Text('${score.toInt()}%',
-            style: TextStyle(color: color,
-                fontSize: 12, fontWeight: FontWeight.w700)),
+            style: TextStyle(
+                color: color, fontSize: 12, fontWeight: FontWeight.w700)),
       ]),
     );
   }
 }
 
 class _AlertChip extends StatelessWidget {
-  final String  label;
-  final int     count;
-  final Color   color;
+  final String label;
+  final int count;
+  final Color color;
   final IconData icon;
   const _AlertChip({
     required this.label,
@@ -2119,19 +2506,23 @@ class _AlertChip extends StatelessWidget {
             width: 1),
       ),
       child: Row(children: [
-        Icon(icon, color: hasAlerts ? color : const Color(0xFF6B7A99), size: 18),
+        Icon(icon,
+            color: hasAlerts ? color : const Color(0xFF6B7A99), size: 18),
         const SizedBox(width: 8),
-        Expanded(child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(label,
               style: TextStyle(
                   color: const Color(0xFF94A3B8),
-                  fontSize: 11, fontWeight: FontWeight.w500)),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500)),
           const SizedBox(height: 1),
           Text('$count alert${count == 1 ? '' : 's'}',
               style: TextStyle(
                   color: hasAlerts ? color : const Color(0xFF6B7A99),
-                  fontSize: 14, fontWeight: FontWeight.w700)),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700)),
         ])),
       ]),
     );
@@ -2158,10 +2549,12 @@ class _CameraGuideDialog extends StatelessWidget {
             child: GestureDetector(
               onTap: () => Navigator.of(context).pop(false),
               child: Container(
-                width: 40, height: 40,
+                width: 40,
+                height: 40,
                 decoration: const BoxDecoration(
-                  color: Color(0xFFe2e8f0), shape: BoxShape.circle),
-                child: const Icon(Icons.close, size: 20, color: Color(0xFF1e293b)),
+                    color: Color(0xFFe2e8f0), shape: BoxShape.circle),
+                child:
+                    const Icon(Icons.close, size: 20, color: Color(0xFF1e293b)),
               ),
             ),
           ),
@@ -2169,9 +2562,9 @@ class _CameraGuideDialog extends StatelessWidget {
           ValueListenableBuilder<(double, bool)>(
             valueListenable: headPose,
             builder: (_, pose, __) => HeadPoseIndicator(
-              roll:    pose.$1,
+              roll: pose.$1,
               hasFace: pose.$2,
-              size:    170,
+              size: 170,
             ),
           ),
           const SizedBox(height: 20),

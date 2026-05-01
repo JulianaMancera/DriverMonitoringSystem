@@ -4,18 +4,20 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-Future<bool> showExitDialog(BuildContext context) async {
+Future<bool> showExitDialog(BuildContext context,
+    {bool isRecording = false}) async {
   final result = await showDialog<bool>(
     context: context,
     barrierDismissible: false,
     barrierColor: Colors.black.withValues(alpha: 0.7),
-    builder: (ctx) => const _ExitDialog(),
+    builder: (ctx) => _ExitDialog(isRecording: isRecording),
   );
   return result ?? false;
 }
 
 class _ExitDialog extends StatelessWidget {
-  const _ExitDialog();
+  final bool isRecording;
+  const _ExitDialog({this.isRecording = false});
 
   @override
   Widget build(BuildContext context) {
@@ -54,7 +56,9 @@ class _ExitDialog extends StatelessWidget {
         ],
       ),
       content: Text(
-        'Monitoring will stop and all active alerts will be dismissed.',
+        isRecording
+            ? 'Monitoring will stop and all active alerts will be dismissed.'
+            : 'Are you sure you want to exit Bantay Drive?',
         style: TextStyle(
           color: Colors.white.withValues(alpha: 0.6),
           fontSize: 14,

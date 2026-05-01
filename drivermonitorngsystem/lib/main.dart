@@ -188,7 +188,8 @@ class _ExitWrapper extends ConsumerWidget {
         if (didPop) return;
         // Don't show exit dialog if in PiP — back is handled natively
         if (ref.read(isInPipProvider)) return;
-        final shouldExit = await showExitDialog(context);
+        final shouldExit = await showExitDialog(context,
+            isRecording: ref.read(isRecordingProvider));
         if (shouldExit && context.mounted) {
           // Stop service if recording before exit
           if (ref.read(isRecordingProvider)) {
@@ -271,20 +272,16 @@ class MainShell extends ConsumerWidget {
       error: (err, stack) => 'USER',
     );
 
-    if (isInPip) {
-      return Scaffold(
-        backgroundColor: Colors.black,
-        body: IndexedStack(
-          index: 1,
-          children: _screens,
-        ),
-      );
-    }
-
+    // Keep a single consistent widget tree in both PIP and non-PIP modes so
+    // that _MonitorScreenState (and its _systemLogs / session data) is never
+    // disposed and recreated during PIP transitions.  Switching to a different
+    // Scaffold structure (bare IndexedStack vs SafeArea→IndexedStack) causes
+    // Flutter to unmount the old IndexedStack and recreate all child elements,
+    // destroying MonitorScreen state and clearing the system logs.
     return Scaffold(
-      backgroundColor: const Color(0xFF080E1A),
+      backgroundColor: isInPip ? Colors.black : const Color(0xFF080E1A),
 
-      appBar: PreferredSize(
+      appBar: isInPip ? null : PreferredSize(
         preferredSize: Size.fromHeight(context.rs(58)),
         child: AppBar(
           backgroundColor: const Color(0xFF0D1627),
@@ -362,11 +359,14 @@ class MainShell extends ConsumerWidget {
       ),
 
       body: SafeArea(
-        top: true,
-        child: IndexedStack(index: currentIndex, children: _screens),
+        top: !isInPip,
+        child: IndexedStack(
+          index: isInPip ? 1 : currentIndex,
+          children: _screens,
+        ),
       ),
 
-      bottomNavigationBar: _BottomNav(
+      bottomNavigationBar: isInPip ? null : _BottomNav(
         currentIndex: currentIndex,
         onTap: (i) => ref.read(navIndexProvider.notifier).set(i),
       ),

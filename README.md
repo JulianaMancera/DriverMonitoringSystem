@@ -8,6 +8,7 @@
   <img src="https://img.shields.io/badge/TFLite-DMS--HybridNet-FF6F00?style=for-the-badge&logo=tensorflow&logoColor=white"/>
   <img src="https://img.shields.io/badge/Platform-Android%208.0+-3DDC84?style=for-the-badge&logo=android&logoColor=white"/>
   <img src="https://img.shields.io/badge/Status-In%20Development-yellow?style=for-the-badge"/>
+  <img src="https://img.shields.io/badge/License-CC%20BY--NC--ND%204.0-lightgrey?style=for-the-badge"/>
 </p>
 
 <div align="center">
@@ -17,242 +18,305 @@
 
 ---
 
-## 📖 About
+## About
 
-**Bantay Drive** is a mobile-based real-time driver monitoring system powered by an on-device deep learning model. It uses the front-facing camera to detect drowsiness and distraction in real time, escalating alerts before dangerous situations occur — entirely offline, no internet connection required.
+**Bantay Drive** is a mobile-based real-time driver monitoring system powered by an on-device deep learning model. It uses the front-facing camera to classify driver behavior into 13 sub-classes across three parent states (NATURAL, DISTRACTED, DROWSY), escalating tiered alerts before dangerous situations occur — entirely offline, 14.12 MB, no cloud dependency.
 
-This app is the mobile implementation component of the thesis:
-> *"DMS-HybridNet: A Hybrid CNN-BiLSTM-Attention Architecture for Real-Time Driver Monitoring Under Low-Light and Occlusion Conditions via Mobile-Based Computer Vision"*
+> *"DMS-HybridNet: A Dual-Stream Architecture Combining MobileNetV3 and Residual 1D-CNN for Real-Time Multi-Class Driver Behavior Monitoring on Mobile Edge Devices"*
 
 ---
 
-## ✨ Features
+## Features
 
-### 📷 Real-Time Monitoring
-- Front-facing camera live feed with on-device AI inference
+### Real-Time Monitoring
+- On-device TFLite inference (NNAPI → CPU fallback) — no server required
 - **3-level escalating alert system:**
   - **Level 1** — Slide-in audio banner (auto-dismisses)
-  - **Level 2** — Stronger persistent banner with audio
-  - **Level 3** — Full-screen blocking alarm overlay with looping audio, requires manual dismissal
-- User-configurable alert sensitivity:
+  - **Level 2** — Persistent banner with audio
+  - **Level 3** — Full-screen blocking alarm overlay, requires manual dismissal
+- Configurable alert sensitivity:
 
-| Sensitivity | L1 Threshold | L2 Threshold | L3 Threshold |
-|-------------|-------------|-------------|-------------|
-| Low         | 5 frames    | 10 frames   | 15 frames   |
-| Medium      | 3 frames    | 6 frames    | 9 frames    |
-| High        | 2 frames    | 4 frames    | 6 frames    |
+| Sensitivity | L1 | L2 | L3 |
+|-------------|----|----|-----|
+| Low         | 5 frames | 10 frames | 15 frames |
+| Medium      | 3 frames | 6 frames  | 9 frames  |
+| High        | 2 frames | 4 frames  | 6 frames  |
 
-- **Picture-in-Picture (PiP) mode** — monitoring continues in a floating window when the user navigates away or presses home
+- **Head-pose visual indicator** — real-time circle overlay tracking driver head rotation
+- **Video clip capture** — automatically records and saves clips (up to 10 s) when alerts trigger
+- **Picture-in-Picture (PiP)** — monitoring continues in a floating window when app is backgrounded
 - Foreground service with persistent notification showing live driver state + Stop button
-- Clear Glasses toggle for periocular occlusion adjustment
-- Auto-start recording on app launch option
+- Clear Glasses toggle, Auto-start recording option
 
-### 🤖 AI Inference Engine (DMS-HybridNet)
-- On-device TFLite inference — no internet or server required
-- Currently outputs **3 main states** (Neutral, Drowsy, Distracted)
-- Subclass modal UI prepared for **11-class model** (commented, ready to activate):
-
-| Index | Subclass | Main State |
-|-------|----------|------------|
-| 0 | safe_driving | NEUTRAL |
-| 1 | yawning | DROWSY |
-| 2 | fatigue_head_droop | DROWSY |
-| 3 | texting | DISTRACTED |
-| 4 | phone_call | DISTRACTED |
-| 5 | adjusting_radio | DISTRACTED |
-| 6 | drinking | DISTRACTED |
-| 7 | reaching_behind | DISTRACTED |
-| 8 | hair_makeup | DISTRACTED |
-| 9 | talking_passenger | DISTRACTED |
-| 10 | eyes_closed_perclos | DROWSY |
-
-- Background isolate preprocessing via `compute()` — UI thread never blocks
-- YUV420 → RGB → 224×224 resize → Float32 normalization
-- Gamma correction (γ = 0.3) via precomputed LUT
-- Frame-skip gate: every 6th frame ≈ 5 FPS + 100ms time gate
-- NNAPI (NPU/DSP) → CPU fallback initialization
-
-### 📊 Dashboard
+### Dashboard
 - Circular Safety Score (0–100), color-coded green / amber / red
-- Four stat cards: Total Drive Time, Alerts (last 24h), Safety Streak, Avg Alertness
-- Horizontally scrollable Safety Score History line chart (last 30 days)
-- Auto-refreshes every 30 seconds + reactive to live session changes
+- Stat cards: Total Drive Time, Alerts (last 24 h), Safety Streak, Avg Alertness
+- Safety Score History line chart (last 30 days, horizontally scrollable)
+- **Shimmer skeleton loading** while data is being fetched
 
-### 📈 Analytics
+### Analytics
 - Time filter: 7 Days / 30 Days / All Time
-- Summary cards: Total Sessions, Total Alerts, Drowsiness Events, Distraction Events
-- Drowsiness vs Distraction daily line chart (expandable, horizontally scrollable)
-- Hourly Alert Distribution bar chart (all 24 hours, expandable)
+- Drowsiness vs. Distraction daily line chart + Hourly Alert Distribution bar chart
+- **Shimmer skeleton loading** while analytics data is being fetched
 
-### 📋 History
-- Chronological session list grouped by date (Today / Yesterday / date)
-- Search by date, month name, day, time, or keyword `safe`
-- Filter chips: All / This Week / This Month / With Alerts / Safe Drives
-- Session detail bottom sheet: state breakdown bar, alert events (L1/L2/L3), system log
+### History
+- Chronological session list grouped by date with search and filter chips
+- **Advanced filtering** for both session logs and video logs
+- Session detail: state breakdown, alert events (L1/L2/L3), system log
+- **In-app session video playback** (non-mirrored)
 
-### ⚙️ Settings
-- Alert volume slider (synchronized with system volume)
-- Alert sensitivity control (Low / Medium / High)
-- Auto-start recording toggle
-- Session data retention (7 Days / 30 Days / Forever) — enforced immediately on change
-- Clear all history with confirmation dialog
-- About section with authors and GitHub profile links
-
-### 🗄️ Local Database (SQLite — 5 tables, schema v2)
-- `sessions` — drive sessions with timestamps, safety score, and optional trip label
-- `state_counts` — neutral / drowsy / distracted frame counts per session
-- `alert_events` — alert type (DROWSY / DISTRACTED), level (1/2/3), and timestamp
-- `system_logs` — INFO / SUCCESS / WARNING log entries per session
-- `alertness_snapshots` — 5-second alertness readings per session (for history chart)
+### Settings
+- Alert volume, sensitivity, auto-start recording, data retention (7 Days / 30 Days / Forever)
+- Clear all history with confirmation
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 lib/
 ├── core/
 │   ├── database/
-│   │   ├── database_helper.dart       # SQLite — 5 tables, schema v2, migrations
-│   │   └── db_change_notifier.dart    # Riverpod reactive DB change counter
+│   │   ├── database_helper.dart       # SQLite — 6 tables, schema v4, migrations
+│   │   └── db_change_notifier.dart    # Riverpod reactive DB counter
 │   ├── inference/
-│   │   ├── tflite_service.dart        # Model loading, inference, 3-class mapping
-│   │   └── frame_preprocessor.dart   # YUV→RGB, gamma LUT, resize, normalize
+│   │   └── tflite_service.dart        # Model loading, inference, 13-class mapping
 │   ├── preference/
 │   │   └── preference_helper.dart    # SharedPreferences wrapper
-│   └── services/
-│       └── notifications.dart        # Foreground service + notification management
+│   ├── services/
+│   │   ├── notifications.dart        # Foreground service + notification management
+│   │   ├── head_pose_service.dart    # ML Kit head-pose & euler angle calculation
+│   │   ├── pip_service.dart          # Picture-in-Picture control
+│   │   └── video_clip_service.dart   # Alert video recording & clip management
+│   ├── providers.dart                # Riverpod state providers
+│   └── session_state.dart           # Session data container
 ├── screens/
-│   ├── dashboard_screen.dart         # Safety score ring + stat cards + chart
-│   ├── monitor_screen.dart           # Camera + inference + 3-level alert system + PiP
-│   ├── analytics_screen.dart         # Trend charts + summary cards
-│   ├── history_screen.dart           # Session list + search + filter + detail sheet
-│   ├── settings_screen.dart          # App settings + retention enforcement
+│   ├── monitor_screen.dart           # Camera + inference + alerts + PiP + head-pose
+│   ├── dashboard_screen.dart         # Safety score + charts + skeleton loading
+│   ├── analytics_screen.dart         # Trend charts + skeleton loading
+│   ├── history_screen.dart           # Session list + video playback + filters
+│   ├── settings_screen.dart          # App settings
 │   ├── onboarding_screen.dart        # First-launch walkthrough
-│   └── splash_screen.dart            # Animated splash screen
+│   └── splash_screen.dart
+├── widgets/
+│   ├── exit.dart                     # Exit confirmation dialog
+│   └── head_pose_indicator.dart      # Camera alignment visual overlay
 ├── utils/
-│   └── responsive.dart              # Breakpoints + layout helpers
+│   └── responsive.dart              # Breakpoints + brand-specific scaling
 └── main.dart                         # App shell + IndexedStack + landscape sidebar
 ```
 
+### Local Database (SQLite — 6 tables, schema v4)
+- `sessions` — drive sessions with timestamps, safety score, trip label
+- `state_counts` — neutral / drowsy / distracted frame counts per session
+- `alert_events` — alert type, level (1/2/3), timestamp
+- `system_logs` — INFO / SUCCESS / WARNING log entries per session
+- `alertness_snapshots` — 5-second alertness readings per session
+- `video_clips` — saved alert clip paths, alert types, duration
+
 ---
 
-## 📱 Navigation
-
-- **Portrait** — Persistent bottom navigation bar with animated sliding cyan pill indicator
-- **Landscape** — Hamburger (☰) button opens a collapsible push sidebar
-  - Sidebar slides in via animated push layout (preserves screen space for Monitor)
-  - Close with the ✕ button or navigate away
-
----
-
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 - Flutter SDK 3.16+
 - Android Studio / VS Code
 - Android device or emulator (API 26+, Android 8.0 Oreo minimum)
-- JDK 17 (required — JDK 24 causes CameraX build errors)
+- **JDK 21**
 
 ### Installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/your-username/DriverMonitoringSystem.git
 cd DriverMonitoringSystem/drivermonitorngsystem
 
-# Install dependencies
 flutter pub get
 
-# Run the app (debug mode)
+# Debug
 flutter run
 
-# Build release APK
+# Release APK
 flutter build apk --release
 ```
 
-### Model Setup
-Place the trained TFLite model in:
+New to Flutter? The [official Flutter documentation](https://docs.flutter.dev/) offers tutorials, samples, and a full API reference. A guided first-app walkthrough is available at [docs.flutter.dev/get-started/codelab](https://docs.flutter.dev/get-started/codelab).
+
+### Model & Asset Setup
+
+Place the following under `assets/`:
+
 ```
-assets/dms_hybridnet.tflite
+assets/
+├── models/
+│   └── dms_hybridnet_v3_float32.tflite
+├── norm_params.json
+├── L1_L2_sound.mp3
+├── L3_critical_alert.wav
+├── car.png
+├── text_logo.png
+└── bantay_drive_logo.png
 ```
 
-Ensure `pubspec.yaml` includes:
-```yaml
-assets:
-  - assets/dms_hybridnet.tflite
-  - assets/L1_L2_sound.mp3
-  - assets/L3_critical_alert.wav
-  - assets/car.png
-  - assets/text_logo.png
-  - assets/bantay_drive_logo.png
-```
+Verify `pubspec.yaml` declares all of these under `flutter: assets:`.
 
 ### Android Gradle Setup
-`android/app/build.gradle.kts` must use Java 17 and include the concurrent-futures dependency:
+
+**`android/app/build.gradle.kts`** — Java 21 target:
 ```kotlin
 compileOptions {
     isCoreLibraryDesugaringEnabled = true
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
 }
-kotlinOptions { jvmTarget = "17" }
+kotlinOptions { jvmTarget = "21" }
 ```
 ```kotlin
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
     implementation("androidx.concurrent:concurrent-futures:1.2.0")
     implementation("androidx.concurrent:concurrent-futures-ktx:1.2.0")
+    implementation("androidx.multidex:multidex:2.0.1")
 }
 ```
 
-`android/gradle/wrapper/gradle-wrapper.properties`:
+**`android/gradle/wrapper/gradle-wrapper.properties`:**
 ```properties
 distributionUrl=https\://services.gradle.org/distributions/gradle-8.13-all.zip
 ```
 
+**`android/app/build.gradle.kts`** — suppress `.tflite` compression:
+```kotlin
+aaptOptions {
+    noCompress += listOf("tflite")
+}
+```
+
+Release builds use ProGuard minification + resource shrinking by default.
+
 ---
 
-## 📦 Key Dependencies
+## Key Dependencies
 
 | Package | Purpose |
 |---------|---------|
-| `flutter_riverpod` | State management (providers, StateProvider) |
+| `flutter_riverpod` | State management |
 | `sqflite` | Local SQLite database |
 | `camera` | Camera feed + image stream |
 | `tflite_flutter` | On-device TFLite inference |
+| `google_mlkit_face_detection` | Face detection for head-pose |
 | `flutter_foreground_task` | Foreground service + persistent notification |
 | `fl_chart` | Line + bar charts |
-| `audioplayers` | Alert sounds (L1/L2/L3) |
+| `shimmer` | Skeleton loading animations |
+| `audioplayers` | Alert sounds |
 | `volume_controller` | System volume control |
+| `video_player` | Session video playback |
+| `sensors_plus` | Accelerometer (phone tilt) |
 | `shared_preferences` | Settings persistence |
 | `permission_handler` | Runtime permissions |
-| `device_info_plus` | Device name display in app bar |
-| `url_launcher` | Authors' GitHub links in About section |
+| `device_info_plus` | Brand-specific UI scaling |
+| `package_info_plus` | App version display |
 | `path_provider` | App documents directory |
+| `url_launcher` | Authors' GitHub links |
 
 ---
 
-## 🎓 Thesis Context
+## Thesis Context
 
-This app implements the mobile inference pipeline for **DMS-HybridNet**, a hybrid deep learning architecture combining:
-- **EfficientNet-B0** — spatial feature extraction (full face, 224×224)
-- **Eye MicroCNN** — periocular feature extraction (eye patch, 32×64)
-- **MobileNetV3-Small** — upper body / posture feature extraction (112×112)
-- **BiLSTM** — bidirectional temporal sequence modeling (20-frame window)
-- **Multi-Head Self-Attention** — occlusion-tolerant frame weighting
-- **Geometric feature fusion** — EAR, MAR, PERCLOS, Head Pose (PnP)
+### DMS-HybridNet V3.1 Architecture
 
-**Datasets used for training:**
-- MRL Eye Dataset (drowsiness — eye region images, IR + RGB)
-- YawDD — Yawning Detection Dataset (temporal, dashboard + mirror cameras)
-- UTA-RLDD — Real-Life Drowsiness Dataset (Fold 5 held out as novelty test)
-- State Farm Distracted Driver Detection (distraction — 10 classes)
-- AUC Distracted Driver Dataset v2 (distraction — dual camera)
+A dual-stream model designed for real-time inference on mid-range Android hardware. Two streams; zero cloud dependency.
+
+#### Spatial Stream
+
+- Input: single 224×224 RGB frame
+- Backbone: MobileNetV3Large (3.2M params, ImageNet pretrained)
+- Output: 256-dim spatial embedding
+
+#### Temporal Stream
+
+- Input: 30-frame rolling window × 25 geometric features
+- Three Residual 1D-CNN blocks: 64 → 128 → 256 filters
+- Output: 128-dim temporal embedding
+- Why Residual 1D-CNN instead of LSTM: LSTM requires `SELECT_TF_OPS` in TFLite, blocking INT8 quantization. 1D-CNN is parallelizable, quantization-compatible, and ~1/5 the parameter count (~500K vs ~2.5M BiLSTM equivalent).
+
+#### Asymmetric Gated Fusion
+
+- Gate driven exclusively by the temporal stream: `gate = σ(Dense(t))`
+- Prevents MobileNetV3 from suppressing drowsiness signals during ambiguous frames
+- Gate layer adds only 258 parameters
+
+#### Output Heads (3 parallel)
+
+- Behavior: 13-class (primary, loss weight 1.0)
+- Parent state: 3-class NATURAL / DISTRACTED / DROWSY (loss weight 0.3)
+- Gaze zone: 8-class (loss weight 0.2)
 
 ---
 
-## 👥 Authors
+### The 25-Feature Vector
+
+| Group | Indices | Features |
+|-------|---------|----------|
+| Eye signals | 0–3 | EAR_L, EAR_R, EAR_avg, EAR_min |
+| Mouth | 4 | MAR (yawn vs. talking disambiguation) |
+| Head pose | 5–7 | Pitch, Yaw, Roll via PnP solver |
+| Gaze | 8–11 | Iris tracking — gaze_L/R × gaze_L/R y |
+| Body geometry | 12–17 | Wrist + shoulder positions, normalized by shoulder span |
+| Occlusion flags | 18–19 | Hand-near-face, mouth-occluded binaries |
+| Temporal statistics | 20–24 | ear_avg_mean, ear_avg_min, mar_max, mar_above_thresh, ear_trend (OLS slope) |
+
+`ear_trend` (OLS slope) is the key drowsiness onset detector — a progressively negative slope means eyes are slowly closing, not blinking.
+
+> **Known gap:** Body geometry features (indices 12–17) currently default to 0.0 in live inference — full body pose integration is the top engineering priority for V4.
+
+---
+
+### Training Datasets
+
+| Dataset | Subjects | Frames | Notes |
+|---------|----------|--------|-------|
+| NTHU-DDD | 36+ | 18,000 | Near-IR, multiple capture modes |
+| YawDD | 107 | 222,954 | Mirror-flipped (LHD correction applied) |
+| SAM-DD | ~30 | 10,991 | RHD → coordinate-flipped to LHD |
+| 3MDAD | 50 | 101,405 | 16 classes → mapped to 13 unified |
+| **Total** | — | **353,350** | **13 unified classes** |
+
+Subject-exclusive splits — no subject appears in more than one partition, eliminating the #1 source of inflated accuracy in prior work.
+
+**Class imbalance:** 72× ratio between largest and smallest class. Fixed with Weighted Focal Loss (γ=2.0, weights capped at 15.0), giving rare classes up to 55× more gradient emphasis.
+
+---
+
+### Model Performance
+
+| Metric | Value | Context |
+|--------|-------|---------|
+| 13-Class Overall Accuracy | 51.51% | 6.7× above 7.7% random baseline |
+| Parent-Class Accuracy | 73.18% | 2.2× above 33% chance |
+| DISTRACTED Recall | 98.5% | Near-ceiling |
+| DISTRACTED F1 | 0.901 | Strongest performing group |
+| DROWSY Recall | 30.4% | Primary limitation (data poverty, not architecture) |
+| DROWSY F1 | 0.370 | |
+| NATURAL Recall | 73.8% | Practical safe-state detection |
+| talking_passenger F1 | 0.671 | 4.3× improvement over face-only V1 (0.156) |
+| Top-3 Accuracy | ~93.0% | Correct class in top 3 for 93/100 sequences |
+| Macro F1 | 0.4125 | |
+| Weighted F1 | 0.4958 | |
+
+**DROWSY recall root causes:** Only 2,025 DROWSY training sequences from 4 NTHU subjects; MAR features alias between yawning and animated talking; partial modality collapse in ambiguous frames. Fix for V4: UTA-RLDD integration (60 subjects, 477K frames) projected to deliver 2.4× subject count increase in DROWSY training data.
+
+---
+
+### On-Device Performance
+
+- TFLite float32, 14.12 MB
+- 5–15 ms per forward pass on mid-range Snapdragon
+- Effective prediction rate: 6–7 FPS (every 5th camera frame)
+- Privacy by design: no video transmitted, no cloud sync — compliant with the Philippine Data Privacy Act of 2012 (RA 10173)
+
+---
+
+## Authors
 
 | Name | Role |
 |------|------|
@@ -265,10 +329,6 @@ This app implements the mobile inference pipeline for **DMS-HybridNet**, a hybri
 
 ---
 
-## 📄 License
+## License
 
-This project is developed as an undergraduate thesis and is intended for academic and non-commercial research purposes only.
-
----
-
-<p align="center">Made with ❤️ for safer driving in the Philippines 🇵🇭</p>
+This project was developed as an undergraduate thesis at New Era University. It is intended for academic and non-commercial research purposes only. Unauthorized reproduction, distribution, or commercial use of any part of this project — including the model architecture, source code, and documentation — is not permitted without prior written consent from the authors.
