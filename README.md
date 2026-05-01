@@ -17,17 +17,17 @@
 
 ---
 
-## 📖 About
+## About
 
 **Bantay Drive** is a mobile-based real-time driver monitoring system powered by an on-device deep learning model. It uses the front-facing camera to detect drowsiness and distraction in real time, escalating alerts before dangerous situations occur — entirely offline, no internet connection required.
 
-> *"DMS-HybridNet: A Hybrid CNN-BiLSTM-Attention Architecture for Real-Time Driver Monitoring Under Low-Light and Occlusion Conditions via Mobile-Based Computer Vision"*
+> *"DMS-HybridNet: A Dual-Stream Architecture Combining MobileNetV3 and Residual 1D-CNN for Real-Time Multi-Class Driver Behavior Monitoring on Mobile Edge Devices"*
 
 ---
 
-## ✨ Features
+## Features
 
-### 📷 Real-Time Monitoring
+### Real-Time Monitoring
 - On-device TFLite inference (NNAPI → CPU fallback) — no server required
 - **3-level escalating alert system:**
   - **Level 1** — Slide-in audio banner (auto-dismisses)
@@ -42,33 +42,35 @@
 | High        | 2 frames | 4 frames  | 6 frames  |
 
 - **Head-pose visual indicator** — real-time circle overlay tracking driver head rotation
-- **Video clip capture** — automatically records and saves clips when alerts trigger
+- **Video clip capture** — automatically records and saves clips (up to 10 s) when alerts trigger
 - **Picture-in-Picture (PiP)** — monitoring continues in a floating window when app is backgrounded
 - Foreground service with persistent notification showing live driver state + Stop button
 - Clear Glasses toggle, Auto-start recording option
 
-### 📊 Dashboard
+### Dashboard
 - Circular Safety Score (0–100), color-coded green / amber / red
-- Stat cards: Total Drive Time, Alerts (last 24h), Safety Streak, Avg Alertness
+- Stat cards: Total Drive Time, Alerts (last 24 h), Safety Streak, Avg Alertness
 - Safety Score History line chart (last 30 days, horizontally scrollable)
+- **Shimmer skeleton loading** while data is being fetched
 
-### 📈 Analytics
+### Analytics
 - Time filter: 7 Days / 30 Days / All Time
 - Drowsiness vs. Distraction daily line chart + Hourly Alert Distribution bar chart
+- **Shimmer skeleton loading** while analytics data is being fetched
 
-### 📋 History
+### History
 - Chronological session list grouped by date with search and filter chips
 - **Advanced filtering** for both session logs and video logs
 - Session detail: state breakdown, alert events (L1/L2/L3), system log
 - **In-app session video playback** (non-mirrored)
 
-### ⚙️ Settings
+### Settings
 - Alert volume, sensitivity, auto-start recording, data retention (7 Days / 30 Days / Forever)
 - Clear all history with confirmation
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 lib/
@@ -77,8 +79,7 @@ lib/
 │   │   ├── database_helper.dart       # SQLite — 6 tables, schema v4, migrations
 │   │   └── db_change_notifier.dart    # Riverpod reactive DB counter
 │   ├── inference/
-│   │   ├── tflite_service.dart        # Model loading, inference, 13-class mapping
-│   │   └── frame_preprocessor.dart   # YUV→RGB, gamma LUT, resize, normalize
+│   │   └── tflite_service.dart        # Model loading, inference, 13-class mapping
 │   ├── preference/
 │   │   └── preference_helper.dart    # SharedPreferences wrapper
 │   ├── services/
@@ -90,18 +91,21 @@ lib/
 │   └── session_state.dart           # Session data container
 ├── screens/
 │   ├── monitor_screen.dart           # Camera + inference + alerts + PiP + head-pose
-│   ├── dashboard_screen.dart         # Safety score + charts
-│   ├── analytics_screen.dart         # Trend charts
+│   ├── dashboard_screen.dart         # Safety score + charts + skeleton loading
+│   ├── analytics_screen.dart         # Trend charts + skeleton loading
 │   ├── history_screen.dart           # Session list + video playback + filters
 │   ├── settings_screen.dart          # App settings
 │   ├── onboarding_screen.dart        # First-launch walkthrough
 │   └── splash_screen.dart
+├── widgets/
+│   ├── exit.dart                     # Exit confirmation dialog
+│   └── head_pose_indicator.dart      # Camera alignment visual overlay
 ├── utils/
 │   └── responsive.dart              # Breakpoints + brand-specific scaling
 └── main.dart                         # App shell + IndexedStack + landscape sidebar
 ```
 
-### 🗄️ Local Database (SQLite — 6 tables, schema v4)
+### Local Database (SQLite — 6 tables, schema v4)
 - `sessions` — drive sessions with timestamps, safety score, trip label
 - `state_counts` — neutral / drowsy / distracted frame counts per session
 - `alert_events` — alert type, level (1/2/3), timestamp
@@ -111,13 +115,13 @@ lib/
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 - Flutter SDK 3.16+
 - Android Studio / VS Code
 - Android device or emulator (API 26+, Android 8.0 Oreo minimum)
-- **JDK 21** 
+- **JDK 21**
 
 ### Installation
 
@@ -133,6 +137,8 @@ flutter run
 # Release APK
 flutter build apk --release
 ```
+
+New to Flutter? The [official Flutter documentation](https://docs.flutter.dev/) offers tutorials, samples, and a full API reference. A guided first-app walkthrough is available at [docs.flutter.dev/get-started/codelab](https://docs.flutter.dev/get-started/codelab).
 
 ### Model & Asset Setup
 
@@ -188,7 +194,7 @@ Release builds use ProGuard minification + resource shrinking by default.
 
 ---
 
-## 📦 Key Dependencies
+## Key Dependencies
 
 | Package | Purpose |
 |---------|---------|
@@ -199,6 +205,7 @@ Release builds use ProGuard minification + resource shrinking by default.
 | `google_mlkit_face_detection` | Face detection for head-pose |
 | `flutter_foreground_task` | Foreground service + persistent notification |
 | `fl_chart` | Line + bar charts |
+| `shimmer` | Skeleton loading animations |
 | `audioplayers` | Alert sounds |
 | `volume_controller` | System volume control |
 | `video_player` | Session video playback |
@@ -212,7 +219,7 @@ Release builds use ProGuard minification + resource shrinking by default.
 
 ---
 
-## 🎓 Thesis Context
+## Thesis Context
 
 **DMS-HybridNet** combines:
 - **EfficientNet-B0** — spatial feature extraction (224×224)
@@ -226,7 +233,7 @@ Release builds use ProGuard minification + resource shrinking by default.
 
 ---
 
-## 👥 Authors
+## Authors
 
 | Name | Role |
 |------|------|
@@ -239,6 +246,6 @@ Release builds use ProGuard minification + resource shrinking by default.
 
 ---
 
-## 📄 License
+## License
 
-Developed as an undergraduate thesis. Intended for academic and non-commercial research purposes only.
+This project was developed as an undergraduate thesis at New Era University. It is intended for academic and non-commercial research purposes only. Unauthorized reproduction, distribution, or commercial use of any part of this project — including the model architecture, source code, and documentation — is not permitted without prior written consent from the authors.
