@@ -34,8 +34,8 @@ If you discover a security issue in this repository, **do not open a public GitH
 
 Contact the authors directly:
 
-- **Juliana R. Mancera** — julianamancera06@gmail.com
-- **Pia Katleya V. Macalanda** — *(institutional email via New Era University)*
+- **Juliana R. Mancera** — real.julianamancera@gmail.com
+- **Pia Katleya V. Macalanda** — piav.macalanda@gmail.com
 
 Please include in your report:
 1. A description of the vulnerability
