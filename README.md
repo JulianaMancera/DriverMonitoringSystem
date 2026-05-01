@@ -12,7 +12,7 @@
 </p>
 
 <div align="center">
-  <h2>Undergraduate Thesis Project — New Era University, 2026</h2>
+  <h2>Undergraduate Thesis Project — New Era University, AY. 2025-2026</h2>
   <h4>Authors: Macalanda, Pia Katleya V. & Mancera, Juliana R.</h4>
 </div>
 
@@ -240,7 +240,7 @@ Release builds use ProGuard minification + resource shrinking by default.
 
 **Institution:** New Era University, College of Informatics and Computing Studies  
 **Program:** Bachelor of Science in Computer Science  
-**Year:** 2026
+**Year:** 2025-2026
 
 ---
 
