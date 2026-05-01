@@ -19,7 +19,7 @@
 
 ## About
 
-**Bantay Drive** is a mobile-based real-time driver monitoring system powered by an on-device deep learning model. It uses the front-facing camera to detect drowsiness and distraction in real time, escalating alerts before dangerous situations occur — entirely offline, no internet connection required.
+**Bantay Drive** is a mobile-based real-time driver monitoring system powered by an on-device deep learning model. It uses the front-facing camera to classify driver behavior into 13 sub-classes across three parent states (NATURAL, DISTRACTED, DROWSY), escalating tiered alerts before dangerous situations occur — entirely offline, 14.12 MB, no cloud dependency.
 
 > *"DMS-HybridNet: A Dual-Stream Architecture Combining MobileNetV3 and Residual 1D-CNN for Real-Time Multi-Class Driver Behavior Monitoring on Mobile Edge Devices"*
 
@@ -221,15 +221,97 @@ Release builds use ProGuard minification + resource shrinking by default.
 
 ## Thesis Context
 
-**DMS-HybridNet** combines:
-- **EfficientNet-B0** — spatial feature extraction (224×224)
-- **Eye MicroCNN** — periocular feature extraction (32×64)
-- **MobileNetV3-Small** — upper body/posture features (112×112)
-- **BiLSTM** — bidirectional temporal sequence modeling (20-frame window)
-- **Multi-Head Self-Attention** — occlusion-tolerant frame weighting
-- **Geometric feature fusion** — EAR, MAR, PERCLOS, Head Pose (PnP)
+### DMS-HybridNet V3.1 Architecture
 
-**Training datasets:** MRL Eye, YawDD, UTA-RLDD, State Farm Distracted Driver, AUC Distracted Driver v2
+A dual-stream model designed for real-time inference on mid-range Android hardware. Two streams; zero cloud dependency.
+
+#### Spatial Stream
+
+- Input: single 224×224 RGB frame
+- Backbone: MobileNetV3Large (3.2M params, ImageNet pretrained)
+- Output: 256-dim spatial embedding
+
+#### Temporal Stream
+
+- Input: 30-frame rolling window × 25 geometric features
+- Three Residual 1D-CNN blocks: 64 → 128 → 256 filters
+- Output: 128-dim temporal embedding
+- Why Residual 1D-CNN instead of LSTM: LSTM requires `SELECT_TF_OPS` in TFLite, blocking INT8 quantization. 1D-CNN is parallelizable, quantization-compatible, and ~1/5 the parameter count (~500K vs ~2.5M BiLSTM equivalent).
+
+#### Asymmetric Gated Fusion
+
+- Gate driven exclusively by the temporal stream: `gate = σ(Dense(t))`
+- Prevents MobileNetV3 from suppressing drowsiness signals during ambiguous frames
+- Gate layer adds only 258 parameters
+
+#### Output Heads (3 parallel)
+
+- Behavior: 13-class (primary, loss weight 1.0)
+- Parent state: 3-class NATURAL / DISTRACTED / DROWSY (loss weight 0.3)
+- Gaze zone: 8-class (loss weight 0.2)
+
+---
+
+### The 25-Feature Vector
+
+| Group | Indices | Features |
+|-------|---------|----------|
+| Eye signals | 0–3 | EAR_L, EAR_R, EAR_avg, EAR_min |
+| Mouth | 4 | MAR (yawn vs. talking disambiguation) |
+| Head pose | 5–7 | Pitch, Yaw, Roll via PnP solver |
+| Gaze | 8–11 | Iris tracking — gaze_L/R × gaze_L/R y |
+| Body geometry | 12–17 | Wrist + shoulder positions, normalized by shoulder span |
+| Occlusion flags | 18–19 | Hand-near-face, mouth-occluded binaries |
+| Temporal statistics | 20–24 | ear_avg_mean, ear_avg_min, mar_max, mar_above_thresh, ear_trend (OLS slope) |
+
+`ear_trend` (OLS slope) is the key drowsiness onset detector — a progressively negative slope means eyes are slowly closing, not blinking.
+
+> **Known gap:** Body geometry features (indices 12–17) currently default to 0.0 in live inference — full body pose integration is the top engineering priority for V4.
+
+---
+
+### Training Datasets
+
+| Dataset | Subjects | Frames | Notes |
+|---------|----------|--------|-------|
+| NTHU-DDD | 36+ | 18,000 | Near-IR, multiple capture modes |
+| YawDD | 107 | 222,954 | Mirror-flipped (LHD correction applied) |
+| SAM-DD | ~30 | 10,991 | RHD → coordinate-flipped to LHD |
+| 3MDAD | 50 | 101,405 | 16 classes → mapped to 13 unified |
+| **Total** | — | **353,350** | **13 unified classes** |
+
+Subject-exclusive splits — no subject appears in more than one partition, eliminating the #1 source of inflated accuracy in prior work.
+
+**Class imbalance:** 72× ratio between largest and smallest class. Fixed with Weighted Focal Loss (γ=2.0, weights capped at 15.0), giving rare classes up to 55× more gradient emphasis.
+
+---
+
+### Model Performance
+
+| Metric | Value | Context |
+|--------|-------|---------|
+| 13-Class Overall Accuracy | 51.51% | 6.7× above 7.7% random baseline |
+| Parent-Class Accuracy | 73.18% | 2.2× above 33% chance |
+| DISTRACTED Recall | 98.5% | Near-ceiling |
+| DISTRACTED F1 | 0.901 | Strongest performing group |
+| DROWSY Recall | 30.4% | Primary limitation (data poverty, not architecture) |
+| DROWSY F1 | 0.370 | |
+| NATURAL Recall | 73.8% | Practical safe-state detection |
+| talking_passenger F1 | 0.671 | 4.3× improvement over face-only V1 (0.156) |
+| Top-3 Accuracy | ~93.0% | Correct class in top 3 for 93/100 sequences |
+| Macro F1 | 0.4125 | |
+| Weighted F1 | 0.4958 | |
+
+**DROWSY recall root causes:** Only 2,025 DROWSY training sequences from 4 NTHU subjects; MAR features alias between yawning and animated talking; partial modality collapse in ambiguous frames. Fix for V4: UTA-RLDD integration (60 subjects, 477K frames) projected to deliver 2.4× subject count increase in DROWSY training data.
+
+---
+
+### On-Device Performance
+
+- TFLite float32, 14.12 MB
+- 5–15 ms per forward pass on mid-range Snapdragon
+- Effective prediction rate: 6–7 FPS (every 5th camera frame)
+- Privacy by design: no video transmitted, no cloud sync — compliant with the Philippine Data Privacy Act of 2012 (RA 10173)
 
 ---
 
