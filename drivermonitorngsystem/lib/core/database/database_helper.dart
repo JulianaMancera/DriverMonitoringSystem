@@ -30,9 +30,9 @@
 //   • settings_screen.dart  — calls deleteSessionsOlderThan() + clearAllData()
 // ─────────────────────────────────────────────────────────────────────────────
 
-import 'dart:io';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import '../services/video_clip_service.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
@@ -882,10 +882,7 @@ class DatabaseHelper {
     });
 
     for (final path in clipPaths) {
-      try {
-        final f = File(path);
-        if (await f.exists()) await f.delete();
-      } catch (_) {}
+      await VideoClipService.deleteFile(path);
     }
   }
 
@@ -915,12 +912,8 @@ class DatabaseHelper {
       await txn.delete('state_counts');
       await txn.delete('sessions');
     });
-    // Delete files after DB is clean
     for (final path in paths) {
-      try {
-        final f = File(path);
-        if (await f.exists()) await f.delete();
-      } catch (_) {}
+      await VideoClipService.deleteFile(path);
     }
   }
 
