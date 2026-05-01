@@ -1038,10 +1038,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             keepRecording = false;
             break;
           }
-          final thresholds =
-              _sensitivityThresholds[_prefAlertSensitivity] ?? [3, 6, 9];
-          keepRecording = _consecutiveDrowsy >= thresholds[0] ||
-              _consecutiveDistracted >= thresholds[0];
+          keepRecording = _alertLevel > 0;
         } else {
           keepRecording = false;
         }
