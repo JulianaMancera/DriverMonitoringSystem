@@ -1,8 +1,6 @@
 // lib/widgets/exit_dialog.dart
 
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 Future<bool> showExitDialog(BuildContext context,
     {bool isRecording = false}) async {
@@ -77,15 +75,7 @@ class _ExitDialog extends StatelessWidget {
           child: const Text('Stay', style: TextStyle(fontSize: 15)),
         ),
         FilledButton(
-          onPressed: () {
-            Navigator.of(context).pop(true);
-            // Exits the app completely
-            if (Platform.isAndroid) {
-              SystemNavigator.pop(); // Android: removes from recents-friendly
-            } else {
-              exit(0); // iOS / fallback
-            }
-          },
+          onPressed: () => Navigator.of(context).pop(true),
           style: FilledButton.styleFrom(
             backgroundColor: const Color(0xFF00D4FF).withValues(alpha: 0.15),
             foregroundColor: const Color(0xFF00D4FF),

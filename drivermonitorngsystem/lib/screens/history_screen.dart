@@ -1009,15 +1009,17 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     return '${s}s';
   }
 
-  /// Returns MM/DD/YYYY format
+  static const _monthAbbr = [
+    '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  ];
+
   String _formatDateMDY(String? iso) {
     if (iso == null) return '—';
     final d = DateTime.tryParse(iso);
     if (d == null) return '—';
     final l = d.toLocal();
-    final mm = l.month.toString().padLeft(2, '0');
-    final dd = l.day.toString().padLeft(2, '0');
-    return '$mm/$dd/${l.year}';
+    return '${_monthAbbr[l.month]} ${l.day}, ${l.year}';
   }
 
   String _formatTime(String? iso) {
@@ -1930,14 +1932,17 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
   bool _initialized = false;
   bool _error = false;
 
+  static const _monthAbbr = [
+    '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  ];
+
   String _formatDateMDY(String? iso) {
     if (iso == null || iso.isEmpty) return '—';
     final d = DateTime.tryParse(iso);
     if (d == null) return '—';
     final l = d.toLocal();
-    final mm = l.month.toString().padLeft(2, '0');
-    final dd = l.day.toString().padLeft(2, '0');
-    return '$mm/$dd/${l.year}';
+    return '${_monthAbbr[l.month]} ${l.day}, ${l.year}';
   }
 
   @override
@@ -2182,14 +2187,17 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet>
     }
   }
 
+  static const _monthAbbr = [
+    '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  ];
+
   String _formatDateMDY(String? iso) {
     if (iso == null) return '—';
     final d = DateTime.tryParse(iso);
     if (d == null) return '—';
     final l = d.toLocal();
-    final mm = l.month.toString().padLeft(2, '0');
-    final dd = l.day.toString().padLeft(2, '0');
-    return '$mm/$dd/${l.year}';
+    return '${_monthAbbr[l.month]} ${l.day}, ${l.year}';
   }
 
   String _formatTime(String? iso) {
