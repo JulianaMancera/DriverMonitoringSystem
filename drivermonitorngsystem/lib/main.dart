@@ -188,7 +188,8 @@ class _ExitWrapper extends ConsumerWidget {
         if (didPop) return;
         // Don't show exit dialog if in PiP — back is handled natively
         if (ref.read(isInPipProvider)) return;
-        final shouldExit = await showExitDialog(context);
+        final shouldExit = await showExitDialog(context,
+            isRecording: ref.read(isRecordingProvider));
         if (shouldExit && context.mounted) {
           // Stop service if recording before exit
           if (ref.read(isRecordingProvider)) {
