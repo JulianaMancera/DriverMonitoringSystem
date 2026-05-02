@@ -184,8 +184,8 @@ const Map<int, double> _kBehaviorClassThresholds = {
   12: 8.0, // drowsy_microsleep       ↓ from 12.0 — critical safety event
 };
 
-// Inference gap: 150ms ≈ 6.7 FPS inference, camera preview unaffected.
-const int _kMinInferenceGapMs = 150;
+// Inference gap: 200ms ≈ 5 FPS inference, camera preview unaffected.
+const int _kMinInferenceGapMs = 200;
 
 // ══════════════════════════════════════════════════════════════════════════════
 
