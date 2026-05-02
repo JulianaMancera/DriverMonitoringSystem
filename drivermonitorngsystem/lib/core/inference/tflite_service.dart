@@ -36,7 +36,7 @@ import 'package:flutter/services.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:camera/camera.dart';
 
-const String _kModelAsset = 'assets/models/dms_hybridnet_v3_float32.tflite';
+const String _kModelAsset = 'assets/model/dms_hybridnet_v3_float32.tflite';
 const String _kNormParamsAsset = 'assets/norm_params.json';
 
 // 13 behavior class names (index = model output index)

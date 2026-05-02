@@ -75,5 +75,5 @@ flutter:
     - assets/L1_L2_sound.mp3
     - assets/L3_critical_alert.wav
     - assets/bantay_drive_logo.png
-    - assets/models/dms_hybridnet_v3_float32.tflite
+    - assets/model/dms_hybridnet_v3_float32.tflite
     - assets/norm_params.json
