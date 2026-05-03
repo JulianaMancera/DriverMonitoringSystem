@@ -11,8 +11,6 @@ class VideoClipService {
     return dir;
   }
 
-  /// Moves a camera temp file into permanent app storage.
-  /// Returns the saved path, or null if the source file was missing / copy failed.
   static Future<String?> saveClip({
     required String sourcePath,
     required int sessionId,
@@ -31,22 +29,18 @@ class VideoClipService {
     }
   }
 
-  /// Deletes a file silently — used for safe-drive temp cleanup.
   static Future<void> deleteFile(String path) async {
     try {
       await File(path).delete();
     } catch (_) {}
   }
 
-  /// Copies an alert clip to the device Downloads folder.
-  /// Returns the destination path on success, null on failure.
   static Future<String?> exportToDownloads(String filePath) async {
     try {
       final src = File(filePath);
       final fileName = p.basename(filePath);
 
-      // Android public Downloads directory (API 29+ scoped storage allows this
-      // without WRITE_EXTERNAL_STORAGE on the app's own external files).
+      // Android public Downloads (API 29+ scoped storage allows this without WRITE_EXTERNAL_STORAGE)
       final downloadsDir = Directory('/storage/emulated/0/Download');
       if (await downloadsDir.exists()) {
         final dest = p.join(downloadsDir.path, fileName);
@@ -54,7 +48,6 @@ class VideoClipService {
         return dest;
       }
 
-      // Fallback: app-specific external storage (accessible via file manager)
       final extDir = await getExternalStorageDirectory();
       if (extDir != null) {
         final dest = p.join(extDir.path, fileName);
@@ -68,7 +61,6 @@ class VideoClipService {
     }
   }
 
-  /// Checks whether a saved clip file still exists on disk.
   static Future<bool> clipExists(String path) async {
     try {
       return await File(path).exists();
