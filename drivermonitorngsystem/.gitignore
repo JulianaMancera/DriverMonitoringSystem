@@ -44,6 +44,3 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# Proprietary model and parameters — not for public distribution
-assets/model/*.tflite
-assets/norm_params.json
