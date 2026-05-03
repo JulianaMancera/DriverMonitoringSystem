@@ -36,7 +36,7 @@ import 'package:flutter/services.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:camera/camera.dart';
 
-const String _kModelAsset = 'assets/models/dms_hybridnet_v3_float32.tflite';
+const String _kModelAsset = 'assets/model/dms_hybridnet_v3_float32.tflite';
 const String _kNormParamsAsset = 'assets/norm_params.json';
 
 // 13 behavior class names (index = model output index)
@@ -184,8 +184,8 @@ const Map<int, double> _kBehaviorClassThresholds = {
   12: 8.0, // drowsy_microsleep       ↓ from 12.0 — critical safety event
 };
 
-// Inference gap: 150ms ≈ 6.7 FPS inference, camera preview unaffected.
-const int _kMinInferenceGapMs = 150;
+// Inference gap: 200ms ≈ 5 FPS inference, camera preview unaffected.
+const int _kMinInferenceGapMs = 200;
 
 // ══════════════════════════════════════════════════════════════════════════════
 

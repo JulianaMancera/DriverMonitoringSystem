@@ -629,7 +629,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         totalPenalty += 8.0;
       }
     }
-    final durationMin = durationSec > 0 ? durationSec / 60.0 : 1.0;
+    // Use a 2-minute floor so short test sessions aren't penalised to 0%
+    // by an artificially high alerts-per-minute rate.
+    final rawMin = durationSec > 0 ? durationSec / 60.0 : 1.0;
+    final durationMin = rawMin < 2.0 ? 2.0 : rawMin;
     return (100.0 - (totalPenalty / durationMin) * 10.0).clamp(0.0, 100.0);
   }
 
@@ -791,7 +794,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   void _startHeadPoseUpdates() {
     _headPoseTimer?.cancel();
     _headPoseTimer =
-        Timer.periodic(const Duration(milliseconds: 100), (_) async {
+        Timer.periodic(const Duration(milliseconds: 200), (_) async {
       final frame = _latestFrame;
       if (frame == null || _isHeadPoseRunning || _camDisposing) return;
       _isHeadPoseRunning = true;
@@ -1226,23 +1229,16 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           final availH = constraints.maxHeight;
           final camH = availH * (context.isSmallPhone ? 0.50 : 0.52);
 
-          return SingleChildScrollView(
-            physics: const NeverScrollableScrollPhysics(),
-            child: SizedBox(
-              height: availH,
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: context.rp(14)),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(height: context.rs(20)),
-                    _buildCameraWithOverlay(height: camH),
-                    SizedBox(height: context.rs(10)),
-                    _buildMetricsSidebar(),
-                    SizedBox(height: context.rs(14)),
-                  ],
-                ),
-              ),
+          return Padding(
+            padding: EdgeInsets.symmetric(horizontal: context.rp(14)),
+            child: Column(
+              children: [
+                SizedBox(height: context.rs(20)),
+                _buildCameraWithOverlay(height: camH),
+                SizedBox(height: context.rs(10)),
+                Expanded(child: _buildMetricsSidebar()),
+                SizedBox(height: context.rs(14)),
+              ],
             ),
           );
         },
@@ -1914,7 +1910,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         ]),
       ),
       SizedBox(height: context.rs(12)),
-      _buildSystemLog(),
+      Expanded(child: _buildSystemLog()),
     ]);
   }
 
@@ -1979,7 +1975,6 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       padding: EdgeInsets.all(context.rp(12)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
         children: [
           Row(children: [
             Text('SYSTEM LOG',
@@ -2005,53 +2000,51 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               ),
           ]),
           SizedBox(height: context.rs(8)),
-          if (_systemLogs.isEmpty)
-            Align(
-              alignment: Alignment.topCenter,
-              child: Text('No logs yet. Start recording to begin.',
-                  style: TextStyle(
-                      color: Colors.white24, fontSize: context.sp(11)),
-                  textAlign: TextAlign.center),
-            )
-          else
-            Builder(builder: (context) {
-              final recentLogs = _systemLogs.reversed.take(20).toList();
-              return SizedBox(
-                height: context.rs(context.isSmallPhone ? 90 : 115),
-                child: ListView.builder(
-                  physics: const BouncingScrollPhysics(),
-                  itemCount: recentLogs.length,
-                  itemBuilder: (context, index) {
-                    final log = recentLogs[index];
-                    final textColor = switch (log['type']) {
-                      'SUCCESS' => const Color(0xFF10b981),
-                      'WARNING' => const Color(0xFFfbbf24),
-                      _ => const Color(0xFF94a3b8),
-                    };
-                    return Padding(
-                      padding: EdgeInsets.only(bottom: context.rs(5)),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('[${log['time']}]',
-                              style: TextStyle(
-                                  color: const Color(0xFF475569),
-                                  fontSize: context.sp(9),
-                                  fontFamily: 'monospace')),
-                          SizedBox(width: context.rp(6)),
-                          Expanded(
-                              child: Text(log['message'],
+          Expanded(
+            child: _systemLogs.isEmpty
+                ? Align(
+                    alignment: Alignment.topCenter,
+                    child: Text('No logs yet. Start recording to begin.',
+                        style: TextStyle(
+                            color: Colors.white24, fontSize: context.sp(11)),
+                        textAlign: TextAlign.center),
+                  )
+                : Builder(builder: (context) {
+                    final recentLogs = _systemLogs.reversed.take(20).toList();
+                    return ListView.builder(
+                      physics: const BouncingScrollPhysics(),
+                      itemCount: recentLogs.length,
+                      itemBuilder: (context, index) {
+                        final log = recentLogs[index];
+                        final textColor = switch (log['type']) {
+                          'SUCCESS' => const Color(0xFF10b981),
+                          'WARNING' => const Color(0xFFfbbf24),
+                          _ => const Color(0xFF94a3b8),
+                        };
+                        return Padding(
+                          padding: EdgeInsets.only(bottom: context.rs(5)),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('[${log['time']}]',
                                   style: TextStyle(
-                                      color: textColor,
+                                      color: const Color(0xFF475569),
                                       fontSize: context.sp(9),
-                                      fontFamily: 'monospace'))),
-                        ],
-                      ),
+                                      fontFamily: 'monospace')),
+                              SizedBox(width: context.rp(6)),
+                              Expanded(
+                                  child: Text(log['message'],
+                                      style: TextStyle(
+                                          color: textColor,
+                                          fontSize: context.sp(9),
+                                          fontFamily: 'monospace'))),
+                            ],
+                          ),
+                        );
+                      },
                     );
-                  },
-                ),
-              );
-            }),
+                  }),
+          ),
         ],
       ),
     );
