@@ -629,10 +629,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         totalPenalty += 8.0;
       }
     }
-    // Use a 2-minute floor so short test sessions aren't penalised to 0%
-    // by an artificially high alerts-per-minute rate.
-    final rawMin = durationSec > 0 ? durationSec / 60.0 : 1.0;
-    final durationMin = rawMin < 2.0 ? 2.0 : rawMin;
+    // 2-minute floor prevents inflated per-minute penalty rates on short test sessions.
+    final durationMin = (durationSec > 0 ? durationSec / 60.0 : 1.0).clamp(2.0, double.infinity);
     return (100.0 - (totalPenalty / durationMin) * 10.0).clamp(0.0, 100.0);
   }
 

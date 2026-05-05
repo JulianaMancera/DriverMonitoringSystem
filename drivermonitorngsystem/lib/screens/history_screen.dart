@@ -1210,8 +1210,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     final hasDateFilter = _dateRangeStart != null;
     final hasDetFilter = _detectionFilter.isNotEmpty || _minAlertLevel > 0;
     final hasAnyFilter = hasDateFilter || hasDetFilter;
-    // Responsive pill max width: screen width minus both horizontal pads,
-    // the gap between pills, and the clear button's width when it's visible.
+    // clearW mirrors the clear button's footprint: gap(8) + hPad×2(10×2) + icon(13).
+    // pillMaxW splits remaining width evenly between the two filter pills.
+    // Must stay in sync with the clear-button widget's actual layout.
     final clearW = hasAnyFilter
         ? (context.rp(8) + context.rp(10) * 2 + context.ri(13))
         : 0.0;
@@ -1550,6 +1551,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     final hasDateFilter = _videoDateRangeStart != null;
     final hasDetFilter = _videoDetectionFilter.isNotEmpty;
     final hasAnyFilter = hasDateFilter || hasDetFilter;
+    // clearW mirrors the clear button's footprint: gap(8) + hPad×2(10×2) + icon(13).
+    // pillMaxW splits remaining width evenly between the two filter pills.
+    // Must stay in sync with the clear-button widget's actual layout.
     final clearW = hasAnyFilter
         ? (context.rp(8) + context.rp(10) * 2 + context.ri(13))
         : 0.0;

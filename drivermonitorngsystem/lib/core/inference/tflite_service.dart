@@ -57,8 +57,14 @@ const int    _kDrowsyThreshold = 3;    // 0.6 s at 200 ms/frame
 const double _kDrowsyPctGate   = 15.0;
 
 // ── Distracted thresholds — three stages calibrated to 35° side-mount output ──
-// Normal driving: distPct 5–15%, bestClass 2–9%
-// Clear distraction: distPct 35–56%, bestClass 25–48%
+// Actual model output ranges observed from real sessions at this mount angle:
+//   Normal driving:    distPct  5–15%,  bestClass  2– 9%
+//   Mild distraction:  distPct 15–35%,  bestClass 10–24%
+//   Clear distraction: distPct 35–56%,  bestClass 25–48%
+//
+// Stage 1 HIGH  — distPct≥40%  bestClass≥25%  6 frames  no parent needed
+// Stage 2 MOD   — distPct≥22%  bestClass≥12%  12 frames parent required
+// Stage 3 LOW   — distPct≥15%  bestClass≥ 8%  22 frames parent+off-road required
 const double _kDistPctHigh   = 40.0;
 const double _kDistBestHigh  = 25.0;
 const int    _kDistThreshHigh = 6;   // ~1.2 s
@@ -472,6 +478,10 @@ class TfliteService {
       }
       final secThresh = _kBehaviorClassThresholds[secondIdx] ?? 30.0;
       if (secondScore >= secThresh && secondScore >= bestDistScore * 0.60) {
+        if (kDebugMode) {
+          debugPrint('[CrossClass] demoted body → ${kClassNames[secondIdx]} '
+              '($secondScore% vs body $bestDistScore%)');
+        }
         bestDistIdx  = secondIdx;
         bestDistScore = secondScore;
       }
@@ -492,7 +502,13 @@ class TfliteService {
         final pct = probs[i] * 100.0;
         if (pct > secondBestScore) secondBestScore = pct;
       }
-      if (secondBestScore >= bestDistScore - 20.0) groomingIsFP = true;
+      if (secondBestScore >= bestDistScore - 20.0) {
+        groomingIsFP = true;
+        if (kDebugMode) {
+          debugPrint('[GroomingFP] suppressed: grooming=${bestDistScore.toStringAsFixed(1)}% '
+              '2nd=${secondBestScore.toStringAsFixed(1)}% — too close, treating as noise');
+        }
+      }
     }
 
     if (groomingIsFP) {
@@ -558,6 +574,7 @@ class TfliteService {
       if (activeStage == 3) {
         if (rawBestIdx != _lastDistractedClass) {
           rawState = 'neutral'; rawBestIdx = 0; activeStage = 0;
+          if (kDebugMode) debugPrint('[Stability-s3] class mismatch, waiting');
         }
       } else {
         rawBestIdx = _lastDistractedClass;

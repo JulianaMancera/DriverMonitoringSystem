@@ -502,14 +502,14 @@ class DatabaseHelper {
 
   Future<Map<String, dynamic>> getDashboardSummary() async {
     final results = await Future.wait([
-      getTotalDriveTimeSec(days: 30),
-      getTotalAlertCount(hours: 24),
-      getSafetyStreakDays(),
-      getAvgAlertness(days: 7),
-      getAvgSafetyScore(days: 30),
-      getLatestSessionSnapshots(),
-      getDailySafetyScores(days: 30),
-      _getLastTwoSessionScores(),
+      getTotalDriveTimeSec(days: 30),   // [0]
+      getTotalAlertCount(hours: 24),    // [1]
+      getSafetyStreakDays(),             // [2]
+      getAvgAlertness(days: 7),         // [3]
+      getAvgSafetyScore(days: 30),      // [4]
+      getLatestSessionSnapshots(),      // [5]
+      getDailySafetyScores(days: 30),   // [6]
+      _getLastTwoSessionScores(),       // [7]
     ]);
 
     final twoScores = results[7] as List<Map<String, dynamic>>;
@@ -529,13 +529,13 @@ class DatabaseHelper {
 
   Future<Map<String, dynamic>> getAnalyticsSummary({int? days}) async {
     final results = await Future.wait([
-      getTotalSessionCount(days: days),
-      getTotalAlertCount(days: days),
-      getAlertCountByType(alertType: 'DROWSY', days: days),
-      getAlertCountByType(alertType: 'DISTRACTED', days: days),
-      getDailyAlertTrends(days: days),
-      getHourlyAlertDistribution(days: days),
-      getAvgSafetyScore(days: days),
+      getTotalSessionCount(days: days),                          // [0]
+      getTotalAlertCount(days: days),                            // [1]
+      getAlertCountByType(alertType: 'DROWSY', days: days),     // [2]
+      getAlertCountByType(alertType: 'DISTRACTED', days: days), // [3]
+      getDailyAlertTrends(days: days),                          // [4]
+      getHourlyAlertDistribution(days: days),                   // [5]
+      getAvgSafetyScore(days: days),                            // [6]
     ]);
 
     return {
