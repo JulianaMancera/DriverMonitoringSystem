@@ -321,39 +321,48 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       });
     }
 
-    await Future.delayed(const Duration(milliseconds: 300));
+    // ✅ Exponential backoff with maximum retries (instead of arbitrary delays)
+    const maxRetries = 3;
+    var retryCount = 0;
+    var backoffMs = 300;
 
-    if (!mounted || _camDisposing) return;
+    while (retryCount < maxRetries && !_camDisposing && mounted) {
+      try {
+        await Future.delayed(Duration(milliseconds: backoffMs));
 
-    try {
-      if (!_cameraController!.value.isStreamingImages) {
-        await _cameraController!.startImageStream(_onCameraFrame);
-      }
-      _isInPipRecovery = false;
-      if (mounted) {
-        setState(() {
-          _cameraResuming = false;
-          _cameraReconnecting = false;
-        });
-      }
-    } catch (e) {
-      debugPrint(
-          '[Camera] startImageStream during recovery: $e — waiting for CameraX');
-      if (mounted) setState(() => _cameraResuming = false);
-      Future.delayed(const Duration(milliseconds: 800), () async {
         if (!mounted || _camDisposing || _cameraController == null) return;
-        try {
-          if (!_cameraController!.value.isStreamingImages) {
-            await _cameraController!.startImageStream(_onCameraFrame);
-          }
-          _isInPipRecovery = false;
-          if (mounted) setState(() => _cameraReconnecting = false);
-        } catch (e2) {
-          debugPrint('[Camera] retry startImageStream failed: $e2');
-          _isInPipRecovery = false;
-          if (mounted) setState(() => _cameraReconnecting = false);
+
+        if (!_cameraController!.value.isStreamingImages) {
+          await _cameraController!.startImageStream(_onCameraFrame);
+          debugPrint('[Camera] ✅ Image stream resumed after PiP recovery');
         }
-      });
+
+        _isInPipRecovery = false;
+        if (mounted) {
+          setState(() {
+            _cameraResuming = false;
+            _cameraReconnecting = false;
+          });
+        }
+        return; // ✅ Success - exit retry loop
+      } catch (e) {
+        retryCount++;
+        debugPrint(
+            '[Camera] startImageStream retry $retryCount/$maxRetries failed: $e');
+        backoffMs = (backoffMs * 1.5).toInt(); // ✅ Exponential backoff
+
+        if (retryCount >= maxRetries) {
+          debugPrint(
+              '[Camera] ❌ Failed to resume image stream after $maxRetries retries');
+          _isInPipRecovery = false;
+          if (mounted) {
+            setState(() {
+              _cameraResuming = false;
+              _cameraReconnecting = false;
+            });
+          }
+        }
+      }
     }
   }
 
@@ -629,10 +638,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         totalPenalty += 8.0;
       }
     }
-    // Use a 2-minute floor so short test sessions aren't penalised to 0%
-    // by an artificially high alerts-per-minute rate.
-    final rawMin = durationSec > 0 ? durationSec / 60.0 : 1.0;
-    final durationMin = rawMin < 2.0 ? 2.0 : rawMin;
+    // 2-minute floor prevents inflated per-minute penalty rates on short test sessions.
+    final durationMin = (durationSec > 0 ? durationSec / 60.0 : 1.0)
+        .clamp(2.0, double.infinity);
     return (100.0 - (totalPenalty / durationMin) * 10.0).clamp(0.0, 100.0);
   }
 
@@ -651,102 +659,155 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
     _isStopping = true;
 
+    // ✅ Timeout mechanism to prevent _isStopping flag from getting stuck
+    const maxStopDuration = Duration(seconds: 30);
+    var stopCompleted = false;
+
     try {
-      if (_currentSessionId == null && ActiveSession.isActive) {
-        _currentSessionId = ActiveSession.sessionId;
-        _sessionStartTime = ActiveSession.startTime;
-      }
-      // Guard: if still null after restore, nothing to stop
-      if (_currentSessionId == null) {
-        BantayDriveService.stopService();
-        PipService.setRecording(false);
-        if (mounted) {
-          ref.read(isRecordingProvider.notifier).set(false);
-          ref.read(driverStateProvider.notifier).set('neutral');
-          ref.read(showAlertBannerProvider.notifier).set(false);
+      // Execute stop logic with timeout
+      await Future.any([
+        _performStopRecording().then((_) {
+          stopCompleted = true;
+        }),
+        Future.delayed(maxStopDuration).then((_) {
+          if (!stopCompleted) {
+            debugPrint(
+                '[Monitor] ⚠️ _stopRecording exceeded 30s timeout, forcing cleanup');
+            _performStopRecordingCleanup();
+          }
+        }),
+      ]).catchError((_) {
+        // Ignore timeout error
+        if (!stopCompleted) {
+          _performStopRecordingCleanup();
         }
-        return; // finally still runs and resets _isStopping
-      }
+      });
+    } catch (e) {
+      debugPrint('[Monitor] ❌ Unexpected error in _stopRecording: $e');
+      _performStopRecordingCleanup();
+    } finally {
+      _isStopping = false;
+    }
+  }
 
-      _snapshotTimer?.cancel();
-      _sessionTimer?.cancel();
-      _sessionTimer = null;
-      if (mounted) setState(() => _sessionElapsedSec = 0);
-
-      await _saveAlertnessSnapshot();
-
-      await _pauseCameraStream();
-      await _alarmPlayer.stop();
-      _alertLevel = _consecutiveDrowsy = _consecutiveDistracted = 0;
-
-      final durationSec = _sessionStartTime != null
-          ? DateTime.now().difference(_sessionStartTime!).inSeconds
-          : 0;
-
-      final snapshots = await DatabaseHelper.instance
-          .getAlertnessSnapshots(_currentSessionId!);
-      final alertness =
-          _computeAlertnessAvg(snapshots, ref.read(alertnessPctProvider));
-
-      final alerts =
-          await DatabaseHelper.instance.getAlertsBySession(_currentSessionId!);
-      final safetyScore = _computeSafetyScore(alerts, durationSec);
-
-      await DatabaseHelper.instance.endSession(
-        sessionId: _currentSessionId!,
-        durationSec: durationSec,
-        alertnessAvg: alertness,
-        safetyScore: safetyScore,
-      );
-
-      debugPrint('[Monitor] Session $_currentSessionId ended — '
-          'score: ${safetyScore.toInt()}%');
-      await ActiveSession.clear();
-
-      if (mounted) {
-        ref.read(isInPipProvider.notifier).set(false);
-        _flushPendingLogs();
-      }
-      _addLogSync('Session Ended — Score: ${safetyScore.toInt()}%', 'INFO');
-
+  /// Main stop recording logic (extracted for timeout handling)
+  Future<void> _performStopRecording() async {
+    if (_currentSessionId == null && ActiveSession.isActive) {
+      _currentSessionId = ActiveSession.sessionId;
+      _sessionStartTime = ActiveSession.startTime;
+    }
+    // Guard: if still null after restore, nothing to stop
+    if (_currentSessionId == null) {
       BantayDriveService.stopService();
       PipService.setRecording(false);
+      if (mounted) {
+        ref.read(isRecordingProvider.notifier).set(false);
+        ref.read(driverStateProvider.notifier).set('neutral');
+        ref.read(showAlertBannerProvider.notifier).set(false);
+      }
+      return;
+    }
 
-      _currentSessionId = null;
-      _sessionStartTime = null;
-      _pipResumeHandled = false;
-      _isInPipRecovery = false;
+    _snapshotTimer?.cancel();
+    _sessionTimer?.cancel();
+    _sessionTimer = null;
+    if (mounted) setState(() => _sessionElapsedSec = 0);
 
-      final drowsyAlerts =
-          alerts.where((a) => a['alert_type'] == 'DROWSY').length;
-      final distractedAlerts =
-          alerts.where((a) => a['alert_type'] == 'DISTRACTED').length;
+    await _saveAlertnessSnapshot();
 
+    await _pauseCameraStream();
+    await _alarmPlayer.stop();
+    _alertLevel = _consecutiveDrowsy = _consecutiveDistracted = 0;
+
+    final durationSec = _sessionStartTime != null
+        ? DateTime.now().difference(_sessionStartTime!).inSeconds
+        : 0;
+
+    final snapshots =
+        await DatabaseHelper.instance.getAlertnessSnapshots(_currentSessionId!);
+    final alertness =
+        _computeAlertnessAvg(snapshots, ref.read(alertnessPctProvider));
+
+    final alerts =
+        await DatabaseHelper.instance.getAlertsBySession(_currentSessionId!);
+    final safetyScore = _computeSafetyScore(alerts, durationSec);
+
+    await DatabaseHelper.instance.endSession(
+      sessionId: _currentSessionId!,
+      durationSec: durationSec,
+      alertnessAvg: alertness,
+      safetyScore: safetyScore,
+    );
+
+    debugPrint('[Monitor] Session $_currentSessionId ended — '
+        'score: ${safetyScore.toInt()}%');
+    await ActiveSession.clear();
+
+    if (mounted) {
+      ref.read(isInPipProvider.notifier).set(false);
+      _flushPendingLogs();
+    }
+    _addLogSync('Session Ended — Score: ${safetyScore.toInt()}%', 'INFO');
+
+    BantayDriveService.stopService();
+    PipService.setRecording(false);
+
+    _currentSessionId = null;
+    _sessionStartTime = null;
+    _pipResumeHandled = false;
+    _isInPipRecovery = false;
+
+    final drowsyAlerts =
+        alerts.where((a) => a['alert_type'] == 'DROWSY').length;
+    final distractedAlerts =
+        alerts.where((a) => a['alert_type'] == 'DISTRACTED').length;
+
+    ref.read(isRecordingProvider.notifier).set(false);
+    ref.read(driverStateProvider.notifier).set('neutral');
+    ref.read(showAlertBannerProvider.notifier).set(false);
+    ref.read(alertnessPctProvider.notifier).set(100.0);
+    ref.read(drowsinessPctProvider.notifier).set(0.0);
+    ref.read(distractionPctProvider.notifier).set(0.0);
+    ref.read(activeSubclassProvider.notifier).set(null);
+    ref.read(activeSubclassIndexProvider.notifier).set(0);
+
+    if (mounted) {
+      ref.read(dbChangeCounterProvider.notifier).increment();
+
+      final showSummary =
+          await PreferencesHelper.instance.getShowSessionSummary();
+      if (mounted && showSummary) {
+        _showSessionSummaryModal(
+          durationSec: durationSec,
+          safetyScore: safetyScore,
+          drowsyAlerts: drowsyAlerts,
+          distractedAlerts: distractedAlerts,
+        );
+      }
+    }
+  }
+
+  /// Cleanup when stop recording times out or fails
+  void _performStopRecordingCleanup() {
+    BantayDriveService.stopService();
+    PipService.setRecording(false);
+
+    _snapshotTimer?.cancel();
+    _sessionTimer?.cancel();
+    _sessionTimer = null;
+
+    _currentSessionId = null;
+    _sessionStartTime = null;
+    _pipResumeHandled = false;
+    _isInPipRecovery = false;
+    _alertLevel = _consecutiveDrowsy = _consecutiveDistracted = 0;
+
+    if (mounted) {
       ref.read(isRecordingProvider.notifier).set(false);
       ref.read(driverStateProvider.notifier).set('neutral');
       ref.read(showAlertBannerProvider.notifier).set(false);
       ref.read(alertnessPctProvider.notifier).set(100.0);
-      ref.read(drowsinessPctProvider.notifier).set(0.0);
-      ref.read(distractionPctProvider.notifier).set(0.0);
-      ref.read(activeSubclassProvider.notifier).set(null);
-      ref.read(activeSubclassIndexProvider.notifier).set(0);
-
-      if (mounted) {
-        ref.read(dbChangeCounterProvider.notifier).increment();
-
-        final showSummary =
-            await PreferencesHelper.instance.getShowSessionSummary();
-        if (mounted && showSummary) {
-          _showSessionSummaryModal(
-            durationSec: durationSec,
-            safetyScore: safetyScore,
-            drowsyAlerts: drowsyAlerts,
-            distractedAlerts: distractedAlerts,
-          );
-        }
-      }
-    } finally {
-      _isStopping = false;
+      setState(() => _sessionElapsedSec = 0);
     }
   }
 
@@ -794,9 +855,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   void _startHeadPoseUpdates() {
     _headPoseTimer?.cancel();
     _headPoseTimer =
-        Timer.periodic(const Duration(milliseconds: 200), (_) async {
+        Timer.periodic(const Duration(milliseconds: 500), (_) async {
+      // ✅ Skip if already running (prevent overlapping calls)
+      if (_isHeadPoseRunning || _camDisposing) return;
+
       final frame = _latestFrame;
-      if (frame == null || _isHeadPoseRunning || _camDisposing) return;
+      if (frame == null) return;
+
       _isHeadPoseRunning = true;
       try {
         final result = await HeadPoseService.instance.detectPose(frame);
@@ -819,6 +884,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         // When face is not detected, keep the last known face values.
         // Zeroing EAR to 0.0 would falsely signal "eyes completely closed"
         // and corrupt the temporal buffer used for drowsy detection.
+      } catch (e) {
+        debugPrint('[HeadPose] Error detecting pose: $e');
       } finally {
         _isHeadPoseRunning = false;
       }
@@ -988,58 +1055,123 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     // if the alert is still active → repeat until clear or 3-min cap.
     // Each chunk is saved as its own clip entry so its file length always
     // matches the displayed duration.
-    const chunkDuration    = Duration(seconds: 10);
-    const inferenceWindow  = Duration(milliseconds: 1000);
+    const chunkDuration = Duration(seconds: 10);
+    const inferenceWindow = Duration(milliseconds: 1000);
     const maxTotalDuration = Duration(minutes: 3);
-    final clipStart        = DateTime.now();
+    // ✅ Buffer delay after stopping image stream before starting video recording
+    const surfaceRecoveryDelay = Duration(milliseconds: 150);
+    final clipStart = DateTime.now();
 
     try {
       bool keepRecording = true;
+      int recordingAttempts = 0;
+      int consecutiveErrors = 0;
 
       while (keepRecording) {
         if (_camDisposing || !ref.read(isRecordingProvider)) break;
         if (DateTime.now().difference(clipStart) >= maxTotalDuration) break;
 
+        recordingAttempts++;
+
+        // ✅ Stop image stream with proper state management
         if (_cameraController!.value.isStreamingImages) {
-          await _cameraController!.stopImageStream();
+          try {
+            await _cameraController!.stopImageStream();
+            debugPrint('[VideoClip] Image stream stopped for chunk recording');
+          } catch (e) {
+            debugPrint('[VideoClip] ❌ Error stopping image stream: $e');
+            consecutiveErrors++;
+            if (consecutiveErrors >= 3) break;
+            await Future.delayed(const Duration(milliseconds: 500));
+            continue;
+          }
         }
 
-        await _cameraController!.startVideoRecording();
+        // ✅ Wait for surface to be ready before starting video recording
+        await Future.delayed(surfaceRecoveryDelay);
+
+        try {
+          await _cameraController!.startVideoRecording();
+          consecutiveErrors = 0; // Reset error counter on success
+          debugPrint(
+              '[VideoClip] Video recording started (attempt $recordingAttempts)');
+        } catch (e) {
+          debugPrint('[VideoClip] ❌ Error starting video recording: $e');
+          consecutiveErrors++;
+          if (consecutiveErrors >= 3) {
+            debugPrint(
+                '[VideoClip] ❌ Too many consecutive errors, stopping recording');
+            break;
+          }
+          await Future.delayed(const Duration(milliseconds: 500));
+          continue;
+        }
+
         await Future.delayed(chunkDuration);
 
         if (_camDisposing) {
-          try { await _cameraController!.stopVideoRecording(); } catch (_) {}
+          try {
+            await _cameraController!.stopVideoRecording();
+          } catch (_) {}
           break;
         }
 
-        final XFile videoFile = await _cameraController!.stopVideoRecording();
+        XFile? videoFile;
+        try {
+          videoFile = await _cameraController!.stopVideoRecording();
+          debugPrint(
+              '[VideoClip] Video recording stopped, file: ${videoFile.path}');
+        } catch (e) {
+          debugPrint('[VideoClip] ❌ Error stopping video recording: $e');
+          consecutiveErrors++;
+          if (consecutiveErrors >= 3) break;
+          continue;
+        }
 
+        // ✅ Verify file was created and attempt to save
         final savedPath = await VideoClipService.saveClip(
           sourcePath: videoFile.path,
           sessionId: sessionId,
         );
+
         if (savedPath != null && mounted) {
-          await DatabaseHelper.instance.insertVideoClip(
-            sessionId: sessionId,
-            filePath: savedPath,
-            alertTypes: alertType,
-            durationSec: chunkDuration.inSeconds,
-          );
-          ref.read(dbChangeCounterProvider.notifier).increment();
+          try {
+            await DatabaseHelper.instance.insertVideoClip(
+              sessionId: sessionId,
+              filePath: savedPath,
+              alertTypes: alertType,
+              durationSec: chunkDuration.inSeconds,
+            );
+            ref.read(dbChangeCounterProvider.notifier).increment();
+            debugPrint('[VideoClip] ✅ Clip saved and recorded: $savedPath');
+          } catch (e) {
+            debugPrint('[VideoClip] ❌ Error inserting clip into database: $e');
+            // Continue even if DB insert fails
+          }
+        } else {
+          debugPrint('[VideoClip] ❌ Failed to save clip (savedPath was null)');
+          consecutiveErrors++;
+          if (consecutiveErrors >= 3) break;
         }
 
         // Brief inference window: check whether the alert is still active.
         if (!_camDisposing && ref.read(isRecordingProvider)) {
           try {
             await _cameraController!.startImageStream(_onCameraFrame);
+            debugPrint('[VideoClip] Image stream resumed for inference check');
             await Future.delayed(inferenceWindow);
             if (_cameraController!.value.isStreamingImages) {
               await _cameraController!.stopImageStream();
+              debugPrint(
+                  '[VideoClip] Image stream stopped after inference check');
             }
           } catch (e) {
-            debugPrint('[VideoClip] inference check error: $e');
-            keepRecording = false;
-            break;
+            debugPrint('[VideoClip] ❌ Inference check error: $e');
+            consecutiveErrors++;
+            if (consecutiveErrors >= 3) {
+              keepRecording = false;
+              break;
+            }
           }
           keepRecording = _alertLevel > 0;
         } else {
