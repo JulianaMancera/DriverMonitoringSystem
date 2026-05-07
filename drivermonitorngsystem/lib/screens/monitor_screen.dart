@@ -630,13 +630,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     double totalPenalty = 0.0;
     for (final a in alerts) {
       final level = (a['alert_level'] as int?) ?? 1;
-      if (level == 1) {
-        totalPenalty += 2.0;
-      } else if (level == 2) {
-        totalPenalty += 4.0;
-      } else {
-        totalPenalty += 8.0;
-      }
+      totalPenalty += switch (level) { 1 => 2.0, 2 => 4.0, _ => 8.0 };
     }
     // 2-minute floor prevents inflated per-minute penalty rates on short test sessions.
     final durationMin = (durationSec > 0 ? durationSec / 60.0 : 1.0)

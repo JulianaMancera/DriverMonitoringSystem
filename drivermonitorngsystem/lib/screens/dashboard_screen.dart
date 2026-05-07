@@ -98,14 +98,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final bool isRecording    = ref.watch(isRecordingProvider);
     final bool hasAnySessions = dailyScores.isNotEmpty;
 
-    String scoreLabel = 'EXCELLENT';
-     if (safetyScore < 60) {
-          scoreLabel = "POOR";
-      } else if (safetyScore < 75) {
-          scoreLabel = "FAIR";
-      } else if (safetyScore < 90) {
-          scoreLabel = "GOOD";
-      }
+    final scoreLabel = switch (safetyScore) {
+      < 60.0 => 'POOR',
+      < 75.0 => 'FAIR',
+      < 90.0 => 'GOOD',
+      _ => 'EXCELLENT',
+    };
 
     return RefreshIndicator(
       color:           const Color(0xFF22d3ee),

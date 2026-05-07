@@ -13,16 +13,11 @@ class Responsive {
 
   // Per-brand multiplier compensates for OEM UI chrome inflation
   // (Samsung One UI, MIUI, ColorOS all scale text/chrome above stock Android).
-  static double _brandFactor() {
-    switch (_deviceBrand) {
-      case DeviceBrand.samsung: return 0.92;
-      case DeviceBrand.xiaomi:  return 0.97;
-      case DeviceBrand.oppo:    return 0.97;
-      case DeviceBrand.vivo:    return 0.97;
-      case DeviceBrand.pixel:   return 1.00;
-      case DeviceBrand.other:   return 1.00;
-    }
-  }
+  static double _brandFactor() => switch (_deviceBrand) {
+    DeviceBrand.samsung => 0.92,
+    DeviceBrand.xiaomi || DeviceBrand.oppo || DeviceBrand.vivo => 0.97,
+    DeviceBrand.pixel || DeviceBrand.other => 1.00,
+  };
 
   static const double mobileBreakpoint  = 600;
   static const double tabletBreakpoint  = 900;
@@ -83,13 +78,13 @@ class Responsive {
     T? tablet,
   }) {
     if (isTablet(context) || isDesktop(context)) return tablet ?? base;
-    switch (phoneTier(context)) {
-      case PhoneTier.compact: return compact ?? small ?? base;
-      case PhoneTier.small:   return small   ?? base;
-      case PhoneTier.medium:  return base;
-      case PhoneTier.large:   return large   ?? base;
-      case PhoneTier.xlarge:  return xlarge  ?? large ?? base;
-    }
+    return switch (phoneTier(context)) {
+      PhoneTier.compact => compact ?? small ?? base,
+      PhoneTier.small   => small   ?? base,
+      PhoneTier.medium  => base,
+      PhoneTier.large   => large   ?? base,
+      PhoneTier.xlarge  => xlarge  ?? large ?? base,
+    };
   }
 
   static double getWidth(BuildContext context) =>
@@ -138,13 +133,11 @@ extension ResponsiveContext on BuildContext {
 
   bool get isShortPhone => sh < 700;
 
-  double get hPad {
-    switch (phoneTier) {
-      case PhoneTier.compact: return rp(12);
-      case PhoneTier.small:   return rp(14);
-      default:                return rp(16).clamp(14.0, 24.0);
-    }
-  }
+  double get hPad => switch (phoneTier) {
+    PhoneTier.compact => rp(12),
+    PhoneTier.small   => rp(14),
+    _                 => rp(16).clamp(14.0, 24.0),
+  };
 
   EdgeInsets get cardPadding => EdgeInsets.symmetric(
     horizontal: rp(14).clamp(10.0, 20.0),
@@ -162,13 +155,11 @@ extension ResponsiveContext on BuildContext {
     T? small,
     T? large,
     T? xlarge,
-  }) {
-    switch (phoneTier) {
-      case PhoneTier.compact: return compact ?? small ?? base;
-      case PhoneTier.small:   return small ?? base;
-      case PhoneTier.medium:  return base;
-      case PhoneTier.large:   return large ?? base;
-      case PhoneTier.xlarge:  return xlarge ?? large ?? base;
-    }
-  }
+  }) => switch (phoneTier) {
+    PhoneTier.compact => compact ?? small ?? base,
+    PhoneTier.small   => small ?? base,
+    PhoneTier.medium  => base,
+    PhoneTier.large   => large ?? base,
+    PhoneTier.xlarge  => xlarge ?? large ?? base,
+  };
 }
