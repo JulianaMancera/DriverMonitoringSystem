@@ -95,16 +95,20 @@ A running summary of everything that has been built into Bantay Drive from start
   - Tap a session to open a detail sheet with alertness timeline, individual alert events, system log, and linked video clips
 - **Video Logs tab** — all saved alert clips
   - Thumbnail, duration, alert type, date and time shown per clip
+  - Filter by date range and detection type (Drowsy / Distracted)
+  - Clips are validated on load — entries whose files no longer exist on device are automatically hidden
   - In-app video player
-  - Export to Downloads folder
-  - Delete individual clips
+  - **Multi-select bulk export** — tap to select one or more clips, then export all selected clips to the Downloads folder in one action
+  - Specific error feedback on export failure: distinct messages for disk full, permission denied, and file not found
+  - Delete a clip via the delete button or by swiping the card
+  - Export is locked while a batch download is in progress to prevent duplicate exports
 
 ---
 
 ### Settings
 
 | Setting | Details |
-|---|---|
+| --- | --- |
 | **Alert Volume** | Slider 0–100%, default 85% |
 | **Alert Sensitivity** | Low / Normal / High |
 | **Auto-Start Recording** | Toggle, default Off |
@@ -138,7 +142,6 @@ A running summary of everything that has been built into Bantay Drive from start
 - **Portrait orientation** supported (standard use case)
 - **Responsive layouts** on monitor and filter screens
 - **Animations** on the Analytics screen
-- **Clear Glasses Mode** (Settings) for improved eye detection when wearing glasses
 
 ---
 

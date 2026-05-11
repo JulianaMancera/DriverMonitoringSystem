@@ -124,7 +124,7 @@ Driver ──→ UC-01: First Launch & Onboarding   (first install only)
 ### Main Flow
 1. Driver taps **Start**.
 2. System checks if camera permission has been granted.
-3. Camera permission is granted → System initializes the camera feed (rear-facing, portrait-locked).
+3. Camera permission is granted → System initializes the camera feed (front-facing/driver-facing, portrait-locked).
 4. Android OS starts a foreground service and displays a persistent status-bar notification.
 5. System creates a new session record in the SQLite `sessions` table.
 6. System begins the inference loop (every 200 ms):
@@ -187,6 +187,7 @@ Driver ──→ UC-01: First Launch & Onboarding   (first install only)
    - → Moderate audio alert plays (L1/L2 sound asset).
    - → Orange visual indicator replaces the amber one.
    - → Alert event is logged to the SQLite `alert_events` table with timestamp, class, and confidence.
+   - → Video clip recording is triggered (UC-06).
 
    **Stage 3 — Level 3 Critical Alert:**
    - distPct ≥ 15%, bestClass ≥ 8%, sustained for 22 consecutive frames.
@@ -266,10 +267,11 @@ Driver ──→ UC-01: First Launch & Onboarding   (first install only)
 ## UC-06: Record Alert Video Clip
 
 **Actor:** System  
-**Trigger:** A Level 3 critical alert is raised during an active session (triggered by UC-04).
+**Trigger:** A Level 2 or Level 3 alert is raised during an active session (triggered by UC-04).
 
 ### Preconditions
-- A Level 3 alert has been confirmed.
+
+- A Level 2 or Level 3 alert has been confirmed.
 - Camera feed is active and writable.
 - App-private storage is available.
 
@@ -356,6 +358,8 @@ Driver ──→ UC-01: First Launch & Onboarding   (first install only)
 6. Driver applies filters:
    - **Date filter:** date-range picker to narrow sessions to a specific period.
    - **Alert-type filter:** filter by drowsiness alerts, distraction alerts, or all.
+   - **Alert-level filter:** filter by minimum alert level (Level 1, Level 2, or any).
+   - **Text search:** free-text field searches sessions by date string.
    - Filtered results update dynamically.
 7. Driver taps **Clear** (visible only when filters are active) to reset all filters.
 
@@ -364,9 +368,16 @@ Driver ──→ UC-01: First Launch & Onboarding   (first install only)
 9. System loads the list of saved alert video clips from SQLite.
 10. Each row displays: clip date/time, linked alert type, duration.
 11. Driver may apply the same date and alert-type filters.
-12. Driver taps a clip:
-    - Video player opens and plays the clip.
+12. Driver taps a clip to select it (multi-select mode):
+    - Tapping additional clips adds them to the selection.
+    - A bottom action bar appears showing selected count and a **Download** button.
+    - Driver taps **Download** → all selected clips are exported to the device's Downloads folder in one batch.
+    - Export is locked (button disabled) while a batch download is already in progress.
+    - Driver taps **Cancel** in the action bar to clear the selection.
+13. Driver taps a clip row (not in multi-select) to open the in-app video player:
     - Driver can pause, seek, and dismiss.
+14. Driver deletes a clip by tapping the delete button on the clip card, or by swiping the card:
+    - A confirmation dialog is shown before permanent deletion.
 
 ### Postconditions
 - No data is written; this is a read-only view.
@@ -383,8 +394,14 @@ Driver ──→ UC-01: First Launch & Onboarding   (first install only)
 - Driver clears filters to see all clips.
 
 **A3 — Video file is missing from storage:**
-- Clip record exists in the database but the file has been deleted externally.
-- Player shows an error message; the clip row remains visible in the list.
+
+- Clip records are validated on load; any entry whose file no longer exists on device is automatically hidden from the list.
+- The database record is retained but the clip does not appear in the UI.
+
+**A4 — Export fails during batch download:**
+
+- System surfaces a specific error message depending on the cause: disk full, permission denied, or file not found.
+- Successfully exported clips in the same batch are unaffected; only the failed clip is reported.
 
 ---
 
