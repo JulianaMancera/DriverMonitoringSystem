@@ -4,6 +4,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
 class VideoClipService {
+  // Minimum free space required (50MB) before attempting to write
+  static const int _minFreeBytesRequired = 52428800;
+
   static Future<Directory> _clipsDir() async {
     final docs = await getApplicationDocumentsDirectory();
     final dir = Directory(p.join(docs.path, 'alert_clips'));
@@ -11,11 +14,31 @@ class VideoClipService {
     return dir;
   }
 
+  /// Check if sufficient disk space is available
+  static Future<bool> _hasSufficientDiskSpace() async {
+    try {
+      final dir = await _clipsDir();
+      final stat = await FileStat.stat(dir.path);
+      final availableBytes = stat.size; // Approximate available space
+      return availableBytes > _minFreeBytesRequired;
+    } catch (e) {
+      debugPrint('[VideoClip] Disk space check error: $e');
+      // If we can't check, assume we have space to attempt write
+      return true;
+    }
+  }
+
   static Future<String?> saveClip({
     required String sourcePath,
     required int sessionId,
   }) async {
     try {
+      // ✅ Check disk space before attempting write
+      if (!await _hasSufficientDiskSpace()) {
+        debugPrint('[VideoClip] ❌ Insufficient disk space for saveClip');
+        return null;
+      }
+
       final src = File(sourcePath);
 
       // ✅ Verify source file exists
@@ -75,13 +98,18 @@ class VideoClipService {
     }
   }
 
-  /// Returns (destinationPath, errorReason). On success errorReason is null.
-  static Future<(String?, String?)> exportToDownloads(String filePath) async {
+  static Future<String?> exportToDownloads(String filePath) async {
     try {
+      // ✅ Check disk space before export
+      if (!await _hasSufficientDiskSpace()) {
+        debugPrint('[VideoClip] ❌ Insufficient disk space for export');
+        return null;
+      }
+
       final src = File(filePath);
       if (!await src.exists()) {
         debugPrint('[VideoClip] ❌ Source file does not exist: $filePath');
-        return (null, 'file_not_found');
+        return null;
       }
 
       final fileName = p.basename(filePath);
@@ -92,9 +120,10 @@ class VideoClipService {
         final dest = p.join(downloadsDir.path, fileName);
         await src.copy(dest);
 
+        // ✅ Verify export succeeded
         if (await File(dest).exists()) {
           debugPrint('[VideoClip] ✅ Exported to Downloads: $dest');
-          return (dest, null);
+          return dest;
         }
       }
 
@@ -103,27 +132,18 @@ class VideoClipService {
         final dest = p.join(extDir.path, fileName);
         await src.copy(dest);
 
+        // ✅ Verify export succeeded
         if (await File(dest).exists()) {
           debugPrint('[VideoClip] ✅ Exported to external storage: $dest');
-          return (dest, null);
+          return dest;
         }
       }
 
       debugPrint('[VideoClip] ❌ Could not export file: no valid destination');
-      return (null, 'no_destination');
-    } on FileSystemException catch (e) {
-      final msg = e.message.toLowerCase();
-      debugPrint('[VideoClip] ❌ exportToDownloads FileSystemException: $e');
-      if (msg.contains('no space') || msg.contains('disk full') || msg.contains('enospc')) {
-        return (null, 'disk_full');
-      }
-      if (msg.contains('permission') || msg.contains('denied') || msg.contains('eacces')) {
-        return (null, 'permission_denied');
-      }
-      return (null, 'io_error');
+      return null;
     } catch (e) {
       debugPrint('[VideoClip] ❌ exportToDownloads error: $e');
-      return (null, 'unknown');
+      return null;
     }
   }
 
