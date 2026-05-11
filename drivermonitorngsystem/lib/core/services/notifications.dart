@@ -1,15 +1,3 @@
-// notifications.dart
-//
-// FIX: updateState() was called on every inference frame (~3-5 FPS).
-// FlutterForegroundTask.updateService() re-registers notification buttons
-// on every call. On Android, re-registering a notification action while
-// the user is interacting with it (tapping Stop) drops the tap event silently.
-// This is why the stop button appeared "clickable or not" — the button press
-// was being lost because the notification was being rebuilt under the user's finger.
-//
-// Fix: throttle updateState() to fire at most once every 2 seconds,
-// and only when the state actually changes.
-
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -20,11 +8,14 @@ class BantayDriveService {
   static bool _serviceReady = false;
   static bool get isReady => _serviceReady;
 
-  // Throttle state: track last update time and last state so we only call
-  // updateService() when something actually changed AND enough time has passed.
-  static String   _lastState      = '';
+  static String _lastState = '';
   static DateTime _lastUpdateTime = DateTime.fromMillisecondsSinceEpoch(0);
-  static const    _kUpdateThrottle = Duration(seconds: 2);
+  static const _kUpdateThrottle = Duration(seconds: 2);
+
+  // Reused across startService and updateState to avoid re-creating the list.
+  static const _stopButton = [
+    NotificationButton(id: 'stop_recording', text: '⏹ Stop'),
+  ];
 
   static Future<void> initialize() async {
     try {
@@ -57,8 +48,7 @@ class BantayDriveService {
 
   static Future<void> startService({String state = 'neutral'}) async {
     if (!_serviceReady) return;
-    // Reset throttle on fresh session start so the first update always fires.
-    _lastState      = '';
+    _lastState = '';
     _lastUpdateTime = DateTime.fromMillisecondsSinceEpoch(0);
     try {
       final running = await FlutterForegroundTask.isRunningService;
@@ -66,9 +56,7 @@ class BantayDriveService {
         await FlutterForegroundTask.updateService(
           notificationTitle: 'Bantay Drive',
           notificationText: _statusText(state),
-          notificationButtons: [
-            const NotificationButton(id: 'stop_recording', text: '⏹ Stop'),
-          ],
+          notificationButtons: _stopButton,
         );
       } else {
         await FlutterForegroundTask.startService(
@@ -76,12 +64,10 @@ class BantayDriveService {
           notificationTitle: 'Bantay Drive',
           notificationText: _statusText(state),
           callback: startCallback,
-          notificationButtons: [
-            const NotificationButton(id: 'stop_recording', text: '⏹ Stop'),
-          ],
+          notificationButtons: _stopButton,
         );
       }
-      _lastState      = state;
+      _lastState = state;
       _lastUpdateTime = DateTime.now();
       debugPrint('[BantayDrive] ✅ startService — state: $state');
     } catch (e) {
@@ -100,27 +86,12 @@ class BantayDriveService {
     }
   }
 
-  // FIX: Throttled updateState().
-  //
-  // Root cause of "stop button not working":
-  //   onModelOutput() calls updateState() on every inference frame (~3-5 FPS).
-  //   updateService() re-registers the notification button list each time.
-  //   On Android, if a notification is rebuilt while the user is tapping it,
-  //   the tap event is dropped — the system discards input to the old view.
-  //   This made the Stop button unreliable, especially during active detection.
-  //
-  // Two-part throttle:
-  //   1. State must have actually changed (no-op if 'drowsy' → 'drowsy').
-  //   2. At least 2 seconds must have passed since the last update.
-  //      2s is long enough to avoid the tap-drop race while still keeping
-  //      the notification text reasonably current.
+  // Throttled: skips if state unchanged or if called within 2 seconds of last
+  // update. Re-registering the notification too frequently drops tap events
+  // on Android when the user is interacting with the Stop button.
   static Future<void> updateState(String state) async {
-    if (!_serviceReady) return;
+    if (!_serviceReady || state == _lastState) return;
 
-    // Skip if state hasn't changed
-    if (state == _lastState) return;
-
-    // Throttle: skip if updated too recently
     final now = DateTime.now();
     if (now.difference(_lastUpdateTime) < _kUpdateThrottle) return;
 
@@ -129,11 +100,9 @@ class BantayDriveService {
       await FlutterForegroundTask.updateService(
         notificationTitle: 'Bantay Drive',
         notificationText: _statusText(state),
-        notificationButtons: [
-          const NotificationButton(id: 'stop_recording', text: '⏹ Stop'),
-        ],
+        notificationButtons: _stopButton,
       );
-      _lastState      = state;
+      _lastState = state;
       _lastUpdateTime = now;
     } catch (e) {
       debugPrint('[BantayDrive] ❌ updateState() failed: $e');
@@ -157,8 +126,6 @@ class BantayDriveService {
   }
 }
 
-// ── Foreground task entry point ───────────────────────────────────────────────
-
 @pragma('vm:entry-point')
 void startCallback() {
   FlutterForegroundTask.setTaskHandler(BantayDriveTaskHandler());
@@ -172,17 +139,11 @@ class BantayDriveTaskHandler extends TaskHandler {
 
   @override
   void onRepeatEvent(DateTime timestamp) {
-    // Heartbeat every 5s keeps the service alive.
-    // monitor_screen._onReceiveTaskData filters this with:
-    //   if (data != 'stop_recording') return;
     FlutterForegroundTask.sendDataToMain('heartbeat');
   }
 
   @override
   void onNotificationButtonPressed(String id) {
-    // flutter_foreground_task v9.x: onNotificationButtonPressed still exists
-    // but on some devices/versions the button press arrives via onReceiveTaskData
-    // as a Map instead. Handle both paths to be safe.
     if (id == 'stop_recording') {
       FlutterForegroundTask.sendDataToMain('stop_recording');
     }
@@ -190,8 +151,7 @@ class BantayDriveTaskHandler extends TaskHandler {
 
   @override
   void onReceiveData(Object data) {
-    // v9.x routes notification button presses through onReceiveData on some
-    // Android versions as: {'notification_button_id': 'stop_recording'}
+    // Some Android versions deliver button presses via onReceiveData as a Map.
     if (data is Map) {
       final buttonId = data['notification_button_id'];
       if (buttonId == 'stop_recording') {

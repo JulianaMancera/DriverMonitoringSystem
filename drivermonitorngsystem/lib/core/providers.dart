@@ -1,7 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-// Generic value notifiers — shared by MonitorScreen and any consumer.
-
 class StringNotifier extends Notifier<String> {
   final String _initial;
   StringNotifier(this._initial);
@@ -40,8 +38,6 @@ class IntNotifier extends Notifier<int> {
   int build() => _initial;
   void set(int v) => state = v;
 }
-
-// Provider instances
 
 final driverStateProvider = NotifierProvider<StringNotifier, String>(
     () => StringNotifier('neutral'));
