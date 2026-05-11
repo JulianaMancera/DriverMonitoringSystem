@@ -950,11 +950,16 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     setState(() => _isDownloading = true);
 
     int success = 0;
+    String? lastError;
     for (final clip in _filteredClips) {
       if (!_selectedClipIds.contains(clip['id'] as int)) continue;
-      final dest = await VideoClipService.exportToDownloads(
+      final (dest, error) = await VideoClipService.exportToDownloads(
           clip['file_path'] as String);
-      if (dest != null) success++;
+      if (dest != null) {
+        success++;
+      } else {
+        lastError = error;
+      }
     }
 
     if (mounted) {
@@ -962,14 +967,25 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
         _isDownloading = false;
         _selectedClipIds.clear();
       });
+
+      String message;
+      if (success > 0) {
+        message = '$success video${success > 1 ? 's' : ''} saved to Downloads';
+      } else {
+        message = switch (lastError) {
+          'disk_full' => 'Not enough storage space on device',
+          'permission_denied' => 'Storage permission denied — check app settings',
+          'file_not_found' => 'Video file no longer exists',
+          _ => 'Download failed — please try again',
+        };
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         backgroundColor: success > 0
             ? _green.withValues(alpha: 0.9)
             : Colors.red.withValues(alpha: 0.9),
         content: Text(
-          success > 0
-              ? '$success video${success > 1 ? 's' : ''} saved to Downloads'
-              : 'Download failed — check storage permission',
+          message,
           style: const TextStyle(
               color: Colors.black, fontWeight: FontWeight.w600),
         ),
