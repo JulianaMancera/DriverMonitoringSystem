@@ -61,6 +61,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   final AudioPlayer _audioPlayer = AudioPlayer();
   final AudioPlayer _alarmPlayer = AudioPlayer();
+  int _l2SoundCount = 0;
+  StreamSubscription<void>? _l2Sub;
 
   late AnimationController _warningController;
   late Animation<double> _warningAnimation;
@@ -168,6 +170,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       _cameraController?.dispose();
     } catch (_) {}
     _cameraController = null;
+    _l2Sub?.cancel();
+    _l2Sub = null;
     try {
       _audioPlayer.dispose();
     } catch (_) {}
@@ -710,6 +714,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     await _saveAlertnessSnapshot();
 
     await _pauseCameraStream();
+    _l2Sub?.cancel();
+    _l2Sub = null;
     await _alarmPlayer.stop();
     _alertLevel = _consecutiveDrowsy = _consecutiveDistracted = 0;
 
@@ -960,6 +966,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             _consecutiveDrowsy < thresholds[0] &&
             _consecutiveDistracted < thresholds[0]) {
           _alertLevel = 0;
+          _l2Sub?.cancel();
+          _l2Sub = null;
           _alarmPlayer.stop();
           ref.read(showAlertBannerProvider.notifier).set(false);
         }
@@ -1006,10 +1014,26 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   Future<void> _playAlertSound(int level) async {
-    if (level <= 2) {
+    if (level == 1) {
       await _audioPlayer.stop();
       await _audioPlayer.play(AssetSource('L1_L2_sound.mp3'));
+    } else if (level == 2) {
+      _l2Sub?.cancel();
+      _l2SoundCount = 1;
+      await _alarmPlayer.setReleaseMode(ReleaseMode.release);
+      _l2Sub = _alarmPlayer.onPlayerComplete.listen((_) async {
+        if (_l2SoundCount < 3 && _alertLevel == 2) {
+          _l2SoundCount++;
+          await _alarmPlayer.play(AssetSource('L1_L2_sound.mp3'));
+        } else {
+          _l2Sub?.cancel();
+          _l2Sub = null;
+        }
+      });
+      await _alarmPlayer.play(AssetSource('L1_L2_sound.mp3'));
     } else {
+      _l2Sub?.cancel();
+      _l2Sub = null;
       await _alarmPlayer.setReleaseMode(ReleaseMode.loop);
       await _alarmPlayer.play(AssetSource('L3_critical_alert.wav'));
     }
@@ -1020,6 +1044,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         _notifController?.status != AnimationStatus.dismissed) {
       await _notifController?.reverse();
     }
+    _l2Sub?.cancel();
+    _l2Sub = null;
     await _alarmPlayer.stop();
     _alertLevel = _consecutiveDrowsy = _consecutiveDistracted = 0;
     if (mounted) ref.read(showAlertBannerProvider.notifier).set(false);
