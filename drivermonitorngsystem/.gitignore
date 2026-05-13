@@ -45,5 +45,5 @@ Android Studio will place build artifacts here
 /android/app/release
 
 Proprietary model and parameters — not for public distribution
-assets/models/.tflite
+assets/model/*.tflite
 assets/norm_params.json
