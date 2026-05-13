@@ -31,9 +31,9 @@
 ### Real-Time Monitoring
 - On-device TFLite inference (NNAPI → CPU fallback) — no server required
 - **3-level escalating alert system:**
-  - **Level 1** — Slide-in audio banner (auto-dismisses)
-  - **Level 2** — Persistent banner with audio
-  - **Level 3** — Full-screen blocking alarm overlay, requires manual dismissal
+  - **Level 1** — Slide-in banner; alert sound plays once (auto-dismisses)
+  - **Level 2** — Persistent banner; alert sound plays 3 times
+  - **Level 3** — Full-screen blocking alarm overlay; alarm loops continuously until manually dismissed
 - Configurable alert sensitivity:
 
 | Sensitivity | L1 | L2 | L3 |
@@ -43,7 +43,7 @@
 | High        | 2 frames | 4 frames  | 6 frames  |
 
 - **Head-pose visual indicator** — real-time circle overlay tracking driver head rotation
-- **Video clip capture** — automatically records and saves clips (up to 10 s) when alerts trigger
+- **Video clip capture** — automatically records and saves clips (up to 10 s) when alerts trigger; disk-space-aware (requires 50 MB free) with structured error codes; clips exportable to device Downloads folder
 - **Picture-in-Picture (PiP)** — monitoring continues in a floating window when app is backgrounded
 - Foreground service with persistent notification showing live driver state + Stop button
 - Clear Glasses toggle, Auto-start recording option
@@ -147,7 +147,7 @@ Place the following under `assets/`:
 
 ```
 assets/
-├── models/
+├── model/
 │   └── dms_hybridnet_v3_float32.tflite
 ├── norm_params.json
 ├── L1_L2_sound.mp3
@@ -216,6 +216,7 @@ Release builds use ProGuard minification + resource shrinking by default.
 | `device_info_plus` | Brand-specific UI scaling |
 | `package_info_plus` | App version display |
 | `path_provider` | App documents directory |
+| `path` | File path manipulation |
 | `url_launcher` | Authors' GitHub links |
 
 ---
