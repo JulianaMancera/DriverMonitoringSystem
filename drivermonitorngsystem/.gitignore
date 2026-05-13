@@ -44,6 +44,8 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# Proprietary model and parameters — not for public distribution
-assets/models/*.tflite
-assets/norm_params.json
+# Large ML model binaries — use Git LFS instead of committing directly.
+# The currently tracked model (assets/model/*.tflite) was committed before
+# this rule; remove it from tracking with: git rm --cached <path>
+*.tflite
+

@@ -33,54 +33,37 @@ void main() async {
     ),
   );
 
-  // ── Brand detection — runs BEFORE runApp so scaleFactor is ready ──────────
-  // Samsung One UI, MIUI, ColorOS, OriginOS all inflate default text scale
-  // and UI chrome — layouts overflow on phones that report "normal" size.
-  // Responsive.setBrand() applies a per-brand multiplier to every
-  // sp() / rp() / rs() / ri() call in every screen.
+  // Brand detection runs before runApp so scaleFactor is ready for first frame.
   if (Platform.isAndroid) {
     try {
-      final info  = await DeviceInfoPlugin().androidInfo;
-      final brand = info.brand.toLowerCase();
-      if (brand.contains('samsung')) {
-  Responsive.setBrand(DeviceBrand.samsung); // change 0.95 → 0.92 in responsive.dart
-      }else if (brand.contains('xiaomi') ||
-                 brand.contains('redmi') ||
-                 brand.contains('poco')) {
-        Responsive.setBrand(DeviceBrand.xiaomi);  // 0.97× — MIUI
-      } else if (brand.contains('oppo') ||
-                 brand.contains('realme') ||
-                 brand.contains('oneplus')) {
-        Responsive.setBrand(DeviceBrand.oppo);    // 0.97× — ColorOS
-      } else if (brand.contains('vivo') ||
-                 brand.contains('iqoo')) {
-        Responsive.setBrand(DeviceBrand.vivo);    // 0.97× — OriginOS
-      } else if (brand.contains('google') ||
-                 brand.contains('pixel')) {
-        Responsive.setBrand(DeviceBrand.pixel);   // 1.00× — stock Android
-      } else {
-        Responsive.setBrand(DeviceBrand.other);   // 1.00× — unknown OEM
-      }
+      final info = await DeviceInfoPlugin().androidInfo;
+      Responsive.setBrand(_detectBrand(info.brand.toLowerCase()));
     } catch (_) {
       Responsive.setBrand(DeviceBrand.other);
     }
   }
 
   await DatabaseHelper.instance.database;
-
-  // FIX: Notification permission popup removed — foreground service only.
-  // The system dialog was appearing unexpectedly on first launch.
-  // BantayDriveService handles the notification channel internally.
-
   await BantayDriveService.initialize();
 
-  // CRITICAL: registers the IsolateNameServer port so sendDataToMain() in the
-  // background isolate can deliver messages (heartbeats, stop_recording) to the
-  // main isolate's DataCallbacks. Without this call every sendDataToMain() call
-  // silently drops its payload — notification Stop button never fires.
+  // Registers the IsolateNameServer port so the background isolate can deliver
+  // stop_recording messages to the main isolate via sendDataToMain().
   FlutterForegroundTask.initCommunicationPort();
 
   runApp(const ProviderScope(child: BantayDriveApp()));
+}
+
+DeviceBrand _detectBrand(String brand) {
+  if (brand.contains('samsung')) return DeviceBrand.samsung;
+  if (brand.contains('xiaomi') || brand.contains('redmi') || brand.contains('poco')) {
+    return DeviceBrand.xiaomi;
+  }
+  if (brand.contains('oppo') || brand.contains('realme') || brand.contains('oneplus')) {
+    return DeviceBrand.oppo;
+  }
+  if (brand.contains('vivo') || brand.contains('iqoo')) return DeviceBrand.vivo;
+  if (brand.contains('google') || brand.contains('pixel')) return DeviceBrand.pixel;
+  return DeviceBrand.other;
 }
 
 // ─── APP ──────────────────────────────────────────────────────────────────────
@@ -123,7 +106,7 @@ class EntryPoint extends StatefulWidget {
 }
 
 class _EntryPointState extends State<EntryPoint> {
-  // DEV TOGGLE — set true temporarily to preview onboarding UI
+  // DEV TOGGLE — set true to preview onboarding during development.
   static const bool _forceOnboarding = false;
 
   _AppState _state = _AppState.splash;
@@ -186,12 +169,10 @@ class _ExitWrapper extends ConsumerWidget {
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
-        // Don't show exit dialog if in PiP — back is handled natively
         if (ref.read(isInPipProvider)) return;
         final shouldExit = await showExitDialog(context,
             isRecording: ref.read(isRecordingProvider));
         if (shouldExit && context.mounted) {
-          // Stop service if recording before exit
           if (ref.read(isRecordingProvider)) {
             await BantayDriveService.stopService();
             PipService.setRecording(false);
@@ -204,10 +185,7 @@ class _ExitWrapper extends ConsumerWidget {
   }
 }
 
-// ─── PROVIDERS ────────────────────────────────────────────────────────────────
-
-// FIX: Riverpod 3.x — StateProvider is replaced by NotifierProvider.
-// All providers that held simple state (int, bool) now use Notifier classes.
+// ─── NAV PROVIDER ─────────────────────────────────────────────────────────────
 
 class _NavIndexNotifier extends Notifier<int> {
   @override
@@ -219,8 +197,6 @@ final navIndexProvider = NotifierProvider<_NavIndexNotifier, int>(
   _NavIndexNotifier.new,
 );
 
-
-// FIX: FutureProvider is unchanged in Riverpod 3.x — no changes needed here.
 final deviceNameProvider = FutureProvider<String>((ref) async {
   try {
     if (Platform.isAndroid) {
@@ -240,7 +216,8 @@ final deviceNameProvider = FutureProvider<String>((ref) async {
   return 'USER';
 });
 
-// MAIN SHELL 
+// ─── MAIN SHELL ───────────────────────────────────────────────────────────────
+
 class MainShell extends ConsumerWidget {
   const MainShell({super.key});
 
@@ -273,11 +250,8 @@ class MainShell extends ConsumerWidget {
     );
 
     // Keep a single consistent widget tree in both PIP and non-PIP modes so
-    // that _MonitorScreenState (and its _systemLogs / session data) is never
-    // disposed and recreated during PIP transitions.  Switching to a different
-    // Scaffold structure (bare IndexedStack vs SafeArea→IndexedStack) causes
-    // Flutter to unmount the old IndexedStack and recreate all child elements,
-    // destroying MonitorScreen state and clearing the system logs.
+    // that _MonitorScreenState is never disposed and recreated during PIP
+    // transitions, which would destroy session state and system logs.
     return Scaffold(
       backgroundColor: isInPip ? Colors.black : const Color(0xFF080E1A),
 
@@ -374,7 +348,7 @@ class MainShell extends ConsumerWidget {
   }
 }
 
-// ─── PORTRAIT BOTTOM NAV ──────────────────────────────────────────────────────
+// ─── BOTTOM NAV ───────────────────────────────────────────────────────────────
 
 class _BottomNav extends StatelessWidget {
   final int currentIndex;
@@ -437,9 +411,7 @@ class _BottomNav extends StatelessWidget {
                         borderRadius: BorderRadius.circular(context.rp(12)),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(
-                              0xFF00D4FF,
-                            ).withValues(alpha: 0.15),
+                            color: const Color(0xFF00D4FF).withValues(alpha: 0.15),
                             blurRadius: 10,
                             spreadRadius: 1,
                           ),
@@ -486,8 +458,6 @@ class _BottomNav extends StatelessWidget {
     );
   }
 }
-
-// ─── SHARED ───────────────────────────────────────────────────────────────────
 
 class _NavData {
   final IconData icon;

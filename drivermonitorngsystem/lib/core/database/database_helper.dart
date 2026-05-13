@@ -1,35 +1,3 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// database_helper.dart
-//
-// PURPOSE:
-//   The single source of truth for ALL local data in Bantay Drive.
-//   Uses SQLite (via sqflite) with 5 tables at schema version 2.
-//
-// TABLES:
-//   • sessions            — one row per drive session
-//   • state_counts        — neutral/drowsy/distracted frame counts per session
-//   • alert_events        — every alert fired (type, level, timestamp)
-//   • system_logs         — INFO/SUCCESS/WARNING log entries per session
-//   • alertness_snapshots — 5-second alertness % readings per session
-//
-// HOW IT CONNECTS TO THE AI MODEL (DMS-HybridNet):
-//   The model outputs one of 3 main states per frame:
-//     NEUTRAL / DROWSY / DISTRACTED
-//   monitor_screen.dart calls:
-//     • incrementStateCount()    — on every classified frame
-//     • insertAlertEvent()       — when alert level 1/2/3 is triggered
-//     • insertAlertnessSnapshot()— every 5 seconds
-//     • insertSystemLog()        — for INFO/WARNING events
-//     • endSession()             — when recording stops (saves final score)
-//
-// CALLED BY:
-//   • monitor_screen.dart  — writes session data in real time
-//   • dashboard_screen.dart — reads summary stats + chart data
-//   • analytics_screen.dart — reads trend + distribution data
-//   • history_screen.dart   — reads session list + detail data
-//   • settings_screen.dart  — calls deleteSessionsOlderThan() + clearAllData()
-// ─────────────────────────────────────────────────────────────────────────────
-
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../services/video_clip_service.dart';
@@ -39,8 +7,6 @@ class DatabaseHelper {
   static Database? _database;
 
   DatabaseHelper._init();
-
-  // ── DATABASE INITIALIZATION ───────────────────────────────────────────────
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -60,7 +26,6 @@ class DatabaseHelper {
   }
 
   Future<void> _createTables(Database db, int version) async {
-    // Sessions — one row = one drive session
     await db.execute('''
       CREATE TABLE sessions (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -74,8 +39,6 @@ class DatabaseHelper {
       )
     ''');
 
-    // State counts — how many frames were NEUTRAL / DROWSY / DISTRACTED
-    // per session. Written by monitor_screen via incrementStateCount().
     await db.execute('''
       CREATE TABLE state_counts (
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -87,9 +50,6 @@ class DatabaseHelper {
       )
     ''');
 
-    // Alert events — every L1/L2/L3 alert fired during a session.
-    // alert_type  : 'DROWSY' or 'DISTRACTED'
-    // alert_level : 1, 2, or 3
     await db.execute('''
       CREATE TABLE alert_events (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,7 +61,6 @@ class DatabaseHelper {
       )
     ''');
 
-    // System logs — INFO / SUCCESS / WARNING entries shown in session detail
     await db.execute('''
       CREATE TABLE system_logs (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,8 +72,6 @@ class DatabaseHelper {
       )
     ''');
 
-    // Alertness snapshots — recorded every 5 seconds during a session.
-    // Used to draw the alertness chart in the history session detail sheet.
     await db.execute('''
       CREATE TABLE alertness_snapshots (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -125,10 +82,6 @@ class DatabaseHelper {
       )
     ''');
 
-    // Video clips — one row per saved alert video clip.
-    // file_path   : absolute path inside app documents / alert_clips/
-    // alert_types : comma-separated list e.g. 'DROWSY,DISTRACTED'
-    // created_at  : UTC ISO-8601 timestamp when the clip was saved
     await db.execute('''
       CREATE TABLE video_clips (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -141,8 +94,6 @@ class DatabaseHelper {
       )
     ''');
 
-    // Indexes on timestamp columns to speed up date-range queries used by
-    // Analytics and Dashboard screens as session history grows.
     await db.execute(
         'CREATE INDEX idx_sessions_started ON sessions(started_at)');
     await db.execute(
@@ -182,10 +133,12 @@ class DatabaseHelper {
     }
   }
 
-  // ── SESSIONS — CRUD ───────────────────────────────────────────────────────
+  // Returns an ISO-8601 UTC timestamp [days] ago.
+  String _sinceIso(int days) =>
+      DateTime.now().subtract(Duration(days: days)).toUtc().toIso8601String();
 
-  /// Called by monitor_screen when recording STARTS.
-  /// Returns the new session ID used for all subsequent writes.
+  // ── SESSIONS ──────────────────────────────────────────────────────────────
+
   Future<int> insertSession() async {
     final db = await database;
     return await db.insert('sessions', {
@@ -193,12 +146,6 @@ class DatabaseHelper {
     });
   }
 
-  /// Called by monitor_screen when recording STOPS.
-  /// Saves the final computed safety score and alertness average.
-  ///
-  /// Safety score formula (computed in monitor_screen):
-  ///   score = 100 - (drowsy_frames + distracted_frames) / total_frames * 100
-  ///   clamped to [0, 100]
   Future<void> endSession({
     required int sessionId,
     required int durationSec,
@@ -219,13 +166,11 @@ class DatabaseHelper {
     );
   }
 
-  /// Called by history_screen to show the full session list.
   Future<List<Map<String, dynamic>>> getAllSessions() async {
     final db = await database;
     return await db.query('sessions', orderBy: 'started_at DESC');
   }
 
-  /// Called by history_screen session detail sheet.
   Future<Map<String, dynamic>?> getSessionById(int sessionId) async {
     final db = await database;
     final result = await db.query(
@@ -237,79 +182,44 @@ class DatabaseHelper {
     return result.isNotEmpty ? result.first : null;
   }
 
-  /// Total drive time in seconds — Dashboard "Total Drive Time" card.
   Future<int> getTotalDriveTimeSec({int? days}) async {
     final db = await database;
-    String where = 'ended_at IS NOT NULL';
-    List<dynamic> args = [];
-    if (days != null) {
-      final since = DateTime.now()
-          .subtract(Duration(days: days))
-          .toUtc()
-          .toIso8601String();
-      where += ' AND started_at >= ?';
-      args.add(since);
-    }
+    final where = 'ended_at IS NOT NULL'
+        '${days != null ? ' AND started_at >= ?' : ''}';
+    final args = days != null ? [_sinceIso(days)] : <dynamic>[];
     final result = await db.rawQuery(
-      'SELECT SUM(duration_sec) as total FROM sessions WHERE $where',
-      args,
-    );
+        'SELECT SUM(duration_sec) as total FROM sessions WHERE $where', args);
     return (result.first['total'] as int?) ?? 0;
   }
 
-  /// Average safety score — Dashboard Safety Score ring.
-  /// Returns 100.0 (perfect score) when no sessions exist yet — a fresh
-  /// install should show a perfect score, not zero.
+  // Returns 100.0 (perfect) when no sessions exist yet.
   Future<double> getAvgSafetyScore({int? days}) async {
     final db = await database;
-    String where = 'ended_at IS NOT NULL';
-    List<dynamic> args = [];
-    if (days != null) {
-      final since = DateTime.now()
-          .subtract(Duration(days: days))
-          .toUtc()
-          .toIso8601String();
-      where += ' AND started_at >= ?';
-      args.add(since);
-    }
+    final where = 'ended_at IS NOT NULL'
+        '${days != null ? ' AND started_at >= ?' : ''}';
+    final args = days != null ? [_sinceIso(days)] : <dynamic>[];
     final result = await db.rawQuery(
-      'SELECT AVG(safety_score) as avg FROM sessions WHERE $where',
-      args,
-    );
+        'SELECT AVG(safety_score) as avg FROM sessions WHERE $where', args);
     return (result.first['avg'] as double?) ?? 100.0;
   }
 
-  /// Average alertness — Dashboard "Avg Alertness" card.
-  /// Returns 100.0 when no sessions (same logic as safety score).
   Future<double> getAvgAlertness({int? days}) async {
     final db = await database;
-    String where = 'ended_at IS NOT NULL';
-    List<dynamic> args = [];
-    if (days != null) {
-      final since = DateTime.now()
-          .subtract(Duration(days: days))
-          .toUtc()
-          .toIso8601String();
-      where += ' AND started_at >= ?';
-      args.add(since);
-    }
+    final where = 'ended_at IS NOT NULL'
+        '${days != null ? ' AND started_at >= ?' : ''}';
+    final args = days != null ? [_sinceIso(days)] : <dynamic>[];
     final result = await db.rawQuery(
-      'SELECT AVG(alertness_avg) as avg FROM sessions WHERE $where',
-      args,
-    );
+        'SELECT AVG(alertness_avg) as avg FROM sessions WHERE $where', args);
     return (result.first['avg'] as double?) ?? 100.0;
   }
 
-  /// Safety streak — Dashboard "Safety Streak" card.
-  /// Counts consecutive days with NO alert events, going backwards from today.
-  /// Returns 0 if no sessions exist yet (no driving history = no streak).
+  // Returns 0 if no sessions exist (no driving history = no streak).
   Future<int> getSafetyStreakDays() async {
     final db = await database;
     final sessionCheck = await db.rawQuery(
       'SELECT COUNT(*) as cnt FROM sessions WHERE ended_at IS NOT NULL',
     );
-    final sessionCount = (sessionCheck.first['cnt'] as int?) ?? 0;
-    if (sessionCount == 0) return 0;
+    if ((sessionCheck.first['cnt'] as int?) == 0) return 0;
 
     final since = DateTime.now()
         .toUtc()
@@ -338,30 +248,18 @@ class DatabaseHelper {
     return streak;
   }
 
-  /// Total completed session count — Analytics summary card.
   Future<int> getTotalSessionCount({int? days}) async {
     final db = await database;
-    String where = 'ended_at IS NOT NULL';
-    List<dynamic> args = [];
-    if (days != null) {
-      final since = DateTime.now()
-          .subtract(Duration(days: days))
-          .toUtc()
-          .toIso8601String();
-      where += ' AND started_at >= ?';
-      args.add(since);
-    }
+    final where = 'ended_at IS NOT NULL'
+        '${days != null ? ' AND started_at >= ?' : ''}';
+    final args = days != null ? [_sinceIso(days)] : <dynamic>[];
     final result = await db.rawQuery(
-      'SELECT COUNT(*) as cnt FROM sessions WHERE $where',
-      args,
-    );
+        'SELECT COUNT(*) as cnt FROM sessions WHERE $where', args);
     return (result.first['cnt'] as int?) ?? 0;
   }
 
-  // ── STATE COUNTS — CRUD ───────────────────────────────────────────────────
+  // ── STATE COUNTS ──────────────────────────────────────────────────────────
 
-  /// Called by monitor_screen immediately after insertSession().
-  /// Creates the initial zero-count row for the new session.
   Future<void> insertStateCount(int sessionId) async {
     final db = await database;
     await db.insert('state_counts', {
@@ -372,13 +270,6 @@ class DatabaseHelper {
     });
   }
 
-  /// Called by monitor_screen on EVERY classified frame from DMS-HybridNet.
-  /// state must be 'neutral', 'drowsy', or 'distracted' (case-insensitive).
-  ///
-  /// Model output → state mapping:
-  ///   Class 0 (safe_driving)      → neutral
-  ///   Classes 1,2,10 (drowsy)     → drowsy
-  ///   Classes 3-9 (distracted)    → distracted
   Future<void> incrementStateCount({
     required int sessionId,
     required String state,
@@ -396,7 +287,6 @@ class DatabaseHelper {
     ''', [sessionId]);
   }
 
-  /// Called by history_screen session detail sheet to show state breakdown bar.
   Future<Map<String, dynamic>?> getStateCounts(int sessionId) async {
     final db = await database;
     final result = await db.query(
@@ -408,11 +298,8 @@ class DatabaseHelper {
     return result.isNotEmpty ? result.first : null;
   }
 
-  // ── ALERT EVENTS — CRUD ───────────────────────────────────────────────────
+  // ── ALERT EVENTS ──────────────────────────────────────────────────────────
 
-  /// Called by monitor_screen when an alert threshold is crossed.
-  /// alertType  : 'DROWSY' or 'DISTRACTED'
-  /// alertLevel : 1 (banner), 2 (persistent), 3 (full-screen alarm)
   Future<void> insertAlertEvent({
     required int sessionId,
     required String alertType,
@@ -427,70 +314,41 @@ class DatabaseHelper {
     });
   }
 
-  /// Total alert count — Dashboard "Alerts (last 24h)" card and Analytics.
-  /// Pass hours:24 for dashboard, days:N for analytics.
   Future<int> getTotalAlertCount({int? days, int? hours}) async {
     final db = await database;
     String where = '1=1';
-    List<dynamic> args = [];
+    final args = <dynamic>[];
     if (hours != null) {
-      final since = DateTime.now()
-          .subtract(Duration(hours: hours))
-          .toUtc()
-          .toIso8601String();
       where += ' AND triggered_at >= ?';
-      args.add(since);
+      args.add(DateTime.now().subtract(Duration(hours: hours)).toUtc().toIso8601String());
     } else if (days != null) {
-      final since = DateTime.now()
-          .subtract(Duration(days: days))
-          .toUtc()
-          .toIso8601String();
       where += ' AND triggered_at >= ?';
-      args.add(since);
+      args.add(_sinceIso(days));
     }
     final result = await db.rawQuery(
-      'SELECT COUNT(*) as cnt FROM alert_events WHERE $where',
-      args,
-    );
+      'SELECT COUNT(*) as cnt FROM alert_events WHERE $where', args);
     return (result.first['cnt'] as int?) ?? 0;
   }
 
-  /// Alert count by type — Analytics "Drowsiness Events" and
-  /// "Distraction Events" summary cards.
   Future<int> getAlertCountByType({
     required String alertType,
     int? days,
   }) async {
     final db = await database;
     String where = 'alert_type = ?';
-    List<dynamic> args = [alertType.toUpperCase()];
+    final args = <dynamic>[alertType.toUpperCase()];
     if (days != null) {
-      final since = DateTime.now()
-          .subtract(Duration(days: days))
-          .toUtc()
-          .toIso8601String();
       where += ' AND triggered_at >= ?';
-      args.add(since);
+      args.add(_sinceIso(days));
     }
     final result = await db.rawQuery(
-      'SELECT COUNT(*) as cnt FROM alert_events WHERE $where',
-      args,
-    );
+      'SELECT COUNT(*) as cnt FROM alert_events WHERE $where', args);
     return (result.first['cnt'] as int?) ?? 0;
   }
 
-  /// Daily drowsy vs distracted counts — Analytics line chart.
-  /// Returns one row per day with drowsy_count and distracted_count.
-  /// days = null means All Time — no date filter applied.
-  Future<List<Map<String, dynamic>>> getDailyAlertTrends({
-    int? days,
-  }) async {
+  Future<List<Map<String, dynamic>>> getDailyAlertTrends({int? days}) async {
     final db = await database;
     if (days != null) {
-      final since = DateTime.now()
-          .subtract(Duration(days: days))
-          .toUtc()
-          .toIso8601String();
       return await db.rawQuery('''
         SELECT
           DATE(datetime(triggered_at, 'localtime')) as date,
@@ -500,9 +358,8 @@ class DatabaseHelper {
         WHERE triggered_at >= ?
         GROUP BY DATE(datetime(triggered_at, 'localtime'))
         ORDER BY date ASC
-      ''', [since]);
+      ''', [_sinceIso(days)]);
     } else {
-      // All Time — no WHERE clause
       return await db.rawQuery('''
         SELECT
           DATE(datetime(triggered_at, 'localtime')) as date,
@@ -515,19 +372,11 @@ class DatabaseHelper {
     }
   }
 
-  /// Hourly alert distribution — Analytics bar chart (all 24 hours).
-  /// Returns one row per hour that had at least one alert.
-  /// days = null means All Time — no date filter applied.
-  /// Uses localtime so Philippine users see correct hour buckets.
   Future<List<Map<String, dynamic>>> getHourlyAlertDistribution({
     int? days,
   }) async {
     final db = await database;
     if (days != null) {
-      final since = DateTime.now()
-          .subtract(Duration(days: days))
-          .toUtc()
-          .toIso8601String();
       return await db.rawQuery('''
         SELECT
           CAST(strftime('%H', datetime(triggered_at, 'localtime')) AS INTEGER) as hour,
@@ -536,9 +385,8 @@ class DatabaseHelper {
         WHERE triggered_at >= ?
         GROUP BY hour
         ORDER BY hour ASC
-      ''', [since]);
+      ''', [_sinceIso(days)]);
     } else {
-      // All Time — no WHERE clause
       return await db.rawQuery('''
         SELECT
           CAST(strftime('%H', datetime(triggered_at, 'localtime')) AS INTEGER) as hour,
@@ -550,10 +398,7 @@ class DatabaseHelper {
     }
   }
 
-  /// All alerts for one session — History session detail sheet.
-  Future<List<Map<String, dynamic>>> getAlertsBySession(
-    int sessionId,
-  ) async {
+  Future<List<Map<String, dynamic>>> getAlertsBySession(int sessionId) async {
     final db = await database;
     return await db.query(
       'alert_events',
@@ -563,10 +408,8 @@ class DatabaseHelper {
     );
   }
 
-  // ── SYSTEM LOGS — CRUD ────────────────────────────────────────────────────
+  // ── SYSTEM LOGS ───────────────────────────────────────────────────────────
 
-  /// Called by monitor_screen for INFO/SUCCESS/WARNING events.
-  /// logType: 'INFO', 'SUCCESS', or 'WARNING'
   Future<void> insertSystemLog({
     required int sessionId,
     required String message,
@@ -581,7 +424,6 @@ class DatabaseHelper {
     });
   }
 
-  /// All logs for one session — History session detail sheet.
   Future<List<Map<String, dynamic>>> getSystemLogs(int sessionId) async {
     final db = await database;
     return await db.query(
@@ -592,10 +434,8 @@ class DatabaseHelper {
     );
   }
 
-  // ── ALERTNESS SNAPSHOTS — CRUD ────────────────────────────────────────────
+  // ── ALERTNESS SNAPSHOTS ───────────────────────────────────────────────────
 
-  /// Called by monitor_screen every 5 seconds during a session.
-  /// alertnessPct is derived from the model's neutral confidence score (0–100).
   Future<void> insertAlertnessSnapshot({
     required int sessionId,
     required double alertnessPct,
@@ -608,7 +448,6 @@ class DatabaseHelper {
     });
   }
 
-  /// All snapshots for one session — History session detail alertness chart.
   Future<List<Map<String, dynamic>>> getAlertnessSnapshots(
     int sessionId,
   ) async {
@@ -621,7 +460,6 @@ class DatabaseHelper {
     );
   }
 
-  /// Snapshots for the most recent session — Dashboard live chart.
   Future<List<Map<String, dynamic>>> getLatestSessionSnapshots() async {
     final db = await database;
     final latest = await db.query(
@@ -634,16 +472,10 @@ class DatabaseHelper {
     return await getAlertnessSnapshots(sessionId);
   }
 
-  /// Per-day average safety score — Dashboard "Safety Score History" chart.
-  /// Returns one row per calendar day with avg_score and session_count.
   Future<List<Map<String, dynamic>>> getDailySafetyScores({
     int days = 30,
   }) async {
     final db = await database;
-    final since = DateTime.now()
-        .toUtc()
-        .subtract(Duration(days: days))
-        .toIso8601String();
     return await db.rawQuery('''
       SELECT
         DATE(started_at)  as day,
@@ -653,12 +485,11 @@ class DatabaseHelper {
       WHERE started_at >= ? AND ended_at IS NOT NULL
       GROUP BY DATE(started_at)
       ORDER BY day ASC
-    ''', [since]);
+    ''', [_sinceIso(days)]);
   }
 
   // ── COMBINED QUERIES ──────────────────────────────────────────────────────
 
-  /// Last two completed sessions' safety scores — used for trend arrow on Dashboard.
   Future<List<Map<String, dynamic>>> _getLastTwoSessionScores() async {
     final db = await database;
     return await db.rawQuery('''
@@ -669,18 +500,16 @@ class DatabaseHelper {
     ''');
   }
 
-  /// All data needed by dashboard_screen in one parallel fetch.
-  /// Called by dashboard_screen on init and every 30 seconds.
   Future<Map<String, dynamic>> getDashboardSummary() async {
     final results = await Future.wait([
-      getTotalDriveTimeSec(days: 30),      // index 0
-      getTotalAlertCount(hours: 24),        // index 1
-      getSafetyStreakDays(),                // index 2
-      getAvgAlertness(days: 7),            // index 3
-      getAvgSafetyScore(days: 30),         // index 4
-      getLatestSessionSnapshots(),          // index 5
-      getDailySafetyScores(days: 30),      // index 6
-      _getLastTwoSessionScores(),           // index 7
+      getTotalDriveTimeSec(days: 30),   // [0]
+      getTotalAlertCount(hours: 24),    // [1]
+      getSafetyStreakDays(),             // [2]
+      getAvgAlertness(days: 7),         // [3]
+      getAvgSafetyScore(days: 30),      // [4]
+      getLatestSessionSnapshots(),      // [5]
+      getDailySafetyScores(days: 30),   // [6]
+      _getLastTwoSessionScores(),       // [7]
     ]);
 
     final twoScores = results[7] as List<Map<String, dynamic>>;
@@ -698,20 +527,15 @@ class DatabaseHelper {
     };
   }
 
-  /// All data needed by analytics_screen in one parallel fetch.
-  /// days = null means "All Time" — no date filter on any query.
   Future<Map<String, dynamic>> getAnalyticsSummary({int? days}) async {
-    // FIX: removed effectiveDays = days ?? 7.
-    // getDailyAlertTrends and getHourlyAlertDistribution now accept int?
-    // so null is passed through correctly for All Time.
     final results = await Future.wait([
-      getTotalSessionCount(days: days),                          // index 0
-      getTotalAlertCount(days: days),                            // index 1
-      getAlertCountByType(alertType: 'DROWSY', days: days),     // index 2
-      getAlertCountByType(alertType: 'DISTRACTED', days: days), // index 3
-      getDailyAlertTrends(days: days),                           // index 4 — now nullable
-      getHourlyAlertDistribution(days: days),                    // index 5 — now nullable
-      getAvgSafetyScore(days: days),                             // index 6
+      getTotalSessionCount(days: days),                          // [0]
+      getTotalAlertCount(days: days),                            // [1]
+      getAlertCountByType(alertType: 'DROWSY', days: days),     // [2]
+      getAlertCountByType(alertType: 'DISTRACTED', days: days), // [3]
+      getDailyAlertTrends(days: days),                          // [4]
+      getHourlyAlertDistribution(days: days),                   // [5]
+      getAvgSafetyScore(days: days),                            // [6]
     ]);
 
     return {
@@ -725,8 +549,6 @@ class DatabaseHelper {
     };
   }
 
-  /// Per-day alert breakdown by type and level for the Analytics drill-down.
-  /// [date] is a local-date string in YYYY-MM-DD format.
   Future<Map<String, dynamic>> getDayAlertBreakdown(String date) async {
     final db = await database;
     final rows = await db.rawQuery('''
@@ -752,10 +574,8 @@ class DatabaseHelper {
     };
   }
 
-  // ── VIDEO CLIPS — CRUD ────────────────────────────────────────────────────
+  // ── VIDEO CLIPS ───────────────────────────────────────────────────────────
 
-  /// Called by monitor_screen after a session with alerts ends.
-  /// alertTypes: comma-separated string e.g. 'DROWSY,DISTRACTED'
   Future<int> insertVideoClip({
     required int sessionId,
     required String filePath,
@@ -772,8 +592,6 @@ class DatabaseHelper {
     });
   }
 
-  /// All clips across all sessions — Video Logs tab in history_screen.
-  /// Joins sessions so callers get session start time for grouping by date.
   Future<List<Map<String, dynamic>>> getAllVideoClips() async {
     final db = await database;
     return await db.rawQuery('''
@@ -784,7 +602,6 @@ class DatabaseHelper {
     ''');
   }
 
-  /// Clips for one session — used in session detail sheet.
   Future<List<Map<String, dynamic>>> getVideoClipsBySession(
     int sessionId,
   ) async {
@@ -797,57 +614,41 @@ class DatabaseHelper {
     );
   }
 
-  /// Deletes a single clip row. Caller is responsible for deleting the file.
   Future<void> deleteVideoClip(int id) async {
     final db = await database;
     await db.delete('video_clips', where: 'id = ?', whereArgs: [id]);
   }
 
-  /// Returns all file paths stored in video_clips — used by clearAllData
-  /// so the caller can delete files before wiping the table.
   Future<List<String>> getAllVideoClipPaths() async {
     final db = await database;
     final rows = await db.query('video_clips', columns: ['file_path']);
     return rows.map((r) => r['file_path'] as String).toList();
   }
 
-  /// File paths for clips belonging to sessions older than [days].
   Future<List<String>> getVideoClipPathsOlderThan(int days) async {
     final db = await database;
-    final cutoff = DateTime.now()
-        .toUtc()
-        .subtract(Duration(days: days))
-        .toIso8601String();
     final rows = await db.rawQuery('''
       SELECT vc.file_path
       FROM video_clips vc
       JOIN sessions s ON vc.session_id = s.id
       WHERE s.started_at < ?
-    ''', [cutoff]);
+    ''', [_sinceIso(days)]);
     return rows.map((r) => r['file_path'] as String).toList();
   }
 
   // ── UTILITY ───────────────────────────────────────────────────────────────
 
-  /// Called by settings_screen when user changes retention period.
-  /// Deletes sessions AND all related rows (cascade via transaction).
   Future<void> deleteSessionsOlderThan(int days) async {
     final db     = await database;
-    final cutoff = DateTime.now()
-        .toUtc()
-        .subtract(Duration(days: days))
-        .toIso8601String();
+    final cutoff = _sinceIso(days);
 
     final rows = await db.rawQuery(
-      "SELECT id FROM sessions WHERE started_at < ?",
-      [cutoff],
-    );
+      "SELECT id FROM sessions WHERE started_at < ?", [cutoff]);
     if (rows.isEmpty) return;
 
     final ids          = rows.map((r) => r['id'] as int).toList();
     final placeholders = ids.map((_) => '?').join(',');
 
-    // Collect video file paths before deleting rows
     final clipRows = await db.rawQuery(
       "SELECT file_path FROM video_clips WHERE session_id IN ($placeholders)",
       ids,
@@ -856,29 +657,17 @@ class DatabaseHelper {
 
     await db.transaction((txn) async {
       await txn.rawDelete(
-        "DELETE FROM video_clips WHERE session_id IN ($placeholders)",
-        ids,
-      );
+        "DELETE FROM video_clips WHERE session_id IN ($placeholders)", ids);
       await txn.rawDelete(
-        "DELETE FROM alertness_snapshots WHERE session_id IN ($placeholders)",
-        ids,
-      );
+        "DELETE FROM alertness_snapshots WHERE session_id IN ($placeholders)", ids);
       await txn.rawDelete(
-        "DELETE FROM system_logs WHERE session_id IN ($placeholders)",
-        ids,
-      );
+        "DELETE FROM system_logs WHERE session_id IN ($placeholders)", ids);
       await txn.rawDelete(
-        "DELETE FROM alert_events WHERE session_id IN ($placeholders)",
-        ids,
-      );
+        "DELETE FROM alert_events WHERE session_id IN ($placeholders)", ids);
       await txn.rawDelete(
-        "DELETE FROM state_counts WHERE session_id IN ($placeholders)",
-        ids,
-      );
+        "DELETE FROM state_counts WHERE session_id IN ($placeholders)", ids);
       await txn.rawDelete(
-        "DELETE FROM sessions WHERE id IN ($placeholders)",
-        ids,
-      );
+        "DELETE FROM sessions WHERE id IN ($placeholders)", ids);
     });
 
     for (final path in clipPaths) {
@@ -886,7 +675,6 @@ class DatabaseHelper {
     }
   }
 
-  /// Alert count per session — used by history_screen to show alert badge.
   Future<Map<int, int>> getAllSessionAlertCounts() async {
     final db   = await database;
     final rows = await db.rawQuery(
@@ -898,11 +686,8 @@ class DatabaseHelper {
     };
   }
 
-  /// Called by settings_screen "Clear All History" button.
-  /// Wipes ALL data from ALL tables and deletes video files from disk.
   Future<void> clearAllData() async {
     final db = await database;
-    // Collect file paths before wiping the table
     final paths = await getAllVideoClipPaths();
     await db.transaction((txn) async {
       await txn.delete('video_clips');

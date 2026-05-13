@@ -950,11 +950,16 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     setState(() => _isDownloading = true);
 
     int success = 0;
+    String? lastError;
     for (final clip in _filteredClips) {
       if (!_selectedClipIds.contains(clip['id'] as int)) continue;
-      final dest = await VideoClipService.exportToDownloads(
+      final (dest, error) = await VideoClipService.exportToDownloads(
           clip['file_path'] as String);
-      if (dest != null) success++;
+      if (dest != null) {
+        success++;
+      } else {
+        lastError = error;
+      }
     }
 
     if (mounted) {
@@ -962,14 +967,25 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
         _isDownloading = false;
         _selectedClipIds.clear();
       });
+
+      String message;
+      if (success > 0) {
+        message = '$success video${success > 1 ? 's' : ''} saved to Downloads';
+      } else {
+        message = switch (lastError) {
+          'disk_full' => 'Not enough storage space on device',
+          'permission_denied' => 'Storage permission denied — check app settings',
+          'file_not_found' => 'Video file no longer exists',
+          _ => 'Download failed — please try again',
+        };
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         backgroundColor: success > 0
             ? _green.withValues(alpha: 0.9)
             : Colors.red.withValues(alpha: 0.9),
         content: Text(
-          success > 0
-              ? '$success video${success > 1 ? 's' : ''} saved to Downloads'
-              : 'Download failed — check storage permission',
+          message,
           style: const TextStyle(
               color: Colors.black, fontWeight: FontWeight.w600),
         ),
@@ -1209,6 +1225,15 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
   Widget _buildFilterChips() {
     final hasDateFilter = _dateRangeStart != null;
     final hasDetFilter = _detectionFilter.isNotEmpty || _minAlertLevel > 0;
+    final hasAnyFilter = hasDateFilter || hasDetFilter;
+    // clearW mirrors the clear button's footprint: gap(8) + hPad×2(10×2) + icon(13).
+    // pillMaxW splits remaining width evenly between the two filter pills.
+    // Must stay in sync with the clear-button widget's actual layout.
+    final clearW = hasAnyFilter
+        ? (context.rp(8) + context.rp(10) * 2 + context.ri(13))
+        : 0.0;
+    final pillMaxW =
+        (context.sw - context.rp(16) * 2 - context.rp(8) - clearW) / 2;
     return Container(
       color: _surface,
       padding: EdgeInsets.only(
@@ -1216,30 +1241,36 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
           right: context.rp(16),
           bottom: context.rs(10)),
       child: Row(children: [
-        _buildFilterPill(
-          icon: Icons.calendar_month_rounded,
-          label: hasDateFilter
-              ? _dateRangeLabel(_dateRangeStart!, _dateRangeEnd)
-              : 'Date Range',
-          isActive: hasDateFilter,
-          onTap: () => _openCalendarFilter(
-            initialStart: _dateRangeStart,
-            initialEnd: _dateRangeEnd,
-            onApply: (start, end) {
-              setState(() {
-                _dateRangeStart = start;
-                _dateRangeEnd = end;
-              });
-              _applyFilter();
-            },
+        ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: pillMaxW),
+          child: _buildFilterPill(
+            icon: Icons.calendar_month_rounded,
+            label: hasDateFilter
+                ? _dateRangeLabel(_dateRangeStart!, _dateRangeEnd)
+                : 'Date Range',
+            isActive: hasDateFilter,
+            onTap: () => _openCalendarFilter(
+              initialStart: _dateRangeStart,
+              initialEnd: _dateRangeEnd,
+              onApply: (start, end) {
+                setState(() {
+                  _dateRangeStart = start;
+                  _dateRangeEnd = end;
+                });
+                _applyFilter();
+              },
+            ),
           ),
         ),
         SizedBox(width: context.rp(8)),
-        _buildFilterPill(
-          icon: Icons.shield_outlined,
-          label: hasDetFilter ? _detFilterLabel() : 'All Detections',
-          isActive: hasDetFilter,
-          onTap: _openDetectionFilter,
+        ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: pillMaxW),
+          child: _buildFilterPill(
+            icon: Icons.shield_outlined,
+            label: hasDetFilter ? _detFilterLabel() : 'All Detections',
+            isActive: hasDetFilter,
+            onTap: _openDetectionFilter,
+          ),
         ),
         if (hasDateFilter || hasDetFilter) ...[
           SizedBox(width: context.rp(8)),
@@ -1291,12 +1322,15 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
           Icon(icon,
               color: isActive ? _cyan : _textDim, size: context.ri(12)),
           SizedBox(width: context.rp(5)),
-          Text(label,
-              style: TextStyle(
-                  color: isActive ? _cyan : _textDim,
-                  fontSize: context.sp(11),
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.4)),
+          Flexible(
+            child: Text(label,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    color: isActive ? _cyan : _textDim,
+                    fontSize: context.sp(11),
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.4)),
+          ),
           SizedBox(width: context.rp(4)),
           Icon(Icons.expand_more_rounded,
               color: isActive ? _cyan : _textDim, size: context.ri(13)),
@@ -1532,35 +1566,50 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
   Widget _buildVideoFilterChips() {
     final hasDateFilter = _videoDateRangeStart != null;
     final hasDetFilter = _videoDetectionFilter.isNotEmpty;
+    final hasAnyFilter = hasDateFilter || hasDetFilter;
+    // clearW mirrors the clear button's footprint: gap(8) + hPad×2(10×2) + icon(13).
+    // pillMaxW splits remaining width evenly between the two filter pills.
+    // Must stay in sync with the clear-button widget's actual layout.
+    final clearW = hasAnyFilter
+        ? (context.rp(8) + context.rp(10) * 2 + context.ri(13))
+        : 0.0;
+    final pillMaxW =
+        (context.sw - context.rp(16) * 2 - context.rp(8) - clearW) / 2;
     return Container(
       color: _surface,
       padding: EdgeInsets.symmetric(
           horizontal: context.rp(16), vertical: context.rs(10)),
       child: Row(children: [
-        _buildFilterPill(
-          icon: Icons.calendar_month_rounded,
-          label: hasDateFilter
-              ? _dateRangeLabel(_videoDateRangeStart!, _videoDateRangeEnd)
-              : 'Date Range',
-          isActive: hasDateFilter,
-          onTap: () => _openCalendarFilter(
-            initialStart: _videoDateRangeStart,
-            initialEnd: _videoDateRangeEnd,
-            onApply: (start, end) {
-              setState(() {
-                _videoDateRangeStart = start;
-                _videoDateRangeEnd = end;
-              });
-              _applyVideoFilter();
-            },
+        ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: pillMaxW),
+          child: _buildFilterPill(
+            icon: Icons.calendar_month_rounded,
+            label: hasDateFilter
+                ? _dateRangeLabel(_videoDateRangeStart!, _videoDateRangeEnd)
+                : 'Date Range',
+            isActive: hasDateFilter,
+            onTap: () => _openCalendarFilter(
+              initialStart: _videoDateRangeStart,
+              initialEnd: _videoDateRangeEnd,
+              onApply: (start, end) {
+                setState(() {
+                  _videoDateRangeStart = start;
+                  _videoDateRangeEnd = end;
+                });
+                _applyVideoFilter();
+              },
+            ),
           ),
         ),
         SizedBox(width: context.rp(8)),
-        _buildFilterPill(
-          icon: Icons.shield_outlined,
-          label: hasDetFilter ? _videoDetFilterLabel() : 'All Detections',
-          isActive: hasDetFilter,
-          onTap: _openVideoDetectionFilter,
+        ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: pillMaxW),
+          child: _buildFilterPill(
+            icon: Icons.shield_outlined,
+            label: hasDetFilter ? _videoDetFilterLabel() : 'All Detections',
+            isActive: hasDetFilter,
+            onTap: _openVideoDetectionFilter,
+          ),
         ),
         if (hasDateFilter || hasDetFilter) ...[
           SizedBox(width: context.rp(8)),
