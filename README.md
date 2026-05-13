@@ -25,7 +25,26 @@
 > *"DMS-HybridNet: A Dual-Stream Architecture Combining MobileNetV3 and Residual 1D-CNN for Real-Time Multi-Class Driver Behavior Monitoring on Mobile Edge Devices"*
 
 ---
+## Authors
 
+| Name | Role |
+|------|------|
+| Pia Katleya V. Macalanda | Machine Learning Engineer, Dataset Preparation, UI/UX Design, Researcher |
+| Juliana R. Mancera | Mobile App Developer, Model Integration, Testing & Deployment, Researcher |
+
+**Institution:** New Era University, College of Informatics and Computing Studies  
+**Program:** Bachelor of Science in Computer Science  
+**Year:** 2025-2026
+
+---
+
+## License
+
+Copyright © 2026 Pia Katleya V. Macalanda & Juliana R. Mancera. All rights reserved.
+
+This project was developed as an undergraduate thesis at New Era University. It is licensed under [CC BY-NC-ND 4.0](LICENSE) — you may view and cite this work with attribution, but you may **not** use it commercially, distribute modified versions, or deploy any part of it (including the DMS-HybridNet model) without prior written permission from the authors.
+
+--- 
 ## Features
 
 ### Real-Time Monitoring
@@ -229,24 +248,3 @@ Release builds use ProGuard minification + resource shrinking by default.
 - 5–15 ms per forward pass on mid-range Snapdragon
 - Effective prediction rate: 6–7 FPS (every 5th camera frame)
 - Privacy by design: no video transmitted, no cloud sync — compliant with the Philippine Data Privacy Act of 2012 (RA 10173)
-
----
-
-## Authors
-
-| Name | Role |
-|------|------|
-| Pia Katleya V. Macalanda | Machine Learning Engineer, Dataset Preparation, UI/UX Design, Researcher |
-| Juliana R. Mancera | Mobile App Developer, Model Integration, Testing & Deployment, Researcher |
-
-**Institution:** New Era University, College of Informatics and Computing Studies  
-**Program:** Bachelor of Science in Computer Science  
-**Year:** 2025-2026
-
----
-
-## License
-
-Copyright © 2026 Pia Katleya V. Macalanda & Juliana R. Mancera. All rights reserved.
-
-This project was developed as an undergraduate thesis at New Era University. It is licensed under [CC BY-NC-ND 4.0](LICENSE) — you may view and cite this work with attribution, but you may **not** use it commercially, distribute modified versions, or deploy any part of it (including the DMS-HybridNet model) without prior written permission from the authors.
