@@ -51,7 +51,7 @@ drivermonitorngsystem/
 
 | File | Role |
 |------|------|
-| `lib/core/database/database_helper.dart` | SQLite database with 5 tables: `sessions`, `state_counts`, `alert_events`, `system_logs`, `alertness_snapshots`. Handles all CRUD operations, schema migrations (v3), and data retention enforcement. |
+| `lib/core/database/database_helper.dart` | SQLite database with 6 tables: `sessions`, `state_counts`, `alert_events`, `system_logs`, `alertness_snapshots`, `video_clips`. Handles all CRUD operations, schema migrations (v4), and data retention enforcement. |
 | `lib/core/database/db_change_notifier.dart` | Riverpod reactive notifier that triggers UI rebuilds whenever the database changes (new session, alert, or log entry). |
 
 ---
@@ -64,6 +64,7 @@ drivermonitorngsystem/
 | `lib/core/session_state.dart` | Persists active session ID and start time via SharedPreferences so session data survives PiP transitions, isolate restarts, and app backgrounding. |
 | `lib/core/services/notifications.dart` | Manages the Android foreground service with a persistent notification showing live driver state and a Stop button. Throttles updates to every 2 seconds to avoid dropped taps. |
 | `lib/core/services/pip_service.dart` | Picture-in-Picture mode so monitoring continues in a floating window when the user navigates away or presses home. |
+| `lib/core/services/video_clip_service.dart` | Records and saves 10-second alert clips to app-private storage. Validates disk space (50 MB minimum) before writing, verifies file existence and size post-copy, and handles bulk export to the Downloads folder. |
 | `lib/core/preference/preference_helper.dart` | SharedPreferences wrapper for user settings: alert sensitivity, auto-start toggle, session retention policy, and onboarding completion status. |
 
 ---
@@ -77,8 +78,8 @@ drivermonitorngsystem/
 | `lib/screens/monitor_screen.dart` | **Core screen.** Live camera feed + real-time AI inference. Implements the 3-level escalating alert system (L1 = slide-in banner, L2 = persistent warning, L3 = full-screen blocking alarm). Manages session recording, foreground service, and PiP mode. |
 | `lib/screens/dashboard_screen.dart` | Home screen with circular Safety Score (0–100, color-coded), 4 stat cards (Total Drive Time, Alerts, Safety Streak, Avg Alertness), and a 30-day safety score line chart. Auto-refreshes every 30 seconds. |
 | `lib/screens/analytics_screen.dart` | Trend analysis with 7-day/30-day/all-time filters, summary cards, drowsiness vs. distraction daily line chart, and hourly alert distribution bar chart. |
-| `lib/screens/history_screen.dart` | Chronological session list grouped by date, with search and filter chips (This Week, This Month, With Alerts, Safe Drives). Tap a session to see state breakdown, alert events (L1/L2/L3), and system logs. |
-| `lib/screens/settings_screen.dart` | App configuration: alert volume slider, sensitivity (Low/Medium/High), auto-start toggle, data retention policy (7 Days/30 Days/Forever), clear all history, and About section with authors. |
+| `lib/screens/history_screen.dart` | Two-tab screen: **Session Logs** — date-grouped session list with search and filters (date range, detection type, alert level); tap a session to see alertness timeline, alert events, system log, and linked clips. **Video Logs** — all saved alert clips with thumbnail, duration, alert type; supports multi-select bulk export to Downloads, in-app playback (non-mirrored), and swipe-to-delete. |
+| `lib/screens/settings_screen.dart` | App configuration: alert volume slider, sensitivity (Low/Medium/High), auto-start toggle, show session summary toggle, data retention policy (7 Days/30 Days/90 Days/Forever), clear all history, and About section with authors. |
 
 ---
 
@@ -86,7 +87,7 @@ drivermonitorngsystem/
 
 | File | Role |
 |------|------|
-| `lib/widgets/head_pose_indicator.dart` | Visual circle widget on the monitor screen showing the driver's current head orientation (yaw/roll as angle and rotation) as alignment feedback. |
+| `lib/widgets/head_pose_indicator.dart` | Color-coded ring widget on the monitor screen (green/yellow/red/dashed) showing the driver's current head orientation (yaw/roll as angle and rotation) as real-time alignment feedback. |
 | `lib/widgets/exit.dart` | Exit confirmation dialog to prevent accidental app closure; stops the foreground service and clears recording state before exiting. |
 | `lib/utils/responsive.dart` | OEM-specific UI scaling utilities. Applies multipliers per brand: Samsung (0.95×), MIUI/OPPO/Vivo (0.97×), stock Android (1.0×) for text, padding, sizes, icons, and border radii. |
 
@@ -98,7 +99,7 @@ drivermonitorngsystem/
 |------|------|
 | `assets/models/dms_hybridnet_v3_float32.tflite` | The TFLite model. Hybrid CNN-BiLSTM-Attention architecture combining EfficientNet-B0 (face), Eye MicroCNN (eyes), and MobileNetV3-Small (upper body) with BiLSTM temporal modeling and Multi-head Attention. Outputs 13 behavior classes from a 224×224 image + 25 geometric features. |
 | `assets/norm_params.json` | Mean and scale normalization parameters for the 25 input features (EAR, MAR, head pose, gaze, wrist/shoulder positions, temporal trends) — required before feeding features into the model. |
-| `assets/L1_L2_sound.mp3` | Audio alert played for Level 1 and Level 2 alerts (slide-in banner and persistent warning). |
+| `assets/L1_L2_sound.mp3` | Audio alert used for Level 1 and Level 2 alerts. L1 plays it once; L2 plays it 3× consecutively via a dedicated secondary audio player (`_alarmPlayer`). |
 | `assets/L3_critical_alert.wav` | Looping alarm played during Level 3 full-screen blocking alert requiring manual dismissal. |
 | `assets/bantay_drive_logo.png` | Main app logo used in splash and onboarding screens. |
 | `assets/text_logo.png` | Text-based "Bantay Drive" logo variant used in UI. |
@@ -138,9 +139,9 @@ Combined → BiLSTM (temporal modeling, 20-frame window)
 
 | Category | Classes |
 |----------|---------|
-| **Normal** | Neutral |
-| **Drowsy** | Yawning, Fatigue, Microsleep, Nodding |
-| **Distracted** | Texting, Phone Call, Eating/Drinking, Radio, Grooming, Smoking, Reaching, Body Distraction |
+| **Natural** | Safe Driving, Talking to Passenger |
+| **Drowsy** | Yawning, Yawning (Occluded), Fatigue, Microsleep |
+| **Distracted** | Texting, Phone Call, Radio, Drinking, Body/Reaching, Grooming, Smoking |
 
 ### Training Datasets
 
@@ -155,9 +156,9 @@ Combined → BiLSTM (temporal modeling, 20-frame window)
 
 | Level | Trigger | UI | Audio |
 |-------|---------|-----|-------|
-| **L1** | Initial detection | Slide-in banner (top of screen) | Short beep |
-| **L2** | Sustained or repeated | Persistent warning banner | Repeated beep |
-| **L3** | Critical / driver unresponsive | Full-screen blocking overlay | Looping alarm |
+| **L1** | Initial detection | Slide-in banner (top of screen, auto-dismisses) | `L1_L2_sound.mp3` plays once |
+| **L2** | Sustained or repeated detection | Persistent warning banner | `L1_L2_sound.mp3` plays 3× consecutively via `_alarmPlayer` |
+| **L3** | Critical / driver unresponsive | Full-screen blocking overlay (manual dismiss required) | `L3_critical_alert.wav` loops until dismissed |
 
 ---
 
@@ -166,12 +167,13 @@ Combined → BiLSTM (temporal modeling, 20-frame window)
 | Feature | Implementation |
 |---------|---------------|
 | Real-Time Detection | DMS-HybridNet V3 TFLite model (224×224 RGB + 25 features) at ~5 FPS |
-| 3-Level Alert System | Escalating L1 → L2 → L3 with audio and visual alerts |
+| 3-Level Alert System | Escalating L1 → L2 → L3 with distinct audio and visual alerts |
+| Video Clip Recording | Auto-records 10-second alert clips on L2/L3; stored in app-private storage with export to Downloads |
 | Background Monitoring | Android foreground service with persistent notification |
 | Picture-in-Picture | Monitoring continues in floating window when app is minimized |
-| Database | SQLite with 5 tables for sessions, alerts, logs, and snapshots |
+| Database | SQLite v4 with 6 tables for sessions, alerts, logs, snapshots, and video clips |
 | Analytics Dashboard | Safety score ring, trend charts, hourly distribution |
-| Session History | Date-grouped list with search and filters |
+| Session History | Two-tab view: session logs with search/filters + video logs with bulk export |
 | Sensitivity Control | Low / Medium / High with adjustable frame thresholds |
 | Responsive Design | OEM-specific scaling for Samsung, MIUI, ColorOS, stock Android |
 | Fully Offline | All inference runs on-device — no internet required |
