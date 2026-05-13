@@ -12,7 +12,7 @@
 </p>
 
 <div align="center">
-  <h2>Undergraduate Thesis Project — New Era University, 2026</h2>
+  <h2>Undergraduate Thesis Project — New Era University, AY. 2025-2026</h2>
   <h4>Authors: Macalanda, Pia Katleya V. & Mancera, Juliana R.</h4>
 </div>
 
@@ -240,10 +240,12 @@ Release builds use ProGuard minification + resource shrinking by default.
 
 **Institution:** New Era University, College of Informatics and Computing Studies  
 **Program:** Bachelor of Science in Computer Science  
-**Year:** 2026
+**Year:** 2025-2026
 
 ---
 
 ## License
 
-This project was developed as an undergraduate thesis at New Era University. It is intended for academic and non-commercial research purposes only. Unauthorized reproduction, distribution, or commercial use of any part of this project — including the model architecture, source code, and documentation — is not permitted without prior written consent from the authors.
+Copyright © 2026 Pia Katleya V. Macalanda & Juliana R. Mancera. All rights reserved.
+
+This project was developed as an undergraduate thesis at New Era University. It is licensed under [CC BY-NC-ND 4.0](LICENSE) — you may view and cite this work with attribution, but you may **not** use it commercially, distribute modified versions, or deploy any part of it (including the DMS-HybridNet model) without prior written permission from the authors.

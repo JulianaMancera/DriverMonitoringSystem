@@ -4,6 +4,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
 class VideoClipService {
+  // Minimum free space required (50MB) before attempting to write
+  static const int _minFreeBytesRequired = 52428800;
+
   static Future<Directory> _clipsDir() async {
     final docs = await getApplicationDocumentsDirectory();
     final dir = Directory(p.join(docs.path, 'alert_clips'));
@@ -16,6 +19,12 @@ class VideoClipService {
     required int sessionId,
   }) async {
     try {
+      // ✅ Check disk space before attempting write
+      if (!await _hasSufficientDiskSpace()) {
+        debugPrint('[VideoClip] ❌ Insufficient disk space for saveClip');
+        return null;
+      }
+
       final src = File(sourcePath);
 
       // ✅ Verify source file exists
@@ -78,6 +87,12 @@ class VideoClipService {
   /// Returns (destinationPath, errorReason). On success errorReason is null.
   static Future<(String?, String?)> exportToDownloads(String filePath) async {
     try {
+      // ✅ Check disk space before export
+      if (!await _hasSufficientDiskSpace()) {
+        debugPrint('[VideoClip] ❌ Insufficient disk space for export');
+        return null;
+      }
+
       final src = File(filePath);
       if (!await src.exists()) {
         debugPrint('[VideoClip] ❌ Source file does not exist: $filePath');
