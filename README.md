@@ -143,21 +143,6 @@ lib/
 - Android device or emulator (API 26+, Android 8.0 Oreo minimum)
 - **JDK 21**
 
-### Installation
-
-```bash
-git clone https://github.com/your-username/DriverMonitoringSystem.git
-cd DriverMonitoringSystem/drivermonitorngsystem
-
-flutter pub get
-
-# Debug
-flutter run
-
-# Release APK
-flutter build apk --release
-```
-
 New to Flutter? The [official Flutter documentation](https://docs.flutter.dev/) offers tutorials, samples, and a full API reference. A guided first-app walkthrough is available at [docs.flutter.dev/get-started/codelab](https://docs.flutter.dev/get-started/codelab).
 
 ### Model & Asset Setup
