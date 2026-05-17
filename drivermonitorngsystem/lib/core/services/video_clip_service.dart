@@ -98,18 +98,18 @@ class VideoClipService {
     }
   }
 
-  static Future<String?> exportToDownloads(String filePath) async {
+  static Future<(String?, String?)> exportToDownloads(String filePath) async {
     try {
       // ✅ Check disk space before export
       if (!await _hasSufficientDiskSpace()) {
         debugPrint('[VideoClip] ❌ Insufficient disk space for export');
-        return null;
+        return (null, 'disk_full');
       }
 
       final src = File(filePath);
       if (!await src.exists()) {
         debugPrint('[VideoClip] ❌ Source file does not exist: $filePath');
-        return null;
+        return (null, 'file_not_found');
       }
 
       final fileName = p.basename(filePath);
@@ -120,10 +120,9 @@ class VideoClipService {
         final dest = p.join(downloadsDir.path, fileName);
         await src.copy(dest);
 
-        // ✅ Verify export succeeded
         if (await File(dest).exists()) {
           debugPrint('[VideoClip] ✅ Exported to Downloads: $dest');
-          return dest;
+          return (dest, null);
         }
       }
 
@@ -132,18 +131,27 @@ class VideoClipService {
         final dest = p.join(extDir.path, fileName);
         await src.copy(dest);
 
-        // ✅ Verify export succeeded
         if (await File(dest).exists()) {
           debugPrint('[VideoClip] ✅ Exported to external storage: $dest');
-          return dest;
+          return (dest, null);
         }
       }
 
       debugPrint('[VideoClip] ❌ Could not export file: no valid destination');
-      return null;
+      return (null, 'no_destination');
+    } on FileSystemException catch (e) {
+      final msg = e.message.toLowerCase();
+      debugPrint('[VideoClip] ❌ exportToDownloads FileSystemException: $e');
+      if (msg.contains('no space') || msg.contains('disk full') || msg.contains('enospc')) {
+        return (null, 'disk_full');
+      }
+      if (msg.contains('permission') || msg.contains('denied') || msg.contains('eacces')) {
+        return (null, 'permission_denied');
+      }
+      return (null, 'io_error');
     } catch (e) {
       debugPrint('[VideoClip] ❌ exportToDownloads error: $e');
-      return null;
+      return (null, 'unknown');
     }
   }
 
