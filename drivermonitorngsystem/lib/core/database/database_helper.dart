@@ -671,7 +671,7 @@ class DatabaseHelper {
     });
 
     for (final path in clipPaths) {
-      await VideoClipService.deleteFile(path);
+      try { await VideoClipService.deleteFile(path); } catch (_) {}
     }
   }
 
@@ -698,7 +698,7 @@ class DatabaseHelper {
       await txn.delete('sessions');
     });
     for (final path in paths) {
-      await VideoClipService.deleteFile(path);
+      try { await VideoClipService.deleteFile(path); } catch (_) {}
     }
   }
 
