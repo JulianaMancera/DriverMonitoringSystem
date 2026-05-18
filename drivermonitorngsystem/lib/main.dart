@@ -185,18 +185,6 @@ class _ExitWrapper extends ConsumerWidget {
   }
 }
 
-// ─── NAV PROVIDER ─────────────────────────────────────────────────────────────
-
-class _NavIndexNotifier extends Notifier<int> {
-  @override
-  int build() => 0;
-  void set(int index) => state = index;
-}
-
-final navIndexProvider = NotifierProvider<_NavIndexNotifier, int>(
-  _NavIndexNotifier.new,
-);
-
 final deviceNameProvider = FutureProvider<String>((ref) async {
   try {
     if (Platform.isAndroid) {

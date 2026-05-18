@@ -371,6 +371,17 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     await _initCamera();
   }
 
+  Future<void> _reloadPreferences() async {
+    final prefs = PreferencesHelper.instance;
+    final thresholds = await prefs.getAlertThresholds();
+    final autoStart  = await prefs.getAutoStart();
+    if (!mounted) return;
+    setState(() {
+      _alertThresholds = thresholds;
+      _prefAutoStart   = autoStart;
+    });
+  }
+
   Future<bool> _ensureCameraPermission() async {
     var status = await Permission.camera.status;
     if (status.isGranted) return true;
@@ -1184,6 +1195,13 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   @override
   Widget build(BuildContext context) {
     final isInPip = ref.watch(isInPipProvider);
+
+    // Reload preferences whenever the user navigates back to the Monitor tab
+    // so that sensitivity or auto-start changes made in Settings take effect
+    // without requiring an app restart.
+    ref.listen<int>(navIndexProvider, (prev, next) {
+      if (next == 1 && prev != 1) _reloadPreferences();
+    });
 
     if (isInPip) return _buildPipView();
 
