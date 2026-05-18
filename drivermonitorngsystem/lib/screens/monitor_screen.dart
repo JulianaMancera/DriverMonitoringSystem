@@ -68,16 +68,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   Animation<Offset>? _notifSlide;
   Animation<double>? _notifFade;
 
-  int _prefAlertSensitivity = 1;
   bool _prefAutoStart = false;
+  List<int> _alertThresholds = [3, 6, 9];
 
   static const bool _mirrorCamera = false;
-
-  static const Map<int, List<int>> _sensitivityThresholds = {
-    0: [5, 10, 15],
-    1: [3, 6, 9],
-    2: [2, 4, 6],
-  };
 
   bool _modelLoaded = false;
 
@@ -369,8 +363,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   // ── CAMERA INIT ──────────────────────────────────────────────────────────────
   Future<void> _loadPreferencesAndInit() async {
     final prefs = PreferencesHelper.instance;
-    _prefAlertSensitivity = await prefs.getAlertSensitivity();
     _prefAutoStart = await prefs.getAutoStart();
+    _alertThresholds = await prefs.getAlertThresholds();
     final success = await TfliteService.instance.initialize();
     if (mounted) setState(() => _modelLoaded = success);
     if (!await _ensureCameraPermission()) return;
@@ -954,7 +948,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         // L1 threshold. A single neutral frame during borderline drowsiness was
         // previously zeroing _alertLevel immediately, making L2/L3 unreachable.
         final thresholds =
-            _sensitivityThresholds[_prefAlertSensitivity] ?? [3, 6, 9];
+            _alertThresholds;
         if (_alertLevel > 0 &&
             _alertLevel < 3 &&
             _consecutiveDrowsy < thresholds[0] &&
@@ -971,7 +965,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   Future<void> _checkAndTriggerAlert(String type, int consecutive) async {
     final thresholds =
-        _sensitivityThresholds[_prefAlertSensitivity] ?? [3, 6, 9];
+        _alertThresholds;
     if (consecutive < thresholds[0]) return;
 
     int newLevel = 1;

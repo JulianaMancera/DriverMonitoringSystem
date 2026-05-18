@@ -357,11 +357,11 @@ class _BottomNav extends StatelessWidget {
   const _BottomNav({required this.currentIndex, required this.onTap});
 
   static const List<_NavData> _items = [
-    _NavData(icon: Icons.home_rounded, label: 'Home'),
-    _NavData(icon: Icons.videocam_rounded, label: 'Monitor'),
-    _NavData(icon: Icons.bar_chart_rounded, label: 'Analytics'),
-    _NavData(icon: Icons.history_rounded, label: 'History'),
-    _NavData(icon: Icons.settings_rounded, label: 'Settings'),
+    _NavData(Icons.home_rounded),
+    _NavData(Icons.videocam_rounded),
+    _NavData(Icons.bar_chart_rounded),
+    _NavData(Icons.history_rounded),
+    _NavData(Icons.settings_rounded),
   ];
 
   @override
@@ -461,6 +461,5 @@ class _BottomNav extends StatelessWidget {
 
 class _NavData {
   final IconData icon;
-  final String label;
-  const _NavData({required this.icon, required this.label});
+  const _NavData(this.icon);
 }

@@ -25,15 +25,34 @@
 > *"DMS-HybridNet: A Dual-Stream Architecture Combining MobileNetV3 and Residual 1D-CNN for Real-Time Multi-Class Driver Behavior Monitoring on Mobile Edge Devices"*
 
 ---
+## Authors
 
+| Name | Role |
+|------|------|
+| Pia Katleya V. Macalanda | Machine Learning Engineer, Dataset Preparation, UI/UX Design, Researcher |
+| Juliana R. Mancera | Mobile App Developer, Model Integration, Testing & Deployment, Researcher |
+
+**Institution:** New Era University, College of Informatics and Computing Studies  
+**Program:** Bachelor of Science in Computer Science  
+**Year:** 2025-2026
+
+---
+
+## License
+
+Copyright © 2026 Pia Katleya V. Macalanda & Juliana R. Mancera. All rights reserved.
+
+This project was developed as an undergraduate thesis at New Era University. It is licensed under [CC BY-NC-ND 4.0](LICENSE) — you may view and cite this work with attribution, but you may **not** use it commercially, distribute modified versions, or deploy any part of it (including the DMS-HybridNet model) without prior written permission from the authors.
+
+--- 
 ## Features
 
 ### Real-Time Monitoring
 - On-device TFLite inference (NNAPI → CPU fallback) — no server required
 - **3-level escalating alert system:**
-  - **Level 1** — Slide-in audio banner (auto-dismisses)
-  - **Level 2** — Persistent banner with audio
-  - **Level 3** — Full-screen blocking alarm overlay, requires manual dismissal
+  - **Level 1** — Slide-in banner; alert sound plays once (auto-dismisses)
+  - **Level 2** — Persistent banner; alert sound plays 3 times
+  - **Level 3** — Full-screen blocking alarm overlay; alarm loops continuously until manually dismissed
 - Configurable alert sensitivity:
 
 | Sensitivity | L1 | L2 | L3 |
@@ -43,7 +62,7 @@
 | High        | 2 frames | 4 frames  | 6 frames  |
 
 - **Head-pose visual indicator** — real-time circle overlay tracking driver head rotation
-- **Video clip capture** — automatically records and saves clips (up to 10 s) when alerts trigger
+- **Video clip capture** — automatically records and saves clips (up to 10 s) when alerts trigger; disk-space-aware (requires 50 MB free) with structured error codes; clips exportable to device Downloads folder
 - **Picture-in-Picture (PiP)** — monitoring continues in a floating window when app is backgrounded
 - Foreground service with persistent notification showing live driver state + Stop button
 - Clear Glasses toggle, Auto-start recording option
@@ -116,82 +135,11 @@ lib/
 
 ---
 
-## Getting Started
+## Installation
 
-### Prerequisites
-- Flutter SDK 3.16+
-- Android Studio / VS Code
-- Android device or emulator (API 26+, Android 8.0 Oreo minimum)
-- **JDK 21**
+Bantay Drive is distributed as a pre-built Android APK. A Google Drive download link will be provided directly by the developers upon request.
 
-### Installation
-
-```bash
-git clone https://github.com/your-username/DriverMonitoringSystem.git
-cd DriverMonitoringSystem/drivermonitorngsystem
-
-flutter pub get
-
-# Debug
-flutter run
-
-# Release APK
-flutter build apk --release
-```
-
-New to Flutter? The [official Flutter documentation](https://docs.flutter.dev/) offers tutorials, samples, and a full API reference. A guided first-app walkthrough is available at [docs.flutter.dev/get-started/codelab](https://docs.flutter.dev/get-started/codelab).
-
-### Model & Asset Setup
-
-Place the following under `assets/`:
-
-```
-assets/
-├── models/
-│   └── dms_hybridnet_v3_float32.tflite
-├── norm_params.json
-├── L1_L2_sound.mp3
-├── L3_critical_alert.wav
-├── car.png
-├── text_logo.png
-└── bantay_drive_logo.png
-```
-
-Verify `pubspec.yaml` declares all of these under `flutter: assets:`.
-
-### Android Gradle Setup
-
-**`android/app/build.gradle.kts`** — Java 21 target:
-```kotlin
-compileOptions {
-    isCoreLibraryDesugaringEnabled = true
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
-}
-kotlinOptions { jvmTarget = "21" }
-```
-```kotlin
-dependencies {
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-    implementation("androidx.concurrent:concurrent-futures:1.2.0")
-    implementation("androidx.concurrent:concurrent-futures-ktx:1.2.0")
-    implementation("androidx.multidex:multidex:2.0.1")
-}
-```
-
-**`android/gradle/wrapper/gradle-wrapper.properties`:**
-```properties
-distributionUrl=https\://services.gradle.org/distributions/gradle-8.13-all.zip
-```
-
-**`android/app/build.gradle.kts`** — suppress `.tflite` compression:
-```kotlin
-aaptOptions {
-    noCompress += listOf("tflite")
-}
-```
-
-Release builds use ProGuard minification + resource shrinking by default.
+> **Requirements:** Android 8.0 (Oreo) or higher — no additional setup required.
 
 ---
 
@@ -216,6 +164,7 @@ Release builds use ProGuard minification + resource shrinking by default.
 | `device_info_plus` | Brand-specific UI scaling |
 | `package_info_plus` | App version display |
 | `path_provider` | App documents directory |
+| `path` | File path manipulation |
 | `url_launcher` | Authors' GitHub links |
 
 ---
@@ -228,24 +177,3 @@ Release builds use ProGuard minification + resource shrinking by default.
 - 5–15 ms per forward pass on mid-range Snapdragon
 - Effective prediction rate: 6–7 FPS (every 5th camera frame)
 - Privacy by design: no video transmitted, no cloud sync — compliant with the Philippine Data Privacy Act of 2012 (RA 10173)
-
----
-
-## Authors
-
-| Name | Role |
-|------|------|
-| Pia Katleya V. Macalanda | Machine Learning Engineer, Dataset Preparation, UI/UX Design, Researcher |
-| Juliana R. Mancera | Mobile App Developer, Model Integration, Testing & Deployment, Researcher |
-
-**Institution:** New Era University, College of Informatics and Computing Studies  
-**Program:** Bachelor of Science in Computer Science  
-**Year:** 2025-2026
-
----
-
-## License
-
-Copyright © 2026 Pia Katleya V. Macalanda & Juliana R. Mancera. All rights reserved.
-
-This project was developed as an undergraduate thesis at New Era University. It is licensed under [CC BY-NC-ND 4.0](LICENSE) — you may view and cite this work with attribution, but you may **not** use it commercially, distribute modified versions, or deploy any part of it (including the DMS-HybridNet model) without prior written permission from the authors.
