@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../services/video_clip_service.dart';
@@ -671,7 +672,11 @@ class DatabaseHelper {
     });
 
     for (final path in clipPaths) {
-      try { await VideoClipService.deleteFile(path); } catch (_) {}
+      try {
+        await VideoClipService.deleteFile(path);
+      } catch (e) {
+        debugPrint('[DB] Failed to delete clip file $path: $e');
+      }
     }
   }
 
@@ -698,7 +703,11 @@ class DatabaseHelper {
       await txn.delete('sessions');
     });
     for (final path in paths) {
-      try { await VideoClipService.deleteFile(path); } catch (_) {}
+      try {
+        await VideoClipService.deleteFile(path);
+      } catch (e) {
+        debugPrint('[DB] Failed to delete clip file $path: $e');
+      }
     }
   }
 
