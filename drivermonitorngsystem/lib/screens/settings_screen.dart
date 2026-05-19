@@ -32,6 +32,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool   _autoStartEnabled    = false;
   bool   _showSessionSummary  = true;
   String _retentionPeriod     = '30 days';
+  String _clipExpiry          = '30 days';
   String _appVersion          = '';
 
   StreamSubscription<double>? _volumeSubscription;
@@ -43,6 +44,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       case '7 days':  return 7;
       case '30 days': return 30;
       default:        return null;
+    }
+  }
+
+  int? _clipExpiryDays(String expiry) {
+    switch (expiry) {
+      case '7 days':  return 7;
+      case '30 days': return 30;
+      case '90 days': return 90;
+      default:        return null; // 'Never'
     }
   }
 
@@ -69,6 +79,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final autoStart    = await prefs.getAutoStart();
     final showSummary  = await prefs.getShowSessionSummary();
     final retention    = await prefs.getRetention();
+    final clipExpiry   = await prefs.getClipExpiry();
     final systemVolume = await VolumeController.instance.getVolume();
     String version     = 'v1.0.0';
     try {
@@ -82,6 +93,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _autoStartEnabled   = autoStart;
         _showSessionSummary = showSummary;
         _retentionPeriod    = retention;
+        _clipExpiry         = clipExpiry;
         _appVersion         = version;
         _isLoading          = false;
       });
@@ -196,6 +208,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 final days = _retentionDays(v);
                 if (days != null) {
                   await DatabaseHelper.instance.deleteSessionsOlderThan(days);
+                  ref.read(dbChangeCounterProvider.notifier).increment();
+                }
+              },
+            ),
+            _dividerLine(),
+            _dropdownTile(
+              icon: Icons.video_library_rounded, iconColor: _cyan,
+              title: 'Video Clip Expiry',
+              subtitle: 'Auto-delete saved clips older than selected period',
+              value: _clipExpiry,
+              options: const ['7 days', '30 days', '90 days', 'Never'],
+              onChanged: (v) async {
+                if (v == null) return;
+                setState(() => _clipExpiry = v);
+                await PreferencesHelper.instance.setClipExpiry(v);
+                final days = _clipExpiryDays(v);
+                if (days != null) {
+                  await DatabaseHelper.instance.deleteClipsOlderThan(days);
                   ref.read(dbChangeCounterProvider.notifier).increment();
                 }
               },
