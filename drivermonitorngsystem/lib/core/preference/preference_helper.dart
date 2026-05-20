@@ -32,6 +32,7 @@ class PreferencesHelper {
   static const String _keyAlertSensitivity   = 'alert_sensitivity';
   static const String _keyAutoStart          = 'auto_start';
   static const String _keyRetention          = 'session_retention';
+  static const String _keyClipExpiry         = 'clip_expiry';
   static const String _keyClearGlasses       = 'clear_glasses';
   static const String _keyOnboardingSeen     = 'onboarding_seen';
   static const String _keyShowSessionSummary = 'show_session_summary';
@@ -132,6 +133,34 @@ class PreferencesHelper {
     }
   }
 
+  /// Valid values: '7 days', '30 days', '90 days', 'Never'
+  /// Default: '30 days'
+  ///
+  /// settings_screen enforces this immediately on change by calling
+  /// DatabaseHelper.instance.deleteClipsOlderThan(days).
+  /// Only video clip files and their DB records are removed — sessions
+  /// and alert events are kept.
+  Future<String> getClipExpiry() async =>
+      (await _prefs()).getString(_keyClipExpiry) ?? '30 days';
+
+  Future<void> setClipExpiry(String value) async {
+    const valid = {'7 days', '30 days', '90 days', 'Never'};
+    if (!valid.contains(value)) return;
+    await (await _prefs()).setString(_keyClipExpiry, value);
+  }
+
+  /// Converts clip expiry string to days integer.
+  /// Returns null for 'Never' (no auto-deletion).
+  Future<int?> getClipExpiryDays() async {
+    final expiry = await getClipExpiry();
+    switch (expiry) {
+      case '7 days':  return 7;
+      case '30 days': return 30;
+      case '90 days': return 90;
+      default:        return null; // 'Never'
+    }
+  }
+
   // ONBOARDING
 
   /// Whether the user has completed the onboarding walkthrough.
@@ -159,6 +188,7 @@ class PreferencesHelper {
     await prefs.setInt   (_keyAlertSensitivity,   1);
     await prefs.setBool  (_keyAutoStart,          false);
     await prefs.setString(_keyRetention,          '30 days');
+    await prefs.setString(_keyClipExpiry,         '30 days');
     await prefs.setBool  (_keyClearGlasses,       false);
     await prefs.setBool  (_keyShowSessionSummary, true);
     // Note: onboarding_seen is intentionally NOT reset here

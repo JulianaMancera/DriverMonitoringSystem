@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'core/database/database_helper.dart';
+import 'core/preference/preference_helper.dart';
 import 'core/providers.dart';
 import 'core/services/notifications.dart';
 import 'screens/dashboard_screen.dart';
@@ -44,6 +45,14 @@ void main() async {
   }
 
   await DatabaseHelper.instance.database;
+
+  // Run clip expiry cleanup on every startup so old clips are removed
+  // even if the user never opens Settings after changing the preference.
+  final clipExpiryDays = await PreferencesHelper.instance.getClipExpiryDays();
+  if (clipExpiryDays != null) {
+    await DatabaseHelper.instance.deleteClipsOlderThan(clipExpiryDays);
+  }
+
   await BantayDriveService.initialize();
 
   // Registers the IsolateNameServer port so the background isolate can deliver
@@ -184,18 +193,6 @@ class _ExitWrapper extends ConsumerWidget {
     );
   }
 }
-
-// ─── NAV PROVIDER ─────────────────────────────────────────────────────────────
-
-class _NavIndexNotifier extends Notifier<int> {
-  @override
-  int build() => 0;
-  void set(int index) => state = index;
-}
-
-final navIndexProvider = NotifierProvider<_NavIndexNotifier, int>(
-  _NavIndexNotifier.new,
-);
 
 final deviceNameProvider = FutureProvider<String>((ref) async {
   try {
