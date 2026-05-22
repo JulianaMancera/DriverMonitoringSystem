@@ -127,7 +127,7 @@ Driver ──→ UC-01: First Launch & Onboarding   (first install only)
 3. Camera permission is granted → System initializes the camera feed (rear-facing, portrait-locked).
 4. Android OS starts a foreground service and displays a persistent status-bar notification.
 5. System creates a new session record in the SQLite `sessions` table.
-6. System begins the inference loop (every 200 ms):
+6. System begins the inference loop (every 150 ms):
    a. Camera frame is captured and passed to ML Kit Face Detection.
    b. ML Kit extracts face landmarks: Eye Aspect Ratio (EAR), Mouth Aspect Ratio (MAR), yaw, pitch, and roll angles.
    c. Features are normalized using mean/scale values from `norm_params.json`.
@@ -266,10 +266,10 @@ Driver ──→ UC-01: First Launch & Onboarding   (first install only)
 ## UC-06: Record Alert Video Clip
 
 **Actor:** System  
-**Trigger:** A Level 3 critical alert is raised during an active session (triggered by UC-04).
+**Trigger:** A Level 2 or Level 3 alert is raised during an active session (triggered by UC-04).
 
 ### Preconditions
-- A Level 3 alert has been confirmed.
+- A Level 2 or Level 3 alert has been confirmed.
 - Camera feed is active and writable.
 - App-private storage is available.
 
@@ -452,8 +452,11 @@ Driver ──→ UC-01: First Launch & Onboarding   (first install only)
    - Value is saved to `shared_preferences`.
 
 **Data & Privacy:**
-5. Driver selects **Session Retention**: 7 days, 30 days, or Forever:
+5. Driver selects **Session Retention**: 7 days, 30 days, 90 days, or Never:
    - System immediately deletes any sessions in SQLite older than the selected threshold.
+   - Value is saved to `shared_preferences`; auto-deletion runs on subsequent app opens.
+5b. Driver selects **Video Clip Expiry**: 7 days, 30 days, 90 days, or Never:
+   - System immediately deletes any video clips older than the selected threshold.
    - Value is saved to `shared_preferences`; auto-deletion runs on subsequent app opens.
 6. Driver taps **Clear All History**:
    - Confirmation dialog is shown: "This will permanently delete ALL session data."
