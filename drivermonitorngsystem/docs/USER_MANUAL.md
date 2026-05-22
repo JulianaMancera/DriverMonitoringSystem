@@ -192,14 +192,19 @@ While a session is in progress, the Monitor screen shows:
 Bantay Drive uses a three-level alert system that escalates based on how long unsafe behavior continues.
 
 #### Level 1 Alert
-- **Trigger:** Unsafe behavior detected for approximately 1 second (5 consecutive frames at normal sensitivity)
-- **Action:** A short audio chime plays and a banner notification appears briefly on screen
+- **Trigger:** Unsafe behavior detected for approximately 0.45 seconds (3 consecutive frames at medium sensitivity)
+- **Action:** A short audio chime plays and a banner notification slides in briefly at the top of the screen
 - **Purpose:** A gentle reminder to refocus on the road
 
 #### Level 2 Alert
-- **Trigger:** Unsafe behavior continues for approximately 2 seconds (10 consecutive frames at normal sensitivity)
-- **Action:** A louder looping alarm plays, a persistent warning banner remains on screen, and a short video clip of the event is saved
-- **Purpose:** A strong warning when the driver has not responded to the Level 1 alert
+- **Trigger:** Unsafe behavior continues for approximately 0.9 seconds (6 consecutive frames at medium sensitivity)
+- **Action:** The same chime plays again and a persistent warning banner remains on screen; a short video clip of the event is saved
+- **Purpose:** A stronger warning when the driver has not responded to the Level 1 alert
+
+#### Level 3 Alert
+- **Trigger:** Unsafe behavior persists for approximately 1.35 seconds (9 consecutive frames at medium sensitivity)
+- **Action:** A looping critical alarm plays continuously and a full-screen red overlay blocks the camera preview — this overlay **must be tapped manually to dismiss**; a video clip is also saved
+- **Purpose:** A critical alarm requiring the driver's active acknowledgment when dangerous behavior has not been corrected
 
 #### Alert Cooldown
 After an alert fires, a brief cooldown period prevents the same alert from firing repeatedly in quick succession. If the unsafe behavior continues past the cooldown window, a new alert will trigger.
@@ -207,9 +212,9 @@ After an alert fires, a brief cooldown period prevents the same alert from firin
 #### Alert Banner
 The alert banner shows:
 - The type of behavior detected (e.g., "Drowsy Detected" or "Distracted — Phone Use")
-- The alert level (Level 1 or Level 2)
+- The alert level (Level 1, Level 2, or Level 3)
 
-Tapping the banner or resuming safe driving dismisses it.
+Tapping the banner or resuming safe driving dismisses Level 1 and Level 2 banners. Level 3 requires a manual tap on the full-screen overlay to dismiss.
 
 ### 4.5 Stopping a Session
 
@@ -342,11 +347,11 @@ A slider that controls the volume of alert sounds (0–100%).
 
 A segmented selector that controls how quickly the app triggers alerts.
 
-| Sensitivity | Level 1 trigger | Level 2 trigger | Recommended for |
-|---|---|---|---|
-| **Low** | ~1.6 seconds | ~3.6 seconds | Casual use, testing |
-| **Normal** (default) | ~1.0 second | ~2.0 seconds | Most drivers |
-| **High** | ~0.6 seconds | ~1.2 seconds | Drivers prone to microsleep |
+| Sensitivity | Level 1 trigger | Level 2 trigger | Level 3 trigger | Recommended for |
+|---|---|---|---|---|
+| **Low** | ~0.75 s (5 frames) | ~1.5 s (10 frames) | ~2.25 s (15 frames) | Casual use, testing |
+| **Medium** (default) | ~0.45 s (3 frames) | ~0.9 s (6 frames) | ~1.35 s (9 frames) | Most drivers |
+| **High** | ~0.3 s (2 frames) | ~0.6 s (4 frames) | ~0.9 s (6 frames) | Drivers prone to microsleep |
 
 Higher sensitivity = fewer consecutive unsafe frames required before an alert fires, meaning faster but potentially more frequent alerts.
 
@@ -366,16 +371,31 @@ When enabled, a summary modal appears after you stop a session, showing your sco
 
 ### 7.5 Data Retention
 
-Controls how long session data, alerts, and video clips are kept before being automatically deleted.
+Two separate dropdowns control how long data is kept before being automatically deleted on the next app launch.
+
+#### Session Retention
+
+Controls how long session records, alert events, and logs are kept.
 
 | Option | Description |
 |---|---|
-| **7 days** | Delete sessions older than 7 days on next app launch |
+| **7 days** | Delete sessions older than 7 days |
 | **30 days** (default) | Delete sessions older than 30 days |
 | **90 days** | Delete sessions older than 90 days |
-| **Forever** | Never automatically delete data |
+| **Never** | Keep all session data indefinitely |
 
-> **Note:** Deleted sessions cannot be recovered. If device storage is a concern, choose a shorter retention period.
+#### Video Clip Expiry
+
+Controls how long saved alert video clips are kept.
+
+| Option | Description |
+|---|---|
+| **7 days** | Delete clips older than 7 days |
+| **30 days** (default) | Delete clips older than 30 days |
+| **90 days** | Delete clips older than 90 days |
+| **Never** | Keep all video clips indefinitely |
+
+> **Note:** Deleted data cannot be recovered. If device storage is a concern, choose a shorter period — especially for video clips, which use the most storage.
 
 ### 7.6 Clear All Data
 

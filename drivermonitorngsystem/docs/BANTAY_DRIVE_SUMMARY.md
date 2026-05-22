@@ -51,7 +51,7 @@ drivermonitorngsystem/
 
 | File | Role |
 |------|------|
-| `lib/core/database/database_helper.dart` | SQLite database with 5 tables: `sessions`, `state_counts`, `alert_events`, `system_logs`, `alertness_snapshots`. Handles all CRUD operations, schema migrations (v3), and data retention enforcement. |
+| `lib/core/database/database_helper.dart` | SQLite database with 6 tables: `sessions`, `state_counts`, `alert_events`, `system_logs`, `alertness_snapshots`, `video_clips`. Handles all CRUD operations, schema migrations (v3), and data retention enforcement. |
 | `lib/core/database/db_change_notifier.dart` | Riverpod reactive notifier that triggers UI rebuilds whenever the database changes (new session, alert, or log entry). |
 
 ---
@@ -74,11 +74,11 @@ drivermonitorngsystem/
 |------|------|
 | `lib/screens/splash_screen.dart` | Animated splash screen on first launch showing Bantay Drive branding; transitions to onboarding or main app. |
 | `lib/screens/onboarding_screen.dart` | First-launch walkthrough introducing app features. Shown only once (persisted via SharedPreferences). |
-| `lib/screens/monitor_screen.dart` | **Core screen.** Live camera feed + real-time AI inference. Implements the 3-level escalating alert system (L1 = slide-in banner, L2 = persistent warning, L3 = full-screen blocking alarm). Manages session recording, foreground service, and PiP mode. |
+| `lib/screens/monitor_screen.dart` | **Core screen.** Live camera feed + real-time AI inference. Implements the 3-level escalating alert system (L1 = slide-in banner, L2 = persistent warning + video clip, L3 = full-screen blocking alarm + video clip). Manages session recording, foreground service, and PiP mode. |
 | `lib/screens/dashboard_screen.dart` | Home screen with circular Safety Score (0–100, color-coded), 4 stat cards (Total Drive Time, Alerts, Safety Streak, Avg Alertness), and a 30-day safety score line chart. Auto-refreshes every 30 seconds. |
 | `lib/screens/analytics_screen.dart` | Trend analysis with 7-day/30-day/all-time filters, summary cards, drowsiness vs. distraction daily line chart, and hourly alert distribution bar chart. |
 | `lib/screens/history_screen.dart` | Chronological session list grouped by date, with search and filter chips (This Week, This Month, With Alerts, Safe Drives). Tap a session to see state breakdown, alert events (L1/L2/L3), and system logs. |
-| `lib/screens/settings_screen.dart` | App configuration: alert volume slider, sensitivity (Low/Medium/High), auto-start toggle, data retention policy (7 Days/30 Days/Forever), clear all history, and About section with authors. |
+| `lib/screens/settings_screen.dart` | App configuration: alert volume slider, sensitivity (Low/Medium/High), auto-start toggle, session retention (7 Days/30 Days/90 Days/Never), video clip expiry (7 Days/30 Days/90 Days/Never), clear all history, and About section with authors. |
 
 ---
 
@@ -88,7 +88,7 @@ drivermonitorngsystem/
 |------|------|
 | `lib/widgets/head_pose_indicator.dart` | Visual circle widget on the monitor screen showing the driver's current head orientation (yaw/roll as angle and rotation) as alignment feedback. |
 | `lib/widgets/exit.dart` | Exit confirmation dialog to prevent accidental app closure; stops the foreground service and clears recording state before exiting. |
-| `lib/utils/responsive.dart` | OEM-specific UI scaling utilities. Applies multipliers per brand: Samsung (0.95×), MIUI/OPPO/Vivo (0.97×), stock Android (1.0×) for text, padding, sizes, icons, and border radii. |
+| `lib/utils/responsive.dart` | OEM-specific UI scaling utilities. Applies multipliers per brand: Samsung (0.92×), MIUI/OPPO/Vivo (0.97×), stock Android (1.0×) for text, padding, sizes, icons, and border radii. |
 
 ---
 
@@ -166,7 +166,7 @@ Combined → BiLSTM (temporal modeling, 20-frame window)
 | Feature | Implementation |
 |---------|---------------|
 | Real-Time Detection | DMS-HybridNet V3 TFLite model (224×224 RGB + 25 features) at ~5 FPS |
-| 3-Level Alert System | Escalating L1 → L2 → L3 with audio and visual alerts |
+| 3-Level Alert System | L1 (chime + slide-in banner) → L2 (chime + persistent banner + video clip) → L3 (looping alarm + full-screen overlay + video clip) |
 | Background Monitoring | Android foreground service with persistent notification |
 | Picture-in-Picture | Monitoring continues in floating window when app is minimized |
 | Database | SQLite with 5 tables for sessions, alerts, logs, and snapshots |
