@@ -108,7 +108,7 @@ class PreferencesHelper {
 
   // DATA & PRIVACY
 
-  /// Valid values: '7 days', '30 days', 'forever'
+  /// Valid values: '7 days', '30 days', '90 days', 'Never'
   /// Default: '30 days'
   ///
   /// settings_screen enforces this immediately on change by calling
@@ -117,19 +117,20 @@ class PreferencesHelper {
       (await _prefs()).getString(_keyRetention) ?? '30 days';
 
   Future<void> setRetention(String value) async {
-    const valid = {'7 days', '30 days', 'forever'};
+    const valid = {'7 days', '30 days', '90 days', 'Never'};
     if (!valid.contains(value)) return;
     await (await _prefs()).setString(_keyRetention, value);
   }
 
   /// Converts retention string to days integer for database queries.
-  /// Returns null for 'forever' (no deletion).
+  /// Returns null for 'Never' (no deletion).
   Future<int?> getRetentionDays() async {
     final retention = await getRetention();
     switch (retention) {
       case '7 days':  return 7;
       case '30 days': return 30;
-      default:        return null; // 'forever' → no deletion
+      case '90 days': return 90;
+      default:        return null; // 'Never' → no deletion
     }
   }
 

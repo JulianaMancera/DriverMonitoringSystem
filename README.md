@@ -51,7 +51,7 @@ This project was developed as an undergraduate thesis at New Era University. It 
 - On-device TFLite inference (NNAPI → CPU fallback) — no server required
 - **3-level escalating alert system:**
   - **Level 1** — Slide-in banner; alert sound plays once (auto-dismisses)
-  - **Level 2** — Persistent banner; alert sound plays 3 times
+  - **Level 2** — Persistent banner; alert sound plays 3x; records video clip
   - **Level 3** — Full-screen blocking alarm overlay; alarm loops continuously until manually dismissed
 - Configurable alert sensitivity:
 
@@ -85,7 +85,7 @@ This project was developed as an undergraduate thesis at New Era University. It 
 - **In-app session video playback** (non-mirrored)
 
 ### Settings
-- Alert volume, sensitivity, auto-start recording, data retention (7 Days / 30 Days / Forever)
+- Alert volume, sensitivity, auto-start recording, session retention (7 Days / 30 Days / 90 Days / Never), video clip expiry (7 Days / 30 Days / 90 Days / Never)
 - Clear all history with confirmation
 
 ---

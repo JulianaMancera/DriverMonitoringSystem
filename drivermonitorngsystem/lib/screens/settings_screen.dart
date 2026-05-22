@@ -43,7 +43,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     switch (period) {
       case '7 days':  return 7;
       case '30 days': return 30;
-      default:        return null;
+      case '90 days': return 90;
+      default:        return null; // 'Never'
     }
   }
 
@@ -200,7 +201,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               title: 'Session Retention',
               subtitle: 'Auto-delete sessions older than selected period',
               value: _retentionPeriod,
-              options: const ['7 days', '30 days', 'Forever'],
+              options: const ['7 days', '30 days', '90 days', 'Never'],
               onChanged: (v) async {
                 if (v == null) return;
                 setState(() => _retentionPeriod = v);
