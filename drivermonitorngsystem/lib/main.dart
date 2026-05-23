@@ -46,14 +46,14 @@ void main() async {
 
   await DatabaseHelper.instance.database;
 
-  // Run clip expiry cleanup on every startup so old clips are removed
-  // even if the user never opens Settings after changing the preference.
+  // Clips are cleaned up at startup so expiry applies even if the user
+  // never reopens Settings after changing the preference.
   final clipExpiryDays = await PreferencesHelper.instance.getClipExpiryDays();
-  if (clipExpiryDays != null) {
-    await DatabaseHelper.instance.deleteClipsOlderThan(clipExpiryDays);
-  }
-
-  await BantayDriveService.initialize();
+  await Future.wait([
+    if (clipExpiryDays != null)
+      DatabaseHelper.instance.deleteClipsOlderThan(clipExpiryDays),
+    BantayDriveService.initialize(),
+  ]);
 
   // Registers the IsolateNameServer port so the background isolate can deliver
   // stop_recording messages to the main isolate via sendDataToMain().

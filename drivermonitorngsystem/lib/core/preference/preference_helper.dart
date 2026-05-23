@@ -124,13 +124,17 @@ class PreferencesHelper {
 
   /// Converts retention string to days integer for database queries.
   /// Returns null for 'Never' (no deletion).
-  Future<int?> getRetentionDays() async {
-    final retention = await getRetention();
-    switch (retention) {
+  Future<int?> getRetentionDays() async =>
+      periodToDays(await getRetention());
+
+  /// Converts a period string ('7 days', '30 days', '90 days', 'Never') to days.
+  /// Returns null for 'Never'.
+  static int? periodToDays(String period) {
+    switch (period) {
       case '7 days':  return 7;
       case '30 days': return 30;
       case '90 days': return 90;
-      default:        return null; // 'Never' → no deletion
+      default:        return null;
     }
   }
 
@@ -152,15 +156,8 @@ class PreferencesHelper {
 
   /// Converts clip expiry string to days integer.
   /// Returns null for 'Never' (no auto-deletion).
-  Future<int?> getClipExpiryDays() async {
-    final expiry = await getClipExpiry();
-    switch (expiry) {
-      case '7 days':  return 7;
-      case '30 days': return 30;
-      case '90 days': return 90;
-      default:        return null; // 'Never'
-    }
-  }
+  Future<int?> getClipExpiryDays() async =>
+      periodToDays(await getClipExpiry());
 
   // ONBOARDING
 
