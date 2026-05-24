@@ -51,7 +51,7 @@ drivermonitorngsystem/
 
 | File | Role |
 |------|------|
-| `lib/core/database/database_helper.dart` | SQLite database with 6 tables: `sessions`, `state_counts`, `alert_events`, `system_logs`, `alertness_snapshots`, `video_clips`. Handles all CRUD operations, schema migrations (v3), and data retention enforcement. |
+| `lib/core/database/database_helper.dart` | SQLite database with 6 tables: `sessions`, `state_counts`, `alert_events`, `system_logs`, `alertness_snapshots`, `video_clips`. Handles all CRUD operations, schema migrations (v4), and data retention enforcement. |
 | `lib/core/database/db_change_notifier.dart` | Riverpod reactive notifier that triggers UI rebuilds whenever the database changes (new session, alert, or log entry). |
 
 ---
@@ -96,7 +96,7 @@ drivermonitorngsystem/
 
 | File | Role |
 |------|------|
-| `assets/models/dms_hybridnet_v3_float32.tflite` | The TFLite model. Hybrid CNN-BiLSTM-Attention architecture combining EfficientNet-B0 (face), Eye MicroCNN (eyes), and MobileNetV3-Small (upper body) with BiLSTM temporal modeling and Multi-head Attention. Outputs 13 behavior classes from a 224×224 image + 25 geometric features. |
+| `assets/model/dms_hybridnet_v3_float32.tflite` | The TFLite model. Hybrid CNN-BiLSTM-Attention architecture combining EfficientNet-B0 (face), Eye MicroCNN (eyes), and MobileNetV3-Small (upper body) with BiLSTM temporal modeling and Multi-head Attention. Outputs 13 behavior classes from a 224×224 image + 25 geometric features. |
 | `assets/norm_params.json` | Mean and scale normalization parameters for the 25 input features (EAR, MAR, head pose, gaze, wrist/shoulder positions, temporal trends) — required before feeding features into the model. |
 | `assets/L1_L2_sound.mp3` | Audio alert played for Level 1 and Level 2 alerts (slide-in banner and persistent warning). |
 | `assets/L3_critical_alert.wav` | Looping alarm played during Level 3 full-screen blocking alert requiring manual dismissal. |
@@ -129,7 +129,7 @@ Input 1: 224×224 RGB face image
 Input 2: 25-dimensional feature vector
   (EAR, MAR, head pose, gaze, wrist/shoulder positions, temporal trends)
 
-Combined → BiLSTM (temporal modeling, 20-frame window)
+Combined → BiLSTM (temporal modeling, 30-frame window)
          → Multi-head Attention (occlusion-tolerant frame weighting)
          → 13-class softmax output
 ```
@@ -138,9 +138,9 @@ Combined → BiLSTM (temporal modeling, 20-frame window)
 
 | Category | Classes |
 |----------|---------|
-| **Normal** | Neutral |
-| **Drowsy** | Yawning, Fatigue, Microsleep, Nodding |
-| **Distracted** | Texting, Phone Call, Eating/Drinking, Radio, Grooming, Smoking, Reaching, Body Distraction |
+| **Natural** | Safe Driving, Talking to Passenger |
+| **Drowsy** | Yawning, Yawning (Occluded), Fatigue, Microsleep |
+| **Distracted** | Texting, Phone Call, Radio, Drinking, Body Movement, Grooming, Smoking |
 
 ### Training Datasets
 
@@ -169,7 +169,7 @@ Combined → BiLSTM (temporal modeling, 20-frame window)
 | 3-Level Alert System | L1 (chime + slide-in banner) → L2 (chime + persistent banner + video clip) → L3 (looping alarm + full-screen overlay + video clip) |
 | Background Monitoring | Android foreground service with persistent notification |
 | Picture-in-Picture | Monitoring continues in floating window when app is minimized |
-| Database | SQLite with 5 tables for sessions, alerts, logs, and snapshots |
+| Database | SQLite with 6 tables for sessions, alerts, logs, snapshots, and video clips |
 | Analytics Dashboard | Safety score ring, trend charts, hourly distribution |
 | Session History | Date-grouped list with search and filters |
 | Sensitivity Control | Low / Medium / High with adjustable frame thresholds |

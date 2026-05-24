@@ -39,24 +39,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final ScrollController _scrollController = ScrollController();
   final GlobalKey        _authorsKey       = GlobalKey();
 
-  int? _retentionDays(String period) {
-    switch (period) {
-      case '7 days':  return 7;
-      case '30 days': return 30;
-      case '90 days': return 90;
-      default:        return null; // 'Never'
-    }
-  }
-
-  int? _clipExpiryDays(String expiry) {
-    switch (expiry) {
-      case '7 days':  return 7;
-      case '30 days': return 30;
-      case '90 days': return 90;
-      default:        return null; // 'Never'
-    }
-  }
-
   @override
   void initState() {
     super.initState();
@@ -206,7 +188,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 if (v == null) return;
                 setState(() => _retentionPeriod = v);
                 await PreferencesHelper.instance.setRetention(v);
-                final days = _retentionDays(v);
+                final days = PreferencesHelper.periodToDays(v);
                 if (days != null) {
                   await DatabaseHelper.instance.deleteSessionsOlderThan(days);
                   ref.read(dbChangeCounterProvider.notifier).increment();
@@ -224,7 +206,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 if (v == null) return;
                 setState(() => _clipExpiry = v);
                 await PreferencesHelper.instance.setClipExpiry(v);
-                final days = _clipExpiryDays(v);
+                final days = PreferencesHelper.periodToDays(v);
                 if (days != null) {
                   await DatabaseHelper.instance.deleteClipsOlderThan(days);
                   ref.read(dbChangeCounterProvider.notifier).increment();

@@ -373,12 +373,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
 
   Future<void> _reloadPreferences() async {
     final prefs = PreferencesHelper.instance;
-    final thresholds = await prefs.getAlertThresholds();
-    final autoStart  = await prefs.getAutoStart();
+    final results = await Future.wait([
+      prefs.getAlertThresholds(),
+      prefs.getAutoStart(),
+    ]);
     if (!mounted) return;
     setState(() {
-      _alertThresholds = thresholds;
-      _prefAutoStart   = autoStart;
+      _alertThresholds = results[0] as List<int>;
+      _prefAutoStart   = results[1] as bool;
     });
   }
 
@@ -1196,9 +1198,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   Widget build(BuildContext context) {
     final isInPip = ref.watch(isInPipProvider);
 
-    // Reload preferences whenever the user navigates back to the Monitor tab
-    // so that sensitivity or auto-start changes made in Settings take effect
-    // without requiring an app restart.
+    // Picks up sensitivity/auto-start changes from Settings without a restart.
     ref.listen<int>(navIndexProvider, (prev, next) {
       if (next == 1 && prev != 1) _reloadPreferences();
     });

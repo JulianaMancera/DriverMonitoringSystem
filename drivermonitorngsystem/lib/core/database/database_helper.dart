@@ -639,13 +639,13 @@ class DatabaseHelper {
     await db.rawDelete(
         'DELETE FROM video_clips WHERE id IN ($placeholders)', ids);
 
-    for (final path in paths) {
+    await Future.wait(paths.map((path) async {
       try {
         await VideoClipService.deleteFile(path);
       } catch (e) {
         debugPrint('[DB] Failed to delete clip file $path: $e');
       }
-    }
+    }));
   }
 
   Future<List<String>> getAllVideoClipPaths() async {

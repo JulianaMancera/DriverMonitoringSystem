@@ -29,10 +29,11 @@ A running summary of everything that has been built into Bantay Drive from start
 
 ### Alert System
 
-- **Two-level alert system** with automatic escalation
-  - Level 1: short audio chime + brief on-screen banner (~1 sec trigger at Normal sensitivity)
-  - Level 2: louder looping alarm + persistent warning banner + video clip saved (~2 sec trigger at Normal sensitivity)
-- **Three sensitivity modes** — Low, Normal, High — adjusting how many consecutive unsafe frames are needed before an alert fires
+- **Three-level alert system** with automatic escalation
+  - Level 1: short audio chime + brief on-screen banner (~0.45 s trigger at Medium sensitivity)
+  - Level 2: audio chime again + persistent warning banner + video clip saved (~0.9 s trigger at Medium sensitivity)
+  - Level 3: looping critical alarm + full-screen red overlay (manual dismiss required) + video clip saved (~1.35 s trigger at Medium sensitivity)
+- **Three sensitivity modes** — Low, Medium, High — adjusting how many consecutive unsafe frames are needed before an alert fires
 - **Alert cooldown** to prevent the same alert from repeating in rapid succession
 - **Alert banner** showing the detected behavior type and level; dismissed by tapping or by resuming safe driving
 - **Alert volume slider** (0–100%) that also adjusts the phone's media volume
@@ -109,11 +110,12 @@ A running summary of everything that has been built into Bantay Drive from start
 
 | Setting | Details |
 | --- | --- |
-| **Alert Volume** | Slider 0–100%, default 85% |
-| **Alert Sensitivity** | Low / Normal / High |
+| **Alert Volume** | Slider 0–100%, default 80% |
+| **Alert Sensitivity** | Low / Medium / High |
 | **Auto-Start Recording** | Toggle, default Off |
 | **Show Session Summary** | Toggle, default On |
-| **Data Retention** | 7 days / 30 days (default) / 90 days / Forever |
+| **Session Retention** | 7 days / 30 days (default) / 90 days / Never |
+| **Video Clip Expiry** | 7 days / 30 days (default) / 90 days / Never |
 | **Clear All Data** | Permanently wipes all sessions, alerts, logs, and clips (with confirmation) |
 | **About** | App version, build number, developer credits |
 
