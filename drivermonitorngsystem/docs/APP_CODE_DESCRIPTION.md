@@ -231,7 +231,8 @@ safetyScore = 100 − (totalPenalty / durationMin) × 10
 ```
 
 - Level 1 alert penalty: 2 points
-- Level 2 alert penalty: 5 points
+- Level 2 alert penalty: 4 points
+- Level 3 alert penalty: 8 points
 - `durationMin` is floored at 2.0 minutes to prevent short test sessions from scoring 0%
 - Result is clamped to [0, 100]
 
@@ -473,7 +474,7 @@ A cached stream reference (`_cachedStream`) is held to avoid the EventChannel be
 
 **File:** `lib/core/services/video_clip_service.dart`
 
-Static utility class for managing video clip files generated when a Level 2 alert fires.
+Static utility class for managing video clip files generated when a Level 2 or Level 3 alert fires.
 
 **Methods:**
 - `saveClip(bytes, sessionId, alertType)` — writes the clip to `getApplicationDocumentsDirectory()/alert_clips/` with a timestamped filename and inserts a record into the database
@@ -556,7 +557,6 @@ Singleton that wraps all `SharedPreferences` read/write operations for user-conf
 | `show_session_summary` | bool | true | Show summary modal after stopping |
 | `session_retention` | String | `'30 days'` | Session auto-delete period: `'7 days'`, `'30 days'`, `'90 days'`, `'Never'` |
 | `clip_expiry` | String | `'30 days'` | Video clip auto-delete period: `'7 days'`, `'30 days'`, `'90 days'`, `'Never'` |
-| `clear_glasses` | bool | false | Adjusted EAR thresholds for glasses wearers |
 | `onboarding_seen` | bool | false | Whether the onboarding walkthrough has been completed |
 | `camera_guide_seen` | bool | false | Whether the camera placement guide has been dismissed |
 

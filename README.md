@@ -51,8 +51,8 @@ This project was developed as an undergraduate thesis at New Era University. It 
 - On-device TFLite inference (NNAPI → CPU fallback) — no server required
 - **3-level escalating alert system:**
   - **Level 1** — Slide-in banner; alert sound plays once (auto-dismisses)
-  - **Level 2** — Persistent banner; alert sound plays 3x; records video clip
-  - **Level 3** — Full-screen blocking alarm overlay; alarm loops continuously until manually dismissed
+  - **Level 2** — Persistent banner; alert sound plays once; records video clip
+  - **Level 3** — Full-screen blocking alarm overlay; alarm loops continuously until manually dismissed; records video clip
 - Configurable alert sensitivity:
 
 | Sensitivity | L1 | L2 | L3 |
@@ -65,7 +65,7 @@ This project was developed as an undergraduate thesis at New Era University. It 
 - **Video clip capture** — automatically records and saves clips (up to 10 s) when alerts trigger; disk-space-aware (requires 50 MB free) with structured error codes; clips exportable to device Downloads folder
 - **Picture-in-Picture (PiP)** — monitoring continues in a floating window when app is backgrounded
 - Foreground service with persistent notification showing live driver state + Stop button
-- Clear Glasses toggle, Auto-start recording option
+- Auto-start recording option
 
 ### Dashboard
 - Circular Safety Score (0–100), color-coded green / amber / red
