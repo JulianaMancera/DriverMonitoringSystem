@@ -19,6 +19,7 @@ import '../widgets/head_pose_indicator.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import '../utils/responsive.dart';
+import '../theme/app_colors.dart';
 
 // GLOBAL — allows stop from notification even during PiP
 _MonitorScreenState? _activeMonitorState;
@@ -412,7 +413,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         context: context,
         barrierDismissible: false,
         builder: (_) => AlertDialog(
-          backgroundColor: const Color(0xFF0f172a),
+          backgroundColor: AppColors.surfaceDark,
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Text('Camera Access Needed',
@@ -420,18 +421,18 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           content: const Text(
             'Bantay Drive uses your camera to monitor driver alertness in real time. '
             'Please grant camera access on the next screen.',
-            style: TextStyle(color: Color(0xFF94a3b8)),
+            style: TextStyle(color: AppColors.textMuted),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
               child: const Text('Not Now',
-                  style: TextStyle(color: Color(0xFF64748b))),
+                  style: TextStyle(color: AppColors.textFaded)),
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(true),
               child: const Text('Continue',
-                  style: TextStyle(color: Color(0xFF22d3ee))),
+                  style: TextStyle(color: AppColors.cyanAlt)),
             ),
           ],
         ),
@@ -451,20 +452,20 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF0f172a),
+        backgroundColor: AppColors.surfaceDark,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Camera Permission Required',
             style: TextStyle(color: Colors.white)),
         content: const Text(
           'Camera access was denied. Open Settings and enable the camera '
           'permission for Bantay Drive to use monitoring.',
-          style: TextStyle(color: Color(0xFF94a3b8)),
+          style: TextStyle(color: AppColors.textMuted),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Cancel',
-                style: TextStyle(color: Color(0xFF64748b))),
+                style: TextStyle(color: AppColors.textFaded)),
           ),
           TextButton(
             onPressed: () {
@@ -472,7 +473,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               openAppSettings();
             },
             child: const Text('Open Settings',
-                style: TextStyle(color: Color(0xFF22d3ee))),
+                style: TextStyle(color: AppColors.cyanAlt)),
           ),
         ],
       ),
@@ -1235,7 +1236,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final isLevel3 = _alertLevel == 3;
 
     return ColoredBox(
-      color: const Color(0xFF080E1A),
+      color: AppColors.bg,
       child: Stack(children: [
         SafeArea(bottom: false, child: _buildPortraitLayout()),
         if (showAlert && !isLevel3)
@@ -1423,7 +1424,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   width: 24,
                   height: 24,
                   child: CircularProgressIndicator(
-                      color: Color(0xFF22d3ee), strokeWidth: 2),
+                      color: AppColors.cyanAlt, strokeWidth: 2),
                 ),
                 const SizedBox(height: 8),
                 Text('Reconnecting camera...',
@@ -1506,8 +1507,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       horizontal: context.rp(7), vertical: context.rs(4)),
                   decoration: BoxDecoration(
                     color: (_modelLoaded
-                            ? const Color(0xFF10b981)
-                            : const Color(0xFFfbbf24))
+                            ? AppColors.greenScore
+                            : AppColors.distracted)
                         .withValues(alpha: 0.88),
                     borderRadius: BorderRadius.circular(context.rp(10)),
                   ),
@@ -1549,10 +1550,10 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       statusColor = Colors.white38;
                     } else if (inRed) {
                       statusLabel = 'Reposition';
-                      statusColor = const Color(0xFFef4444);
+                      statusColor = AppColors.redAlert;
                     } else if (roll.abs() >= 30) {
                       statusLabel = 'Angle OK';
-                      statusColor = const Color(0xFFfbbf24);
+                      statusColor = AppColors.distracted;
                     } else {
                       statusLabel = 'Aligned';
                       statusColor = const Color(0xFF22c55e);
@@ -1569,7 +1570,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                                 horizontal: context.rp(6),
                                 vertical: context.rs(3)),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFef4444)
+                              color: AppColors.redAlert
                                   .withValues(alpha: 0.92),
                               borderRadius:
                                   BorderRadius.circular(context.rp(6)),
@@ -1629,7 +1630,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                             horizontal: context.rp(5), vertical: context.rs(5)),
                         decoration: BoxDecoration(
                           color:
-                              const Color(0xFF0f172a).withValues(alpha: 0.65),
+                              AppColors.surfaceDark.withValues(alpha: 0.65),
                           borderRadius: BorderRadius.circular(context.rp(24)),
                           border: Border.all(
                               color: Colors.white.withValues(alpha: 0.08),
@@ -1660,9 +1661,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       height: height,
       width: double.infinity,
       decoration: BoxDecoration(
-        color: const Color(0xFF0f172a),
+        color: AppColors.surfaceDark,
         borderRadius: BorderRadius.all(Radius.circular(context.rp(18))),
-        border: Border.all(color: const Color(0xFF1E2D45), width: 1),
+        border: Border.all(color: AppColors.divider, width: 1),
       ),
       padding: EdgeInsets.all(context.rp(5)),
       child: inner,
@@ -1676,18 +1677,18 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         child: Center(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.videocam_off,
-              color: const Color(0xFF64748b), size: context.ri(44)),
+              color: AppColors.textFaded, size: context.ri(44)),
           SizedBox(height: context.rs(12)),
           Text(_cameraError!,
               style: TextStyle(
-                  color: const Color(0xFF64748b), fontSize: context.sp(12)),
+                  color: AppColors.textFaded, fontSize: context.sp(12)),
               textAlign: TextAlign.center),
           SizedBox(height: context.rs(12)),
           TextButton(
               onPressed: _initCamera,
               child: Text('Retry',
                   style: TextStyle(
-                      color: const Color(0xFF22d3ee),
+                      color: AppColors.cyanAlt,
                       fontSize: context.sp(13)))),
         ])),
       );
@@ -1696,11 +1697,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       color: Colors.black,
       child: Center(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-        const CircularProgressIndicator(color: Color(0xFF22d3ee)),
+        const CircularProgressIndicator(color: AppColors.cyanAlt),
         SizedBox(height: context.rs(12)),
         Text('Initializing camera...',
             style: TextStyle(
-                color: const Color(0xFF64748b), fontSize: context.sp(12))),
+                color: AppColors.textFaded, fontSize: context.sp(12))),
       ])),
     );
   }
@@ -1713,7 +1714,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               end: Alignment.bottomCenter,
               colors: [
                 Colors.transparent,
-                const Color(0xFF0f172a).withValues(alpha: 0.5)
+                AppColors.surfaceDark.withValues(alpha: 0.5)
               ],
             ),
           ),
@@ -2041,7 +2042,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
               child: _MetricGauge(
                   label: 'Alertness',
                   value: alertness,
-                  color: const Color(0xFF22d3ee),
+                  color: AppColors.cyanAlt,
                   icon: Icons.bolt)),
           SizedBox(width: context.rp(10)),
           Expanded(
@@ -2050,7 +2051,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             child: _MetricGauge(
                 label: 'Drowsiness',
                 value: drowsiness,
-                color: const Color(0xFFef4444),
+                color: AppColors.redAlert,
                 icon: Icons.visibility_off,
                 tapHint: drowsiness > 0),
           )),
@@ -2062,7 +2063,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             child: _MetricGauge(
                 label: 'Distraction',
                 value: distraction,
-                color: const Color(0xFFfbbf24),
+                color: AppColors.distracted,
                 icon: Icons.visibility,
                 tapHint: distraction > 0),
           )),
@@ -2077,7 +2078,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     final subclass = ref.read(activeSubclassProvider) ?? 'safe_driving';
     final isDrowsy = mainClass == 'drowsy';
     final mainColor =
-        isDrowsy ? const Color(0xFFef4444) : const Color(0xFFfbbf24);
+        isDrowsy ? AppColors.redAlert : AppColors.distracted;
 
     showModalBottomSheet(
       context: context,
@@ -2087,7 +2088,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         padding: EdgeInsets.fromLTRB(
             context.rp(20), context.rs(12), context.rp(20), context.rs(28)),
         decoration: BoxDecoration(
-          color: const Color(0xFF0D1627),
+          color: AppColors.surface,
           borderRadius:
               BorderRadius.vertical(top: Radius.circular(context.rp(22))),
         ),
@@ -2098,7 +2099,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
             height: context.rs(4),
             margin: EdgeInsets.only(bottom: context.rs(14)),
             decoration: BoxDecoration(
-                color: const Color(0xFF1E2D45),
+                color: AppColors.divider,
                 borderRadius: BorderRadius.circular(context.rp(2))),
           )),
           Text(isDrowsy ? 'Drowsiness Detected' : 'Distraction Detected',
@@ -2116,7 +2117,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                   : 'Distracted: Texting, Phone Call, Radio, Drinking,\n'
                       'Reaching Behind, Hair/Makeup, Talking to Passenger',
               style: TextStyle(
-                  color: const Color(0xFF94a3b8), fontSize: context.sp(12)),
+                  color: AppColors.textMuted, fontSize: context.sp(12)),
               textAlign: TextAlign.center),
         ]),
       ),
@@ -2127,9 +2128,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: const Color(0xFF0f172a),
+        color: AppColors.surfaceDark,
         borderRadius: BorderRadius.circular(context.rp(14)),
-        border: Border.all(color: const Color(0xFF1E2D45), width: 1),
+        border: Border.all(color: AppColors.divider, width: 1),
       ),
       padding: EdgeInsets.all(context.rp(12)),
       child: Column(
@@ -2138,7 +2139,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
           Row(children: [
             Text('SYSTEM LOG',
                 style: TextStyle(
-                    color: const Color(0xFF94a3b8),
+                    color: AppColors.textMuted,
                     fontSize: context.sp(10),
                     fontWeight: FontWeight.w600,
                     letterSpacing: 1.5)),
@@ -2148,12 +2149,12 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                 padding: EdgeInsets.symmetric(
                     horizontal: context.rp(6), vertical: context.rs(2)),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF10b981).withValues(alpha: 0.15),
+                  color: AppColors.greenScore.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(context.rp(6)),
                 ),
                 child: Text('● LIVE',
                     style: TextStyle(
-                        color: const Color(0xFF10b981),
+                        color: AppColors.greenScore,
                         fontSize: context.sp(9),
                         fontWeight: FontWeight.w600)),
               ),
@@ -2176,9 +2177,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                       itemBuilder: (context, index) {
                         final log = recentLogs[index];
                         final textColor = switch (log['type']) {
-                          'SUCCESS' => const Color(0xFF10b981),
-                          'WARNING' => const Color(0xFFfbbf24),
-                          _ => const Color(0xFF94a3b8),
+                          'SUCCESS' => AppColors.greenScore,
+                          'WARNING' => AppColors.distracted,
+                          _ => AppColors.textMuted,
                         };
                         return Padding(
                           padding: EdgeInsets.only(bottom: context.rs(5)),
@@ -2187,7 +2188,7 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
                             children: [
                               Text('[${log['time']}]',
                                   style: TextStyle(
-                                      color: const Color(0xFF475569),
+                                      color: AppColors.textSlate,
                                       fontSize: context.sp(9),
                                       fontFamily: 'monospace')),
                               SizedBox(width: context.rp(6)),
@@ -2235,12 +2236,12 @@ class _MetricGauge extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF0f172a),
+        color: AppColors.surfaceDark,
         borderRadius: BorderRadius.circular(context.rp(14)),
         border: Border.all(
           color: clamped >= 100.0
               ? color.withValues(alpha: 0.5)
-              : const Color(0xFF1E2D45),
+              : AppColors.divider,
           width: 1,
         ),
       ),
@@ -2254,7 +2255,7 @@ class _MetricGauge extends StatelessWidget {
               child: Text(label,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      color: const Color(0xFF94a3b8),
+                      color: AppColors.textMuted,
                       fontSize: context.sp(9),
                       fontWeight: FontWeight.w500))),
           if (tapHint) ...[
@@ -2372,18 +2373,18 @@ class _SessionSummaryModal extends StatefulWidget {
 
 class _SessionSummaryModalState extends State<_SessionSummaryModal>
     with SingleTickerProviderStateMixin {
-  static const Color _bg = Color(0xFF0D1627);
-  static const Color _surface = Color(0xFF1A2235);
-  static const Color _divider = Color(0xFF1E2D45);
-  static const Color _cyan = Color(0xFF00D4FF);
-  static const Color _green = Color(0xFF00FF88);
-  static const Color _amber = Color(0xFFF59E0B);
-  static const Color _red = Color(0xFFEF4444);
-  static const Color _drowsy = Color(0xFFF59E0B);
-  static const Color _dist = Color(0xFFA855F7);
-  static const Color _txtPri = Color(0xFFEEF2FF);
-  static const Color _txtMuted = Color(0xFF94A3B8);
-  static const Color _txtDim = Color(0xFF6B7A99);
+  static const Color _bg       = AppColors.surface;
+  static const Color _surface  = AppColors.surfaceAlt;
+  static const Color _divider  = AppColors.divider;
+  static const Color _cyan     = AppColors.cyan;
+  static const Color _green    = AppColors.green;
+  static const Color _amber    = AppColors.amber;
+  static const Color _red      = AppColors.redAlert;
+  static const Color _drowsy   = AppColors.amber;
+  static const Color _dist     = AppColors.purple;
+  static const Color _txtPri   = AppColors.textPrimary;
+  static const Color _txtMuted = AppColors.textMuted;
+  static const Color _txtDim   = AppColors.textDim;
 
   late AnimationController _ctrl;
   late Animation<double> _fade;
@@ -2649,30 +2650,30 @@ class _AlertChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: const Color(0xFF1A2235),
+        color: AppColors.surfaceAlt,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
             color: hasAlerts
                 ? color.withValues(alpha: 0.30)
-                : const Color(0xFF1E2D45),
+                : AppColors.divider,
             width: 1),
       ),
       child: Row(children: [
         Icon(icon,
-            color: hasAlerts ? color : const Color(0xFF6B7A99), size: 18),
+            color: hasAlerts ? color : AppColors.textDim, size: 18),
         const SizedBox(width: 8),
         Expanded(
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(label,
               style: TextStyle(
-                  color: const Color(0xFF94A3B8),
+                  color: AppColors.textMuted,
                   fontSize: 11,
                   fontWeight: FontWeight.w500)),
           const SizedBox(height: 1),
           Text('$count alert${count == 1 ? '' : 's'}',
               style: TextStyle(
-                  color: hasAlerts ? color : const Color(0xFF6B7A99),
+                  color: hasAlerts ? color : AppColors.textDim,
                   fontSize: 14,
                   fontWeight: FontWeight.w700)),
         ])),
@@ -2706,7 +2707,7 @@ class _CameraGuideDialog extends StatelessWidget {
                 decoration: const BoxDecoration(
                     color: Color(0xFFe2e8f0), shape: BoxShape.circle),
                 child:
-                    const Icon(Icons.close, size: 20, color: Color(0xFF1e293b)),
+                    const Icon(Icons.close, size: 20, color: AppColors.surfaceSlate),
               ),
             ),
           ),
@@ -2743,7 +2744,7 @@ class _CameraGuideDialog extends StatelessWidget {
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 14,
-                      color: Color(0xFF1e293b),
+                      color: AppColors.surfaceSlate,
                       height: 1.45,
                     ),
                   ),

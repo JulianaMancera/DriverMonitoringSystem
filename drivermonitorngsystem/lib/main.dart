@@ -16,6 +16,7 @@ import 'screens/history_screen.dart';
 import 'utils/responsive.dart';
 import 'screens/splash_screen.dart';
 import 'screens/onboarding_screen.dart';
+import 'theme/app_colors.dart';
 import 'core/services/pip_service.dart';
 import 'widgets/exit.dart';
 
@@ -88,12 +89,12 @@ class BantayDriveApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           brightness: Brightness.dark,
-          scaffoldBackgroundColor: const Color(0xFF080E1A),
+          scaffoldBackgroundColor: AppColors.bg,
           fontFamily: 'SF Pro Display',
           colorScheme: const ColorScheme.dark(
-            primary: Color(0xFF00D4FF),
-            secondary: Color(0xFF00D4FF),
-            surface: Color(0xFF0D1627),
+            primary: AppColors.cyan,
+            secondary: AppColors.cyan,
+            surface: AppColors.surface,
           ),
           useMaterial3: true,
         ),
@@ -250,12 +251,12 @@ class MainShell extends ConsumerWidget {
     // that _MonitorScreenState is never disposed and recreated during PIP
     // transitions, which would destroy session state and system logs.
     return Scaffold(
-      backgroundColor: isInPip ? Colors.black : const Color(0xFF080E1A),
+      backgroundColor: isInPip ? Colors.black : AppColors.bg,
 
       appBar: isInPip ? null : PreferredSize(
         preferredSize: Size.fromHeight(context.rs(58)),
         child: AppBar(
-          backgroundColor: const Color(0xFF0D1627),
+          backgroundColor: AppColors.surface,
           elevation: 0,
           centerTitle: false,
 
@@ -283,7 +284,7 @@ class MainShell extends ConsumerWidget {
                     TextSpan(
                       text: deviceName,
                       style: const TextStyle(
-                        color: Color(0xFF00D4FF),
+                        color: AppColors.cyan,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -302,13 +303,13 @@ class MainShell extends ConsumerWidget {
                 width: context.ri(10), height: context.ri(10),
                 decoration: BoxDecoration(
                   color: isRecording
-                      ? const Color(0xFF00FF88)
-                      : const Color(0xFF3A4A5C),
+                      ? AppColors.green
+                      : AppColors.navInactive,
                   shape: BoxShape.circle,
                   boxShadow: isRecording
                       ? [
                           BoxShadow(
-                            color: const Color(0xFF00FF88)
+                            color: AppColors.green
                                 .withValues(alpha: 0.6),
                             blurRadius: 8, spreadRadius: 1,
                           ),
@@ -365,7 +366,7 @@ class _BottomNav extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF0D1627),
+        color: AppColors.surface,
         border: Border(
           top: BorderSide(
             color: Colors.white.withValues(alpha: 0.05),
@@ -404,11 +405,11 @@ class _BottomNav extends StatelessWidget {
                       width: pillWidth,
                       height: pillHeight,
                       decoration: BoxDecoration(
-                        color: const Color(0xFF00D4FF).withValues(alpha: 0.13),
+                        color: AppColors.cyan.withValues(alpha: 0.13),
                         borderRadius: BorderRadius.circular(context.rp(12)),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF00D4FF).withValues(alpha: 0.15),
+                            color: AppColors.cyan.withValues(alpha: 0.15),
                             blurRadius: 10,
                             spreadRadius: 1,
                           ),
@@ -437,7 +438,7 @@ class _BottomNav extends StatelessWidget {
                                 key: ValueKey('nav_${i}_$active'),
                                 size: active ? context.ri(24) : context.ri(22),
                                 color: active
-                                    ? const Color(0xFF00D4FF)
+                                    ? AppColors.cyan
                                     : Colors.white38,
                               ),
                             ),

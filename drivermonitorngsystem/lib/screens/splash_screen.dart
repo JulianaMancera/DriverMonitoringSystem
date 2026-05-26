@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import '../theme/app_colors.dart';
 
 class SplashScreen extends StatefulWidget {
   final VoidCallback onComplete;
@@ -135,7 +136,7 @@ class _SplashScreenState extends State<SplashScreen>
       builder: (context, child) =>
           Opacity(opacity: _exitOpacity.value, child: child),
       child: Scaffold(
-        backgroundColor: const Color(0xFF080E1A),
+        backgroundColor: AppColors.bg,
         body: Stack(
           children: [
             // Background grid
@@ -155,7 +156,7 @@ class _SplashScreenState extends State<SplashScreen>
                     shape: BoxShape.circle,
                     gradient: RadialGradient(
                       colors: [
-                        Color(0xFF00D4FF)
+                        AppColors.cyan
                             .withValues(alpha: 0.04 + _bgGlow.value * 0.04),
                         Colors.transparent,
                       ],
@@ -186,10 +187,10 @@ class _SplashScreenState extends State<SplashScreen>
                             width:  220,
                             height: 160,
                             decoration: BoxDecoration(
-                              color:         const Color(0xFF0D1627),
+                              color:         AppColors.surface,
                               borderRadius:  BorderRadius.circular(16),
                               border: Border.all(
-                                color: const Color(0xFF00D4FF).withValues(alpha: 0.2),
+                                color: AppColors.cyan.withValues(alpha: 0.2),
                                 width: 1,
                               ),
                             ),
@@ -197,7 +198,7 @@ class _SplashScreenState extends State<SplashScreen>
                               child: Icon(
                                 Icons.directions_car_rounded,
                                 size:  72,
-                                color: Color(0xFF00D4FF),
+                                color: AppColors.cyan,
                               ),
                             ),
                           ),
@@ -231,7 +232,7 @@ class _SplashScreenState extends State<SplashScreen>
                                 TextSpan(
                                   text: 'DRIVE',
                                   style: TextStyle(
-                                    color:         Color(0xFF00D4FF),
+                                    color:         AppColors.cyan,
                                     fontSize:      34,
                                     fontWeight:    FontWeight.w800,
                                     letterSpacing: 4,
@@ -278,7 +279,7 @@ class _SplashScreenState extends State<SplashScreen>
                                 backgroundColor: Colors.white.withValues(alpha: 0.08),
                                 valueColor:
                                     const AlwaysStoppedAnimation<Color>(
-                                        Color(0xFF00D4FF)),
+                                        AppColors.cyan),
                               ),
                             ),
                           ),

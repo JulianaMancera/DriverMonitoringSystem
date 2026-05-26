@@ -7,12 +7,13 @@ import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
 import '../core/providers.dart';
 import '../utils/responsive.dart';
+import '../theme/app_colors.dart';
 
 Color _scoreColor(double score) {
-  if (score >= 90) return const Color(0xFF10b981);
-  if (score >= 75) return const Color(0xFF22d3ee);
-  if (score >= 60) return const Color(0xFFf59e0b);
-  return const Color(0xFFef4444);
+  if (score >= 90) return AppColors.greenScore;
+  if (score >= 75) return AppColors.cyanAlt;
+  if (score >= 60) return AppColors.amber;
+  return AppColors.redAlert;
 }
 
 // PROVIDER
@@ -48,7 +49,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Widget build(BuildContext context) {
     final dashAsync = ref.watch(dashboardProvider);
     return ColoredBox(
-      color: const Color(0xFF080E1A),
+      color: AppColors.bg,
       child: Column(children: [
         Expanded(
           child: dashAsync.when(
@@ -56,7 +57,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             error: (e, _) => Center(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 Icon(Icons.error_outline,
-                    color: const Color(0xFF64748b), size: context.ri(48)),
+                    color: AppColors.textFaded, size: context.ri(48)),
                 SizedBox(height: context.rs(12)),
                 Text('Error loading dashboard: $e',
                     style: const TextStyle(color: Colors.white54),
@@ -65,7 +66,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 TextButton(
                   onPressed: () => ref.invalidate(dashboardProvider),
                   child: const Text('Retry',
-                      style: TextStyle(color: Color(0xFF22d3ee))),
+                      style: TextStyle(color: AppColors.cyanAlt)),
                 ),
               ]),
             ),
@@ -106,8 +107,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     };
 
     return RefreshIndicator(
-      color:           const Color(0xFF22d3ee),
-      backgroundColor: const Color(0xFF0f172a),
+      color:           AppColors.cyanAlt,
+      backgroundColor: AppColors.surfaceDark,
       onRefresh: () async => ref.invalidate(dashboardProvider),
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -151,9 +152,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }) {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF0f172a),
+        color: AppColors.surfaceDark,
         borderRadius: BorderRadius.circular(context.rp(20)),
-        border: Border.all(color: const Color(0xFF1E2D45), width: 1),
+        border: Border.all(color: AppColors.divider, width: 1),
       ),
       child: Stack(children: [
         Positioned(top: 0, left: 0, right: 0,
@@ -161,7 +162,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             height: context.rs(6),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                  colors: [Color(0xFF22d3ee), Color(0xFF3b82f6)]),
+                  colors: [AppColors.cyanAlt, Color(0xFF3b82f6)]),
               borderRadius: BorderRadius.only(
                 topLeft:  Radius.circular(context.rp(20)),
                 topRight: Radius.circular(context.rp(20)),
@@ -179,7 +180,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               children: [
                 Text('SAFETY SCORE',
                     style: TextStyle(
-                      color:         const Color(0xFF94a3b8),
+                      color:         AppColors.textMuted,
                       fontSize:      context.sp(15),
                       fontWeight:    FontWeight.w500,
                       letterSpacing: 1.5,
@@ -193,7 +194,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   SizedBox(height: context.rs(12)),
                   Text('Start a session to see your score',
                       style: TextStyle(
-                          color:    const Color(0xFF475569),
+                          color:    AppColors.textSlate,
                           fontSize: context.sp(11)),
                       textAlign: TextAlign.center),
                 ],
@@ -217,7 +218,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         xlarge: 180.0);
     final progressSize = outerSize * 0.88;
     final innerSize    = outerSize * 0.73;
-    final scoreColor   = hasAnySessions ? _scoreColor(score) : const Color(0xFF1e293b);
+    final scoreColor   = hasAnySessions ? _scoreColor(score) : AppColors.surfaceSlate;
 
     return SizedBox(
       width: outerSize, height: outerSize,
@@ -225,12 +226,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         Container(
           width: outerSize, height: outerSize,
           decoration: BoxDecoration(
-            color:  const Color(0xFF0f172a),
+            color:  AppColors.surfaceDark,
             shape:  BoxShape.circle,
             boxShadow: [
               BoxShadow(color: const Color(0xFF0b1120).withValues(alpha: 0.8),
                   offset: const Offset(6, 6), blurRadius: 12),
-              BoxShadow(color: const Color(0xFF1e293b).withValues(alpha: 0.8),
+              BoxShadow(color: AppColors.surfaceSlate.withValues(alpha: 0.8),
                   offset: const Offset(-6, -6), blurRadius: 12),
             ],
           ),
@@ -241,7 +242,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             value:           hasAnySessions ? score / 100 : 0,
             strokeWidth:     context.forTier(
                 base: 6.0, compact: 5.0, large: 7.0),
-            backgroundColor: const Color(0xFF1e293b),
+            backgroundColor: AppColors.surfaceSlate,
             valueColor:      AlwaysStoppedAnimation<Color>(scoreColor),
             strokeCap: StrokeCap.round,
           ),
@@ -249,12 +250,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         Container(
           width: innerSize, height: innerSize,
           decoration: const BoxDecoration(
-            color:  Color(0xFF0f172a),
+            color:  AppColors.surfaceDark,
             shape:  BoxShape.circle,
             boxShadow: [
               BoxShadow(color: Color(0xFF0b1120),
                   offset: Offset(6, 6), blurRadius: 12),
-              BoxShadow(color: Color(0xFF1e293b),
+              BoxShadow(color: AppColors.surfaceSlate,
                   offset: Offset(-6, -6), blurRadius: 12),
             ],
           ),
@@ -272,7 +273,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             Text(label,
                 style: TextStyle(
                   fontSize:      context.sp(9),
-                  color:         const Color(0xFF64748b),
+                  color:         AppColors.textFaded,
                   letterSpacing: 1,
                 )),
             if (hasAnySessions && trendDelta != null) ...[
@@ -288,9 +289,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Widget _buildTrendRow(BuildContext context, double delta) {
     final improved = delta > 0.5;
     final declined = delta < -0.5;
-    final color = improved ? const Color(0xFF10b981)
-                : declined ? const Color(0xFFef4444)
-                : const Color(0xFF64748b);
+    final color = improved ? AppColors.greenScore
+                : declined ? AppColors.redAlert
+                : AppColors.textFaded;
     final icon  = improved ? Icons.arrow_upward_rounded
                 : declined ? Icons.arrow_downward_rounded
                 : Icons.remove_rounded;
@@ -420,9 +421,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
     return Container(
       decoration: BoxDecoration(
-        color:        const Color(0xFF0f172a),
+        color:        AppColors.surfaceDark,
         borderRadius: BorderRadius.circular(context.rp(20)),
-        border: Border.all(color: const Color(0xFF1E2D45), width: 1),
+        border: Border.all(color: AppColors.divider, width: 1),
       ),
       padding: EdgeInsets.fromLTRB(
           context.hPad, context.rs(16), context.hPad, context.rs(12)),
@@ -440,21 +441,21 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             padding: EdgeInsets.symmetric(
                 horizontal: context.rp(12), vertical: context.rs(6)),
             decoration: BoxDecoration(
-              color:  const Color(0xFF22d3ee).withValues(alpha: 0.08),
+              color:  AppColors.cyanAlt.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(context.rp(20)),
               border: Border.all(
-                  color: const Color(0xFF22d3ee).withValues(alpha: 0.65),
+                  color: AppColors.cyanAlt.withValues(alpha: 0.65),
                   width: 1.4),
             ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               Icon(Icons.show_chart_rounded,
-                  size: context.ri(13), color: const Color(0xFF22d3ee)),
+                  size: context.ri(13), color: AppColors.cyanAlt),
               SizedBox(width: context.rp(5)),
               Text('30 Days',
                   style: TextStyle(
                       fontSize:   context.sp(11),
                       fontWeight: FontWeight.w600,
-                      color:      const Color(0xFF22d3ee))),
+                      color:      AppColors.cyanAlt)),
             ]),
           ),
         ]),
@@ -468,7 +469,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   ? 'Alertness % · updates every 5 s'
                   : 'Start your first session to begin tracking',
           style: TextStyle(
-              color: const Color(0xFF475569), fontSize: context.sp(12)),
+              color: AppColors.textSlate, fontSize: context.sp(12)),
         ),
 
         SizedBox(height: context.rs(16)),
@@ -494,16 +495,16 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     return Container(
       height: context.rs(context.isSmallPhone ? 160 : 190),
       decoration: BoxDecoration(
-        color:        const Color(0xFF0D1627),
+        color:        AppColors.surface,
         borderRadius: BorderRadius.circular(context.rp(12)),
-        border: Border.all(color: const Color(0xFF1e293b), width: 1),
+        border: Border.all(color: AppColors.surfaceSlate, width: 1),
       ),
       child: Center(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Container(
             padding: EdgeInsets.all(context.rp(12)),
             decoration: BoxDecoration(
-              color:        const Color(0xFF1e293b),
+              color:        AppColors.surfaceSlate,
               borderRadius: BorderRadius.circular(context.rp(12)),
             ),
             child: Icon(Icons.show_chart_rounded,
@@ -512,7 +513,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           SizedBox(height: context.rs(14)),
           Text('No drive history yet',
               style: TextStyle(
-                  color:      const Color(0xFF475569),
+                  color:      AppColors.textSlate,
                   fontSize:   context.sp(14),
                   fontWeight: FontWeight.w600)),
           SizedBox(height: context.rs(5)),
@@ -594,7 +595,7 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
               show: true, drawVerticalLine: false,
               horizontalInterval: 20,
               getDrawingHorizontalLine: (_) => FlLine(
-                  color: const Color(0xFF1e293b), strokeWidth: 1,
+                  color: AppColors.surfaceSlate, strokeWidth: 1,
                   dashArray: [4, 4]),
             ),
             titlesData: FlTitlesData(
@@ -624,7 +625,7 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
                     return Padding(
                       padding: EdgeInsets.only(top: context.rs(8)),
                       child: Text(text, style: TextStyle(
-                          color: const Color(0xFF64748b),
+                          color: AppColors.textFaded,
                           fontSize: context.sp(10))),
                     );
                   },
@@ -641,7 +642,7 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
                       return const SizedBox.shrink();
                     }
                     return Text('$v', style: TextStyle(
-                      color:    const Color(0xFF64748b),
+                      color:    AppColors.textFaded,
                       fontSize: context.sp(10),
                     ));
                   },
@@ -656,7 +657,7 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
                 spots:            spots,
                 isCurved:         spots.length > 2,
                 curveSmoothness:  0.3,
-                color:            const Color(0xFF22d3ee),
+                color:            AppColors.cyanAlt,
                 barWidth:         2.5,
                 isStrokeCapRound: true,
                 dotData: FlDotData(
@@ -664,16 +665,16 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
                   getDotPainter: (spot, percent, bar, index) =>
                       FlDotCirclePainter(
                         radius:      3.5,
-                        color:       const Color(0xFF22d3ee),
+                        color:       AppColors.cyanAlt,
                         strokeWidth: 1.5,
-                        strokeColor: const Color(0xFF0f172a)),
+                        strokeColor: AppColors.surfaceDark),
                 ),
                 belowBarData: BarAreaData(
                   show: true,
                   gradient: LinearGradient(
                     colors: [
-                      const Color(0xFF22d3ee).withValues(alpha: 0.25),
-                      const Color(0xFF22d3ee).withValues(alpha: 0.0),
+                      AppColors.cyanAlt.withValues(alpha: 0.25),
+                      AppColors.cyanAlt.withValues(alpha: 0.0),
                     ],
                     begin: Alignment.topCenter, end: Alignment.bottomCenter,
                   ),
@@ -682,7 +683,7 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
             ],
             lineTouchData: LineTouchData(
               touchTooltipData: LineTouchTooltipData(
-                getTooltipColor: (_) => const Color(0xFF0f172a),
+                getTooltipColor: (_) => AppColors.surfaceDark,
                 tooltipBorderRadius: BorderRadius.circular(context.rp(12)),
                 tooltipPadding: EdgeInsets.symmetric(
                     horizontal: context.rp(12), vertical: context.rs(8)),
@@ -695,14 +696,14 @@ class _SafetyScoreChartInnerState extends State<_SafetyScoreChartInner> {
                   return LineTooltipItem(
                     '${s.y.toInt()}%\n',
                     TextStyle(
-                      color:      const Color(0xFF22d3ee),
+                      color:      AppColors.cyanAlt,
                       fontWeight: FontWeight.bold,
                       fontSize:   context.sp(13),
                     ),
                     children: [
                       TextSpan(text: label,
                           style: TextStyle(
-                            color:      const Color(0xFF64748b),
+                            color:      AppColors.textFaded,
                             fontSize:   context.sp(10),
                             fontWeight: FontWeight.normal)),
                     ],
@@ -739,12 +740,12 @@ class _AlertnessSparkline extends StatelessWidget {
         Container(
           width: 8, height: 8,
           decoration: const BoxDecoration(
-              color: Color(0xFF10b981), shape: BoxShape.circle),
+              color: AppColors.greenScore, shape: BoxShape.circle),
         ),
         const SizedBox(width: 6),
         Text('Live — current session  (${snapshots.length} snapshots)',
             style: TextStyle(
-                color: const Color(0xFF10b981),
+                color: AppColors.greenScore,
                 fontSize: context.sp(11),
                 fontWeight: FontWeight.w500)),
       ]),
@@ -756,7 +757,7 @@ class _AlertnessSparkline extends StatelessWidget {
               show: true, drawVerticalLine: false,
               horizontalInterval: 20,
               getDrawingHorizontalLine: (_) => const FlLine(
-                  color: Color(0xFF1e293b), strokeWidth: 1),
+                  color: AppColors.surfaceSlate, strokeWidth: 1),
             ),
             titlesData: FlTitlesData(
               rightTitles:
@@ -777,7 +778,7 @@ class _AlertnessSparkline extends StatelessWidget {
                     }
                     return Text('$v',
                         style: TextStyle(
-                            color: const Color(0xFF64748b),
+                            color: AppColors.textFaded,
                             fontSize: context.sp(10)));
                   },
                 ),
@@ -791,7 +792,7 @@ class _AlertnessSparkline extends StatelessWidget {
                 spots: spots,
                 isCurved: spots.length > 2,
                 curveSmoothness: 0.3,
-                color: const Color(0xFF10b981),
+                color: AppColors.greenScore,
                 barWidth: 2.0,
                 isStrokeCapRound: true,
                 dotData: const FlDotData(show: false),
@@ -799,8 +800,8 @@ class _AlertnessSparkline extends StatelessWidget {
                   show: true,
                   gradient: LinearGradient(
                     colors: [
-                      const Color(0xFF10b981).withValues(alpha: 0.20),
-                      const Color(0xFF10b981).withValues(alpha: 0.0),
+                      AppColors.greenScore.withValues(alpha: 0.20),
+                      AppColors.greenScore.withValues(alpha: 0.0),
                     ],
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
@@ -833,9 +834,9 @@ class _StatCard extends StatelessWidget {
       duration: const Duration(milliseconds: 200),
       curve:    Curves.easeInOut,
       decoration: BoxDecoration(
-        color: const Color(0xFF0f172a),
+        color: AppColors.surfaceDark,
         borderRadius: BorderRadius.circular(context.rp(14)),
-        border: Border.all(color: const Color(0xFF1E2D45), width: 1),
+        border: Border.all(color: AppColors.divider, width: 1),
       ),
       padding: EdgeInsets.all(context.rp(12)),
       child: Column(
@@ -846,12 +847,12 @@ class _StatCard extends StatelessWidget {
             Container(
               padding: EdgeInsets.all(context.rp(7)),
               decoration: BoxDecoration(
-                color: const Color(0xFF22d3ee).withValues(alpha: 0.1),
+                color: AppColors.cyanAlt.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(context.rp(8)),
               ),
               child: Icon(icon,
                   size: context.ri(17),
-                  color: const Color(0xFF22d3ee)),
+                  color: AppColors.cyanAlt),
             ),
             if (accent)
               Padding(
@@ -860,11 +861,11 @@ class _StatCard extends StatelessWidget {
                   width:  context.ri(8),
                   height: context.ri(8),
                   decoration: BoxDecoration(
-                    color:  const Color(0xFF22d3ee),
+                    color:  AppColors.cyanAlt,
                     shape:  BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color:      const Color(0xFF22d3ee).withValues(alpha: 0.4),
+                        color:      AppColors.cyanAlt.withValues(alpha: 0.4),
                         blurRadius: 8,
                         spreadRadius: 2),
                     ],
@@ -874,7 +875,7 @@ class _StatCard extends StatelessWidget {
           ]),
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(label, style: TextStyle(
-              color:      const Color(0xFF64748b),
+              color:      AppColors.textFaded,
               fontSize:   context.sp(11),
               fontWeight: FontWeight.w500,
             ), maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -887,7 +888,7 @@ class _StatCard extends StatelessWidget {
             SizedBox(height: context.rs(1)),
             Text(subtext, style: TextStyle(
               fontSize: context.sp(10),
-              color:    const Color(0xFF475569),
+              color:    AppColors.textSlate,
             ), maxLines: 1, overflow: TextOverflow.ellipsis),
           ]),
         ],
@@ -907,9 +908,9 @@ class _EmptyStatCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF0f172a),
+        color: AppColors.surfaceDark,
         borderRadius: BorderRadius.circular(context.rp(14)),
-        border: Border.all(color: const Color(0xFF1E2D45), width: 1),
+        border: Border.all(color: AppColors.divider, width: 1),
       ),
       padding: EdgeInsets.all(context.rp(12)),
       child: Column(
@@ -919,7 +920,7 @@ class _EmptyStatCard extends StatelessWidget {
           Container(
             padding: EdgeInsets.all(context.rp(7)),
             decoration: BoxDecoration(
-              color:        const Color(0xFF1e293b),
+              color:        AppColors.surfaceSlate,
               borderRadius: BorderRadius.circular(context.rp(8))),
             child: Icon(icon,
                 size: context.ri(17),
@@ -935,11 +936,11 @@ class _EmptyStatCard extends StatelessWidget {
             Text('—', style: TextStyle(
               fontSize: context.forTier(base: 20.0, compact: 16.0, small: 18.0, large: 22.0),
               fontWeight: FontWeight.bold,
-              color:      const Color(0xFF1e293b))),
+              color:      AppColors.surfaceSlate)),
             SizedBox(height: context.rs(1)),
             Text('No data', style: TextStyle(
               fontSize: context.sp(10),
-              color:    const Color(0xFF1e293b))),
+              color:    AppColors.surfaceSlate)),
           ]),
         ],
       ),
@@ -954,7 +955,7 @@ class _DashboardSkeleton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Shimmer.fromColors(
-      baseColor:      const Color(0xFF1A2235),
+      baseColor:      AppColors.surfaceAlt,
       highlightColor: const Color(0xFF263350),
       child: SingleChildScrollView(
         physics: const NeverScrollableScrollPhysics(),

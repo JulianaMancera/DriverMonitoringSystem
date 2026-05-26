@@ -8,6 +8,7 @@ import '../core/database/database_helper.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import 'package:bantaydrive/core/database/db_change_notifier.dart';
 import '../utils/responsive.dart';
+import '../theme/app_colors.dart';
 import 'dart:async';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -17,14 +18,14 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
-  static const Color _bg            = Color(0xFF080E1A);
-  static const Color _surface       = Color(0xFF0D1627);
-  static const Color _surfaceAlt    = Color(0xFF1A2235);
-  static const Color _cyan          = Color(0xFF00D4FF);
-  static const Color _textPrimary   = Color(0xFFEEF2FF);
-  static const Color _textSecondary = Color(0xFF6B7A99);
-  static const Color _red           = Color(0xFFFF4757);
-  static const Color _divider       = Color(0xFF1E2D45);
+  static const Color _bg            = AppColors.bg;
+  static const Color _surface       = AppColors.surface;
+  static const Color _surfaceAlt    = AppColors.surfaceAlt;
+  static const Color _cyan          = AppColors.cyan;
+  static const Color _textPrimary   = AppColors.textPrimary;
+  static const Color _textSecondary = AppColors.textDim;
+  static const Color _red           = AppColors.red;
+  static const Color _divider       = AppColors.divider;
 
   bool   _isLoading           = true;
   double _alertVolume         = 0.8;
