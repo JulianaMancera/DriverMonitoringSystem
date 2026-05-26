@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ui';
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:camera/camera.dart';
@@ -303,6 +304,20 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
     }
   }
 
+  // Restarts the image stream and head pose timer for pre-recording alignment.
+  // Safe to call when not recording — _onCameraFrame gates inference on isRecordingProvider.
+  Future<void> _resumeHeadPoseStream() async {
+    if (_camDisposing || !_cameraInitialized || _cameraController == null) return;
+    try {
+      if (!_cameraController!.value.isStreamingImages) {
+        await _cameraController!.startImageStream(_onCameraFrame);
+      }
+    } catch (e) {
+      debugPrint('[Camera] resumeHeadPoseStream error: $e');
+    }
+    _startHeadPoseUpdates();
+  }
+
   Future<void> _resumeAfterPip() async {
     if (_cameraController == null || _camDisposing) return;
     if (!ref.read(isRecordingProvider)) return;
@@ -372,15 +387,14 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
   }
 
   Future<void> _reloadPreferences() async {
-    final prefs = PreferencesHelper.instance;
-    final results = await Future.wait([
-      prefs.getAlertThresholds(),
-      prefs.getAutoStart(),
-    ]);
+    final prefs      = PreferencesHelper.instance;
+    final thresholds = await prefs.getAlertThresholds();
+    final autoStart  = await prefs.getAutoStart();
     if (!mounted) return;
+    if (listEquals(thresholds, _alertThresholds) && autoStart == _prefAutoStart) return;
     setState(() {
-      _alertThresholds = results[0] as List<int>;
-      _prefAutoStart   = results[1] as bool;
+      _alertThresholds = thresholds;
+      _prefAutoStart   = autoStart;
     });
   }
 
@@ -497,6 +511,9 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       });
 
       HeadPoseService.instance.init(cam.sensorOrientation);
+      if (!_cameraController!.value.isStreamingImages) {
+        await _cameraController!.startImageStream(_onCameraFrame);
+      }
       _startHeadPoseUpdates();
 
       _cameraController!.addListener(_onCameraValueChanged);
@@ -786,6 +803,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
         );
       }
     }
+
+    await _resumeHeadPoseStream();
   }
 
   /// Cleanup when stop recording times out or fails
@@ -810,6 +829,8 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen>
       ref.read(alertnessPctProvider.notifier).set(100.0);
       setState(() => _sessionElapsedSec = 0);
     }
+
+    _resumeHeadPoseStream();
   }
 
   void _showSessionSummaryModal({

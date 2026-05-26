@@ -61,12 +61,6 @@ final activeSubclassProvider =
 final activeSubclassIndexProvider = NotifierProvider<IntNotifier, int>(
     () => IntNotifier(0));
 
-class _NavIndexNotifier extends Notifier<int> {
-  @override
-  int build() => 0;
-  void set(int index) => state = index;
-}
-
-final navIndexProvider = NotifierProvider<_NavIndexNotifier, int>(
-  _NavIndexNotifier.new,
+final navIndexProvider = NotifierProvider<IntNotifier, int>(
+  () => IntNotifier(0),
 );

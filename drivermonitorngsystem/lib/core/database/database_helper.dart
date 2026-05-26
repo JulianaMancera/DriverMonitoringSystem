@@ -620,32 +620,20 @@ class DatabaseHelper {
     await db.delete('video_clips', where: 'id = ?', whereArgs: [id]);
   }
 
-  /// Deletes video clip files and their DB records older than [days] days.
   /// Sessions and alert events are NOT affected.
   Future<void> deleteClipsOlderThan(int days) async {
     final db     = await database;
     final cutoff = _sinceIso(days);
 
     final rows = await db.rawQuery(
-      'SELECT id, file_path FROM video_clips WHERE created_at < ?',
+      'SELECT file_path FROM video_clips WHERE created_at < ?',
       [cutoff],
     );
     if (rows.isEmpty) return;
 
-    final ids          = rows.map((r) => r['id'] as int).toList();
-    final paths        = rows.map((r) => r['file_path'] as String).toList();
-    final placeholders = ids.map((_) => '?').join(',');
-
-    await db.rawDelete(
-        'DELETE FROM video_clips WHERE id IN ($placeholders)', ids);
-
-    await Future.wait(paths.map((path) async {
-      try {
-        await VideoClipService.deleteFile(path);
-      } catch (e) {
-        debugPrint('[DB] Failed to delete clip file $path: $e');
-      }
-    }));
+    final paths = rows.map((r) => r['file_path'] as String).toList();
+    await db.delete('video_clips', where: 'created_at < ?', whereArgs: [cutoff]);
+    await Future.wait(paths.map(_safeDeleteFile));
   }
 
   Future<List<String>> getAllVideoClipPaths() async {
@@ -699,13 +687,7 @@ class DatabaseHelper {
         "DELETE FROM sessions WHERE id IN ($placeholders)", ids);
     });
 
-    for (final path in clipPaths) {
-      try {
-        await VideoClipService.deleteFile(path);
-      } catch (e) {
-        debugPrint('[DB] Failed to delete clip file $path: $e');
-      }
-    }
+    await Future.wait(clipPaths.map(_safeDeleteFile));
   }
 
   Future<Map<int, int>> getAllSessionAlertCounts() async {
@@ -730,12 +712,14 @@ class DatabaseHelper {
       await txn.delete('state_counts');
       await txn.delete('sessions');
     });
-    for (final path in paths) {
-      try {
-        await VideoClipService.deleteFile(path);
-      } catch (e) {
-        debugPrint('[DB] Failed to delete clip file $path: $e');
-      }
+    await Future.wait(paths.map(_safeDeleteFile));
+  }
+
+  Future<void> _safeDeleteFile(String path) async {
+    try {
+      await VideoClipService.deleteFile(path);
+    } catch (e) {
+      debugPrint('[DB] Failed to delete clip file $path: $e');
     }
   }
 

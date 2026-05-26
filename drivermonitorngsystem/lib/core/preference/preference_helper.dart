@@ -105,11 +105,7 @@ class PreferencesHelper {
   Future<String> getRetention() async =>
       (await _prefs()).getString(_keyRetention) ?? '30 days';
 
-  Future<void> setRetention(String value) async {
-    const valid = {'7 days', '30 days', '90 days', 'Never'};
-    if (!valid.contains(value)) return;
-    await (await _prefs()).setString(_keyRetention, value);
-  }
+  Future<void> setRetention(String value) async => _setPeriod(_keyRetention, value);
 
   /// Converts retention string to days integer for database queries.
   /// Returns null for 'Never' (no deletion).
@@ -137,11 +133,7 @@ class PreferencesHelper {
   Future<String> getClipExpiry() async =>
       (await _prefs()).getString(_keyClipExpiry) ?? '30 days';
 
-  Future<void> setClipExpiry(String value) async {
-    const valid = {'7 days', '30 days', '90 days', 'Never'};
-    if (!valid.contains(value)) return;
-    await (await _prefs()).setString(_keyClipExpiry, value);
-  }
+  Future<void> setClipExpiry(String value) async => _setPeriod(_keyClipExpiry, value);
 
   /// Converts clip expiry string to days integer.
   /// Returns null for 'Never' (no auto-deletion).
@@ -182,6 +174,13 @@ class PreferencesHelper {
   }
 
   // PRIVATE
+
+  static const Set<String> _validPeriods = {'7 days', '30 days', '90 days', 'Never'};
+
+  Future<void> _setPeriod(String key, String value) async {
+    if (!_validPeriods.contains(value)) return;
+    await (await _prefs()).setString(key, value);
+  }
 
   /// Returns the cached SharedPreferences instance.
   /// Initialises once on first call — all subsequent calls return cache.
