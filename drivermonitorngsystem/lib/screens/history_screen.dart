@@ -91,6 +91,25 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     }
   }
 
+  static List<Map<String, dynamic>> _applyDateRange(
+    List<Map<String, dynamic>> items, {
+    required String dateField,
+    required DateTime? rangeStart,
+    required DateTime? rangeEnd,
+  }) {
+    if (rangeStart == null) return items;
+    final start = DateTime(rangeStart.year, rangeStart.month, rangeStart.day);
+    final end = rangeEnd != null
+        ? DateTime(rangeEnd.year, rangeEnd.month, rangeEnd.day, 23, 59, 59)
+        : DateTime(start.year, start.month, start.day, 23, 59, 59);
+    return items.where((item) {
+      final d = DateTime.tryParse(item[dateField] ?? '')?.toLocal();
+      return d != null &&
+          d.isAfter(start.subtract(const Duration(seconds: 1))) &&
+          d.isBefore(end.add(const Duration(seconds: 1)));
+    }).toList();
+  }
+
   void _applyFilter() {
     final query = _searchCtrl.text.toLowerCase().trim();
     List<Map<String, dynamic>> result = List.from(_sessions);
@@ -128,20 +147,10 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
       }).toList();
     }
 
-    if (_dateRangeStart != null) {
-      final start = DateTime(
-          _dateRangeStart!.year, _dateRangeStart!.month, _dateRangeStart!.day);
-      final end = _dateRangeEnd != null
-          ? DateTime(_dateRangeEnd!.year, _dateRangeEnd!.month,
-              _dateRangeEnd!.day, 23, 59, 59)
-          : DateTime(start.year, start.month, start.day, 23, 59, 59);
-      result = result.where((s) {
-        final d = DateTime.tryParse(s['started_at'] ?? '')?.toLocal();
-        return d != null &&
-            d.isAfter(start.subtract(const Duration(seconds: 1))) &&
-            d.isBefore(end.add(const Duration(seconds: 1)));
-      }).toList();
-    }
+    result = _applyDateRange(result,
+        dateField: 'started_at',
+        rangeStart: _dateRangeStart,
+        rangeEnd: _dateRangeEnd);
 
     if (_detectionFilter.isNotEmpty) {
       result = result.where((s) {
@@ -164,20 +173,10 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
   void _applyVideoFilter() {
     List<Map<String, dynamic>> result = List.from(_clips);
 
-    if (_videoDateRangeStart != null) {
-      final start = DateTime(_videoDateRangeStart!.year,
-          _videoDateRangeStart!.month, _videoDateRangeStart!.day);
-      final end = _videoDateRangeEnd != null
-          ? DateTime(_videoDateRangeEnd!.year, _videoDateRangeEnd!.month,
-              _videoDateRangeEnd!.day, 23, 59, 59)
-          : DateTime(start.year, start.month, start.day, 23, 59, 59);
-      result = result.where((c) {
-        final d = DateTime.tryParse(c['created_at'] ?? '')?.toLocal();
-        return d != null &&
-            d.isAfter(start.subtract(const Duration(seconds: 1))) &&
-            d.isBefore(end.add(const Duration(seconds: 1)));
-      }).toList();
-    }
+    result = _applyDateRange(result,
+        dateField: 'created_at',
+        rangeStart: _videoDateRangeStart,
+        rangeEnd: _videoDateRangeEnd);
 
     if (_videoDetectionFilter.isNotEmpty) {
       result = result.where((c) {
