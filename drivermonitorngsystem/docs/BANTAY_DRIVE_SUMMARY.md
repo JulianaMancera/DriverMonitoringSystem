@@ -64,6 +64,7 @@ drivermonitorngsystem/
 | `lib/core/session_state.dart` | Persists active session ID and start time via SharedPreferences so session data survives PiP transitions, isolate restarts, and app backgrounding. |
 | `lib/core/services/notifications.dart` | Manages the Android foreground service with a persistent notification showing live driver state and a Stop button. Throttles updates to every 2 seconds to avoid dropped taps. |
 | `lib/core/services/pip_service.dart` | Picture-in-Picture mode so monitoring continues in a floating window when the user navigates away or presses home. |
+| `lib/core/services/video_clip_service.dart` | Records and saves 10-second alert clips to app-private storage. Validates disk space (50 MB minimum) before writing, verifies file existence and size post-copy, and handles bulk export to the Downloads folder. |
 | `lib/core/preference/preference_helper.dart` | SharedPreferences wrapper for user settings: alert sensitivity, auto-start toggle, session retention policy, and onboarding completion status. |
 
 ---
@@ -86,7 +87,7 @@ drivermonitorngsystem/
 
 | File | Role |
 |------|------|
-| `lib/widgets/head_pose_indicator.dart` | Visual circle widget on the monitor screen showing the driver's current head orientation (yaw/roll as angle and rotation) as alignment feedback. |
+| `lib/widgets/head_pose_indicator.dart` | Color-coded ring widget on the monitor screen (green/yellow/red/dashed) showing the driver's current head orientation (yaw/roll as angle and rotation) as real-time alignment feedback. |
 | `lib/widgets/exit.dart` | Exit confirmation dialog to prevent accidental app closure; stops the foreground service and clears recording state before exiting. |
 | `lib/utils/responsive.dart` | OEM-specific UI scaling utilities. Applies multipliers per brand: Samsung (0.92×), MIUI/OPPO/Vivo (0.97×), stock Android (1.0×) for text, padding, sizes, icons, and border radii. |
 
@@ -98,7 +99,7 @@ drivermonitorngsystem/
 |------|------|
 | `assets/model/dms_hybridnet_v3_float32.tflite` | The TFLite model. Hybrid CNN-BiLSTM-Attention architecture combining EfficientNet-B0 (face), Eye MicroCNN (eyes), and MobileNetV3-Small (upper body) with BiLSTM temporal modeling and Multi-head Attention. Outputs 13 behavior classes from a 224×224 image + 25 geometric features. |
 | `assets/norm_params.json` | Mean and scale normalization parameters for the 25 input features (EAR, MAR, head pose, gaze, wrist/shoulder positions, temporal trends) — required before feeding features into the model. |
-| `assets/L1_L2_sound.mp3` | Audio alert played for Level 1 and Level 2 alerts (slide-in banner and persistent warning). |
+| `assets/L1_L2_sound.mp3` | Audio alert used for Level 1 and Level 2 alerts. L1 plays it once; L2 plays it 3× consecutively via a dedicated secondary audio player (`_alarmPlayer`). |
 | `assets/L3_critical_alert.wav` | Looping alarm played during Level 3 full-screen blocking alert requiring manual dismissal. |
 | `assets/bantay_drive_logo.png` | Main app logo used in splash and onboarding screens. |
 | `assets/text_logo.png` | Text-based "Bantay Drive" logo variant used in UI. |
@@ -155,9 +156,9 @@ Combined → BiLSTM (temporal modeling, 30-frame window)
 
 | Level | Trigger | UI | Audio |
 |-------|---------|-----|-------|
-| **L1** | Initial detection | Slide-in banner (top of screen) | Short beep |
-| **L2** | Sustained or repeated | Persistent warning banner | Repeated beep |
-| **L3** | Critical / driver unresponsive | Full-screen blocking overlay | Looping alarm |
+| **L1** | Initial detection | Slide-in banner (top of screen, auto-dismisses) | `L1_L2_sound.mp3` plays once |
+| **L2** | Sustained or repeated detection | Persistent warning banner | `L1_L2_sound.mp3` plays 3× consecutively via `_alarmPlayer` |
+| **L3** | Critical / driver unresponsive | Full-screen blocking overlay (manual dismiss required) | `L3_critical_alert.wav` loops until dismissed |
 
 ---
 
@@ -171,7 +172,7 @@ Combined → BiLSTM (temporal modeling, 30-frame window)
 | Picture-in-Picture | Monitoring continues in floating window when app is minimized |
 | Database | SQLite with 6 tables for sessions, alerts, logs, snapshots, and video clips |
 | Analytics Dashboard | Safety score ring, trend charts, hourly distribution |
-| Session History | Date-grouped list with search and filters |
+| Session History | Two-tab view: session logs with search/filters + video logs with bulk export |
 | Sensitivity Control | Low / Medium / High with adjustable frame thresholds |
 | Responsive Design | OEM-specific scaling for Samsung, MIUI, ColorOS, stock Android |
 | Fully Offline | All inference runs on-device — no internet required |

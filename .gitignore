@@ -1,0 +1,5 @@
+# Thesis documentation files (not for version control)
+drivermonitorngsystem\docs\
+
+# Utility scripts
+generate_pseudocode_docx.py
