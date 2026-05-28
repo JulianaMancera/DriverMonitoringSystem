@@ -43,6 +43,8 @@
 9. [Recommended Camera Placement](#9-recommended-camera-placement)
 10. [Frequently Asked Questions](#10-frequently-asked-questions)
 11. [Troubleshooting](#11-troubleshooting)
+12. [Glossary](#12-glossary)
+13. [About and License](#13-about-and-license)
 
 ---
 
@@ -62,7 +64,7 @@
 - Plays an audio alert to bring your attention back to the road
 - Shows a visual warning banner on screen
 - Records the event in your session history
-- Saves a short video clip of the alert moment (Level 2 alerts)
+- Saves a short video clip of the alert moment (Level 2 and Level 3 alerts)
 
 ---
 
@@ -103,15 +105,15 @@ A large circular ring at the top of the screen shows your **overall safety score
 
 | Score range | Rating |
 |---|---|
-| 85 – 100% | Excellent |
-| 70 – 84% | Good |
-| 50 – 69% | Fair |
-| Below 50% | Needs improvement |
+| 90 – 100% | Excellent |
+| 75 – 89% | Good |
+| 60 – 74% | Fair |
+| Below 60% | Poor |
 
 An arrow indicator shows whether your score is trending up or down compared to your previous sessions.
 
 **How the score is calculated:**
-Each alert that fires during a session deducts points. Level 1 alerts deduct 2 points and Level 2 alerts deduct 5 points. The total deduction is divided by how long you drove (in minutes), then multiplied by 10. The result is subtracted from 100. A minimum drive time of 2 minutes is used to prevent very short test sessions from producing extreme scores.
+Each alert that fires during a session deducts points. Level 1 alerts deduct 2 points, Level 2 alerts deduct 4 points, and Level 3 alerts deduct 8 points. The total deduction is divided by how long you drove (in minutes), then multiplied by 10. The result is subtracted from 100. A minimum drive time of 2 minutes is used to prevent very short test sessions from producing extreme scores.
 
 ### 3.2 Quick Stats
 
@@ -129,9 +131,11 @@ If you have not recorded any sessions yet, placeholder cards are shown encouragi
 ### 3.3 Safety Score History Chart
 
 A line chart below the stats cards shows your daily safety scores for the last 30 days. Colored zones on the chart help you identify:
-- **Green zone** — Safe scores (above 70%)
-- **Yellow zone** — Fair scores (50–70%)
-- **Red zone** — Poor scores (below 50%)
+
+- **Green zone** — Excellent scores (90% and above)
+- **Cyan zone** — Good scores (75–89%)
+- **Amber zone** — Fair scores (60–74%)
+- **Red zone** — Poor scores (below 60%)
 
 An alertness sparkline for your most recent session is shown beneath the main chart.
 
@@ -159,8 +163,6 @@ A **Head Pose Indicator** is displayed on the camera preview to help you align c
 | **Dashed ring** | No face detected — reposition the camera |
 
 The camera icon inside the gauge rotates to show your current head roll angle relative to the camera axis.
-
-> **Tip:** If you wear glasses, enable **Clear Glasses Mode** in Settings for improved eye detection accuracy.
 
 ### 4.2 Starting a Session
 
@@ -192,14 +194,19 @@ While a session is in progress, the Monitor screen shows:
 Bantay Drive uses a three-level alert system that escalates based on how long unsafe behavior continues.
 
 #### Level 1 Alert
-- **Trigger:** Unsafe behavior detected for approximately 1 second (5 consecutive frames at normal sensitivity)
-- **Action:** A short audio chime plays and a banner notification appears briefly on screen
+- **Trigger:** Unsafe behavior detected for approximately 0.45 seconds (3 consecutive frames at medium sensitivity)
+- **Action:** A short audio chime plays and a banner notification slides in briefly at the top of the screen
 - **Purpose:** A gentle reminder to refocus on the road
 
 #### Level 2 Alert
-- **Trigger:** Unsafe behavior continues for approximately 2 seconds (10 consecutive frames at normal sensitivity)
-- **Action:** A louder looping alarm plays, a persistent warning banner remains on screen, and a short video clip of the event is saved
-- **Purpose:** A strong warning when the driver has not responded to the Level 1 alert
+- **Trigger:** Unsafe behavior continues for approximately 0.9 seconds (6 consecutive frames at medium sensitivity)
+- **Action:** The same chime plays again and a persistent warning banner remains on screen; a short video clip of the event is saved
+- **Purpose:** A stronger warning when the driver has not responded to the Level 1 alert
+
+#### Level 3 Alert
+- **Trigger:** Unsafe behavior persists for approximately 1.35 seconds (9 consecutive frames at medium sensitivity)
+- **Action:** A looping critical alarm plays continuously and a full-screen red overlay blocks the camera preview — this overlay **must be tapped manually to dismiss**; a video clip is also saved
+- **Purpose:** A critical alarm requiring the driver's active acknowledgment when dangerous behavior has not been corrected
 
 #### Alert Cooldown
 After an alert fires, a brief cooldown period prevents the same alert from firing repeatedly in quick succession. If the unsafe behavior continues past the cooldown window, a new alert will trigger.
@@ -207,9 +214,9 @@ After an alert fires, a brief cooldown period prevents the same alert from firin
 #### Alert Banner
 The alert banner shows:
 - The type of behavior detected (e.g., "Drowsy Detected" or "Distracted — Phone Use")
-- The alert level (Level 1 or Level 2)
+- The alert level (Level 1, Level 2, or Level 3)
 
-Tapping the banner or resuming safe driving dismisses it.
+Tapping the banner or resuming safe driving dismisses Level 1 and Level 2 banners. Level 3 requires a manual tap on the full-screen overlay to dismiss.
 
 ### 4.5 Stopping a Session
 
@@ -232,7 +239,7 @@ After stopping a session, a summary sheet slides up from the bottom of the scree
 | **Duration** | Total time the session was active |
 | **Safety Score** | Final computed safety score for this session |
 | **State breakdown** | Time spent in Natural / Drowsy / Distracted states |
-| **Alert count** | Number of Level 1 and Level 2 alerts that fired |
+| **Alert count** | Number of Level 1, Level 2, and Level 3 alerts that fired |
 
 Tap **View History** to go directly to the session detail in the History tab, or dismiss the sheet to return to the Monitor screen.
 
@@ -336,17 +343,17 @@ A slider that controls the volume of alert sounds (0–100%).
 
 - Moving the slider also adjusts your phone's media volume
 - At 0%, alert sounds are muted (not recommended while driving)
-- Default: 85%
+- Default: 80%
 
 ### 7.2 Alert Sensitivity
 
 A segmented selector that controls how quickly the app triggers alerts.
 
-| Sensitivity | Level 1 trigger | Level 2 trigger | Recommended for |
-|---|---|---|---|
-| **Low** | ~1.6 seconds | ~3.6 seconds | Casual use, testing |
-| **Normal** (default) | ~1.0 second | ~2.0 seconds | Most drivers |
-| **High** | ~0.6 seconds | ~1.2 seconds | Drivers prone to microsleep |
+| Sensitivity | Level 1 trigger | Level 2 trigger | Level 3 trigger | Recommended for |
+|---|---|---|---|---|
+| **Low** | ~0.75 s (5 frames) | ~1.5 s (10 frames) | ~2.25 s (15 frames) | Casual use, testing |
+| **Medium** (default) | ~0.45 s (3 frames) | ~0.9 s (6 frames) | ~1.35 s (9 frames) | Most drivers |
+| **High** | ~0.3 s (2 frames) | ~0.6 s (4 frames) | ~0.9 s (6 frames) | Drivers prone to microsleep |
 
 Higher sensitivity = fewer consecutive unsafe frames required before an alert fires, meaning faster but potentially more frequent alerts.
 
@@ -366,16 +373,31 @@ When enabled, a summary modal appears after you stop a session, showing your sco
 
 ### 7.5 Data Retention
 
-Controls how long session data, alerts, and video clips are kept before being automatically deleted.
+Two separate dropdowns control how long data is kept before being automatically deleted on the next app launch.
+
+#### Session Retention
+
+Controls how long session records, alert events, and logs are kept.
 
 | Option | Description |
 |---|---|
-| **7 days** | Delete sessions older than 7 days on next app launch |
+| **7 days** | Delete sessions older than 7 days |
 | **30 days** (default) | Delete sessions older than 30 days |
 | **90 days** | Delete sessions older than 90 days |
-| **Forever** | Never automatically delete data |
+| **Never** | Keep all session data indefinitely |
 
-> **Note:** Deleted sessions cannot be recovered. If device storage is a concern, choose a shorter retention period.
+#### Video Clip Expiry
+
+Controls how long saved alert video clips are kept.
+
+| Option | Description |
+|---|---|
+| **7 days** | Delete clips older than 7 days |
+| **30 days** (default) | Delete clips older than 30 days |
+| **90 days** | Delete clips older than 90 days |
+| **Never** | Keep all video clips indefinitely |
+
+> **Note:** Deleted data cannot be recovered. If device storage is a concern, choose a shorter period — especially for video clips, which use the most storage.
 
 ### 7.6 Clear All Data
 
@@ -453,10 +475,6 @@ Correct camera placement is critical for accurate detection. Follow these guidel
 - [ ] Head Pose Indicator shows **green** before starting a session
 - [ ] No strong backlight (sun directly behind your head) washing out the image
 
-### Notes for Glasses Wearers
-
-If you wear clear glasses, enable **Settings → Clear Glasses Mode** to adjust eye detection thresholds and reduce false drowsiness alerts caused by lens reflections.
-
 ---
 
 ## 10. Frequently Asked Questions
@@ -485,7 +503,6 @@ Bantay Drive saves session state to the device persistently. If the app restarts
 **How do I reduce false alerts?**
 - Increase the alert sensitivity to **Low** in Settings
 - Ensure correct camera placement (green on Head Pose Indicator)
-- Enable **Clear Glasses Mode** if you wear glasses
 - Avoid strong backlighting behind your head (e.g., driving directly into a sunset)
 
 ---
@@ -495,7 +512,7 @@ Bantay Drive saves session state to the device persistently. If the app restarts
 | Issue | Possible cause | Solution |
 |---|---|---|
 | No face detected (dashed ring) | Camera not facing driver correctly | Adjust phone mount angle; ensure face is in frame |
-| Frequent false drowsy alerts | Glasses lens reflection or extreme head tilt | Enable Clear Glasses Mode; re-center phone mount |
+| Frequent false drowsy alerts | Glasses lens reflection or extreme head tilt | Re-center phone mount; avoid strong backlighting |
 | App does not stay running in background | Battery optimization killing the app | Disable battery optimization for Bantay Drive in Android Settings → Battery → App battery usage |
 | Alert sound not playing | Volume set to 0 or phone is on silent | Check Alert Volume in Settings; check phone ringer/media volume |
 | Video clips not saving | Storage permission denied | Grant storage permission in Android Settings → Apps → Bantay Drive → Permissions |
@@ -503,6 +520,68 @@ Bantay Drive saves session state to the device persistently. If the app restarts
 | Session does not start automatically | Auto-Start disabled | Enable Auto-Start Recording in Settings |
 | Analytics charts show no data | No sessions recorded yet | Complete at least one monitoring session to populate charts |
 | App lags or drops frames | Device is too busy / low RAM | Close background apps before starting a session; restart the phone if needed |
+
+---
+
+---
+
+## 12. Glossary
+
+| Term | Definition |
+|---|---|
+| **AI / Artificial Intelligence** | Technology that enables the app to learn and recognize patterns in camera frames without explicit rules |
+| **Alert cooldown** | A brief pause after an alert fires to prevent the same alert from repeating immediately |
+| **Alertness gauge** | A circular meter (0–100%) on the Monitor screen showing how alert the driver currently is |
+| **BiLSTM** | Bidirectional Long Short-Term Memory — the neural network component that models behavior over a sequence of frames |
+| **DMS** | Driver Monitoring System — a system designed to detect and warn against unsafe driver behavior |
+| **DMS-HybridNet V3** | The name of the on-device AI model used by Bantay Drive |
+| **Distraction** | Any behavior where the driver's attention is diverted from the road (phone use, grooming, etc.) |
+| **Drowsiness** | A state of reduced alertness marked by fatigue, yawning, or microsleep |
+| **EAR** | Eye Aspect Ratio — a geometric measure of how open the eyes are, used as an input feature for the model |
+| **Foreground service** | An Android background process that keeps monitoring active even when Bantay Drive is not in the foreground |
+| **Head Pose Indicator** | A color-coded ring on the Monitor screen showing whether the driver's head angle is within the detection range |
+| **Inference** | The process of running the AI model on a single camera frame to produce a behavior prediction |
+| **L1 / L2 / L3** | Shorthand for Level 1, Level 2, and Level 3 alerts |
+| **MAR** | Mouth Aspect Ratio — a geometric measure of how open the mouth is, used to detect yawning |
+| **Microsleep** | An involuntary brief episode of sleep, typically lasting less than 30 seconds |
+| **PiP** | Picture-in-Picture — a mode that shrinks the monitor view into a floating window so other apps can be used simultaneously |
+| **Safety score** | A numeric rating (0–100%) summarizing how safely a driver performed during a session |
+| **Session** | A single continuous recording period started and stopped by the driver |
+| **TFLite / TensorFlow Lite** | A lightweight version of TensorFlow optimized for on-device AI inference on mobile devices |
+| **Yaw** | Horizontal head rotation (turning left or right); compensated in the model for right-side phone mounts |
+
+---
+
+## 13. About and License
+
+**App name:** Bantay Drive — Real-Time Driver Monitoring System
+
+**Version:** 1.0.0
+
+**Platform:** Android
+
+**Developed by:**
+
+- Pia Katleya V. Macalanda
+- Juliana R. Mancera
+
+**Institution:** New Era University, 2026
+
+**Purpose:** Undergraduate thesis project — a fully offline, on-device AI driver monitoring system for drowsiness and distraction detection.
+
+**AI Model:** DMS-HybridNet V3 — a hybrid CNN-BiLSTM-Attention architecture trained on publicly available driver behavior datasets (MRL Eye, YawDD, UTA-RLDD, State Farm, AUC Distracted Driver v2).
+
+**Third-party components used:**
+
+- TensorFlow Lite — on-device AI inference
+- Google ML Kit Face Detection — facial landmark extraction
+- SQLite (sqflite) — local session database
+- Flutter Riverpod — state management
+- audioplayers — alert sound playback
+- fl_chart — analytics charts
+- flutter_foreground_task — background monitoring service
+
+**Data privacy:** Bantay Drive does not collect, transmit, or store any data outside your device. All video clips, session logs, and model inference run entirely on-device with no internet connection required.
 
 ---
 

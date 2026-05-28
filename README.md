@@ -51,8 +51,8 @@ This project was developed as an undergraduate thesis at New Era University. It 
 - On-device TFLite inference (NNAPI → CPU fallback) — no server required
 - **3-level escalating alert system:**
   - **Level 1** — Slide-in banner; alert sound plays once (auto-dismisses)
-  - **Level 2** — Persistent banner; alert sound plays 3 times
-  - **Level 3** — Full-screen blocking alarm overlay; alarm loops continuously until manually dismissed
+  - **Level 2** — Persistent banner; alert sound plays once; records video clip
+  - **Level 3** — Full-screen blocking alarm overlay; alarm loops continuously until manually dismissed; records video clip
 - Configurable alert sensitivity:
 
 | Sensitivity | L1 | L2 | L3 |
@@ -65,7 +65,7 @@ This project was developed as an undergraduate thesis at New Era University. It 
 - **Video clip capture** — automatically records and saves clips (up to 10 s) when alerts trigger; disk-space-aware (requires 50 MB free) with structured error codes; clips exportable to device Downloads folder
 - **Picture-in-Picture (PiP)** — monitoring continues in a floating window when app is backgrounded
 - Foreground service with persistent notification showing live driver state + Stop button
-- Clear Glasses toggle, Auto-start recording option
+- Auto-start recording option
 
 ### Dashboard
 - Circular Safety Score (0–100), color-coded green / amber / red
@@ -85,7 +85,7 @@ This project was developed as an undergraduate thesis at New Era University. It 
 - **In-app session video playback** (non-mirrored)
 
 ### Settings
-- Alert volume, sensitivity, auto-start recording, data retention (7 Days / 30 Days / Forever)
+- Alert volume, sensitivity, auto-start recording, session retention (7 Days / 30 Days / 90 Days / Never), video clip expiry (7 Days / 30 Days / 90 Days / Never)
 - Clear all history with confirmation
 
 ---
@@ -135,67 +135,11 @@ lib/
 
 ---
 
-## Getting Started
+## Installation
 
-### Prerequisites
-- Flutter SDK 3.16+
-- Android Studio / VS Code
-- Android device or emulator (API 26+, Android 8.0 Oreo minimum)
-- **JDK 21**
+Bantay Drive is distributed as a pre-built Android APK. A Google Drive download link will be provided directly by the developers upon request.
 
-New to Flutter? The [official Flutter documentation](https://docs.flutter.dev/) offers tutorials, samples, and a full API reference. A guided first-app walkthrough is available at [docs.flutter.dev/get-started/codelab](https://docs.flutter.dev/get-started/codelab).
-
-### Model & Asset Setup
-
-Place the following under `assets/`:
-
-```
-assets/
-├── model/
-│   └── dms_hybridnet_v3_float32.tflite
-├── norm_params.json
-├── L1_L2_sound.mp3
-├── L3_critical_alert.wav
-├── car.png
-├── text_logo.png
-└── bantay_drive_logo.png
-```
-
-Verify `pubspec.yaml` declares all of these under `flutter: assets:`.
-
-### Android Gradle Setup
-
-**`android/app/build.gradle.kts`** — Java 21 target:
-```kotlin
-compileOptions {
-    isCoreLibraryDesugaringEnabled = true
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
-}
-kotlinOptions { jvmTarget = "21" }
-```
-```kotlin
-dependencies {
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-    implementation("androidx.concurrent:concurrent-futures:1.2.0")
-    implementation("androidx.concurrent:concurrent-futures-ktx:1.2.0")
-    implementation("androidx.multidex:multidex:2.0.1")
-}
-```
-
-**`android/gradle/wrapper/gradle-wrapper.properties`:**
-```properties
-distributionUrl=https\://services.gradle.org/distributions/gradle-8.13-all.zip
-```
-
-**`android/app/build.gradle.kts`** — suppress `.tflite` compression:
-```kotlin
-aaptOptions {
-    noCompress += listOf("tflite")
-}
-```
-
-Release builds use ProGuard minification + resource shrinking by default.
+> **Requirements:** Android 8.0 (Oreo) or higher — no additional setup required.
 
 ---
 

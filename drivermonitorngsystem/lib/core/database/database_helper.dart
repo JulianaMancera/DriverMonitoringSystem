@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../services/video_clip_service.dart';
@@ -619,6 +620,22 @@ class DatabaseHelper {
     await db.delete('video_clips', where: 'id = ?', whereArgs: [id]);
   }
 
+  /// Sessions and alert events are NOT affected.
+  Future<void> deleteClipsOlderThan(int days) async {
+    final db     = await database;
+    final cutoff = _sinceIso(days);
+
+    final rows = await db.rawQuery(
+      'SELECT file_path FROM video_clips WHERE created_at < ?',
+      [cutoff],
+    );
+    if (rows.isEmpty) return;
+
+    final paths = rows.map((r) => r['file_path'] as String).toList();
+    await db.delete('video_clips', where: 'created_at < ?', whereArgs: [cutoff]);
+    await Future.wait(paths.map(_safeDeleteFile));
+  }
+
   Future<List<String>> getAllVideoClipPaths() async {
     final db = await database;
     final rows = await db.query('video_clips', columns: ['file_path']);
@@ -670,9 +687,7 @@ class DatabaseHelper {
         "DELETE FROM sessions WHERE id IN ($placeholders)", ids);
     });
 
-    for (final path in clipPaths) {
-      await VideoClipService.deleteFile(path);
-    }
+    await Future.wait(clipPaths.map(_safeDeleteFile));
   }
 
   Future<Map<int, int>> getAllSessionAlertCounts() async {
@@ -697,8 +712,14 @@ class DatabaseHelper {
       await txn.delete('state_counts');
       await txn.delete('sessions');
     });
-    for (final path in paths) {
+    await Future.wait(paths.map(_safeDeleteFile));
+  }
+
+  Future<void> _safeDeleteFile(String path) async {
+    try {
       await VideoClipService.deleteFile(path);
+    } catch (e) {
+      debugPrint('[DB] Failed to delete clip file $path: $e');
     }
   }
 

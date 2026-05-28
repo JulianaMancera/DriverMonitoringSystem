@@ -5,9 +5,10 @@ import 'package:shimmer/shimmer.dart';
 import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
 import '../utils/responsive.dart';
+import '../theme/app_colors.dart';
 
-const Color _kDrowsyColor     = Colors.red;
-const Color _kDistractedColor = Color(0xFFfbbf24);
+const Color _kDrowsyColor     = AppColors.drowsy;
+const Color _kDistractedColor = AppColors.distracted;
 
 class _FilterNotifier extends Notifier<int?> {
   @override
@@ -63,7 +64,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
   Widget build(BuildContext context) {
     final selDays = ref.watch(analyticsFilterProvider);
     return ColoredBox(
-      color: const Color(0xFF080E1A),
+      color: AppColors.bg,
       child: Column(
         children: [
           _FilterTabs(selectedDays: selDays, onSelect: _selectDays),
@@ -120,9 +121,9 @@ class _FilterTabs extends StatelessWidget {
         padding: EdgeInsets.all(context.rp(4)),
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          color: const Color(0xFF0f172a),
+          color: AppColors.surfaceDark,
           borderRadius: BorderRadius.circular(context.rp(16)),
-          border: Border.all(color: const Color(0xFF1E2D45), width: 1),
+          border: Border.all(color: AppColors.divider, width: 1),
         ),
         child: IntrinsicWidth(
           child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -147,13 +148,13 @@ class _FilterTabs extends StatelessWidget {
           padding: EdgeInsets.symmetric(
               horizontal: ctx.rp(14), vertical: ctx.rs(8)),
           decoration: BoxDecoration(
-            color: sel ? const Color(0xFF1e293b) : Colors.transparent,
+            color: sel ? AppColors.surfaceSlate : Colors.transparent,
             borderRadius: BorderRadius.circular(ctx.rp(12)),
           ),
           child: Text(label, style: TextStyle(
             fontSize:   ctx.sp(12),
             fontWeight: sel ? FontWeight.w600 : FontWeight.w500,
-            color: sel ? const Color(0xFF22d3ee) : const Color(0xFF64748b),
+            color: sel ? AppColors.cyanAlt : AppColors.textFaded,
           )),
         ),
       );
@@ -178,8 +179,8 @@ class _Content extends StatelessWidget {
             ?.cast<Map<String, dynamic>>() ?? [];
 
     return RefreshIndicator(
-      color: const Color(0xFF22d3ee),
-      backgroundColor: const Color(0xFF0f172a),
+      color: AppColors.cyanAlt,
+      backgroundColor: AppColors.surfaceDark,
       onRefresh: () async {},
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -281,7 +282,7 @@ class _LineCardState extends State<_LineCard> {
             Text('Drowsiness vs Distraction Trends',
                 style: TextStyle(fontSize: context.sp(13),
                     fontWeight: FontWeight.w600,
-                    color: const Color(0xFFcbd5e1)),
+                    color: AppColors.textSlateLight),
                 maxLines: 1, overflow: TextOverflow.ellipsis),
             SizedBox(height: context.rs(6)),
             Row(children: [
@@ -334,10 +335,10 @@ class _LineCardState extends State<_LineCard> {
               SizedBox(height: ctx.rs(6)),
               Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                 Icon(Icons.swipe_rounded,
-                    color: const Color(0xFF475569), size: ctx.ri(13)),
+                    color: AppColors.textSlate, size: ctx.ri(13)),
                 SizedBox(width: ctx.rp(4)),
                 Text('Swipe to see all dates',
-                    style: TextStyle(color: const Color(0xFF475569),
+                    style: TextStyle(color: AppColors.textSlate,
                         fontSize: ctx.sp(10))),
               ]),
               SizedBox(height: ctx.rs(8)),
@@ -398,7 +399,7 @@ class _LineCardState extends State<_LineCard> {
             show: true, drawVerticalLine: false,
             horizontalInterval: d.yInterval,
             getDrawingHorizontalLine: (_) => FlLine(
-                color: const Color(0xFF1e293b), strokeWidth: 1,
+                color: AppColors.surfaceSlate, strokeWidth: 1,
                 dashArray: [3, 3]),
           ),
           titlesData: FlTitlesData(
@@ -419,7 +420,7 @@ class _LineCardState extends State<_LineCard> {
                   return Padding(
                     padding: EdgeInsets.only(top: ctx.rs(6)),
                     child: Text(d.labels[i], style: TextStyle(
-                        color: const Color(0xFF64748b), fontSize: fs)),
+                        color: AppColors.textFaded, fontSize: fs)),
                   );
                 },
               ),
@@ -431,7 +432,7 @@ class _LineCardState extends State<_LineCard> {
                 getTitlesWidget: (v, _) {
                   if (v == 0 || v == d.maxY) return const SizedBox.shrink();
                   return Text('${v.toInt()}', style: TextStyle(
-                      color: const Color(0xFF64748b), fontSize: fs));
+                      color: AppColors.textFaded, fontSize: fs));
                 },
               ),
             ),
@@ -452,7 +453,7 @@ class _LineCardState extends State<_LineCard> {
               }
             },
             touchTooltipData: LineTouchTooltipData(
-              getTooltipColor: (_) => const Color(0xFF0f172a),
+              getTooltipColor: (_) => AppColors.surfaceDark,
               tooltipBorderRadius: BorderRadius.circular(ctx.rp(12)),
               tooltipPadding: EdgeInsets.all(ctx.rp(8)),
               getTooltipItems: (spots) => spots.map((s) => LineTooltipItem(
@@ -476,7 +477,7 @@ class _LineCardState extends State<_LineCard> {
           show: true,
           getDotPainter: (p0, p1, p2, p3) => FlDotCirclePainter(
               radius: 3.5, color: c, strokeWidth: 2,
-              strokeColor: const Color(0xFF0f172a)),
+              strokeColor: AppColors.surfaceDark),
         ),
         belowBarData: BarAreaData(show: false),
       );
@@ -586,7 +587,7 @@ class _DayBreakdownModalState extends State<_DayBreakdownModal> {
     final total = widget.drowsy + widget.distracted;
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF0D1627),
+        color: AppColors.surface,
         borderRadius: BorderRadius.vertical(
             top: Radius.circular(context.rp(24))),
       ),
@@ -597,7 +598,7 @@ class _DayBreakdownModalState extends State<_DayBreakdownModal> {
           child: Container(
             width: context.rp(40), height: context.rs(4),
             decoration: BoxDecoration(
-                color: const Color(0xFF1E2D45),
+                color: AppColors.divider,
                 borderRadius: BorderRadius.circular(context.rp(2))),
           ),
         )),
@@ -613,7 +614,7 @@ class _DayBreakdownModalState extends State<_DayBreakdownModal> {
                     fontWeight: FontWeight.w700)),
                 SizedBox(height: context.rs(3)),
                 Text('$total alert${total == 1 ? '' : 's'} detected',
-                    style: TextStyle(color: const Color(0xFF6B7A99),
+                    style: TextStyle(color: AppColors.textDim,
                         fontSize: context.sp(11))),
               ],
             )),
@@ -622,16 +623,16 @@ class _DayBreakdownModalState extends State<_DayBreakdownModal> {
               child: Container(
                   width: context.ri(34), height: context.ri(34),
                   decoration: BoxDecoration(
-                      color: const Color(0xFF1A2235),
+                      color: AppColors.surfaceAlt,
                       shape: BoxShape.circle,
-                      border: Border.all(color: const Color(0xFF1E2D45))),
+                      border: Border.all(color: AppColors.divider)),
                   child: Icon(Icons.close_rounded,
                       color: const Color(0xFF94A3B8),
                       size: context.ri(18))),
             ),
           ]),
         ),
-        Divider(color: const Color(0xFF1E2D45).withValues(alpha: 0.6),
+        Divider(color: AppColors.divider.withValues(alpha: 0.6),
             height: context.rs(20)),
         if (_loading)
           Padding(
@@ -668,7 +669,7 @@ class _DayBreakdownModalState extends State<_DayBreakdownModal> {
                 Padding(
                   padding: EdgeInsets.symmetric(vertical: context.rs(16)),
                   child: Text('No alerts on this day',
-                      style: TextStyle(color: const Color(0xFF64748b),
+                      style: TextStyle(color: AppColors.textFaded,
                           fontSize: context.sp(13))),
                 ),
             ]),
@@ -694,9 +695,9 @@ class _TypeRow extends StatelessWidget {
     return Container(
       padding: EdgeInsets.all(context.rp(14)),
       decoration: BoxDecoration(
-        color: const Color(0xFF0f172a),
+        color: AppColors.surfaceDark,
         borderRadius: BorderRadius.circular(context.rp(14)),
-        border: Border.all(color: const Color(0xFF1E2D45)),
+        border: Border.all(color: AppColors.divider),
       ),
       child: Row(children: [
         Container(
@@ -713,7 +714,7 @@ class _TypeRow extends StatelessWidget {
           children: [
             Row(children: [
               Text(label, style: TextStyle(
-                  color: const Color(0xFFcbd5e1), fontSize: context.sp(13),
+                  color: AppColors.textSlateLight, fontSize: context.sp(13),
                   fontWeight: FontWeight.w600)),
               const Spacer(),
               Text('$total total', style: TextStyle(
@@ -722,15 +723,15 @@ class _TypeRow extends StatelessWidget {
             ]),
             SizedBox(height: context.rs(8)),
             Row(children: [
-              if (l1 > 0) _pill(context, 'L1', l1, const Color(0xFFf59e0b)),
+              if (l1 > 0) _pill(context, 'L1', l1, AppColors.amber),
               if (l1 > 0 && (l2 > 0 || l3 > 0))
                 SizedBox(width: context.rp(6)),
               if (l2 > 0) _pill(context, 'L2', l2, const Color(0xFFef8c34)),
               if (l2 > 0 && l3 > 0) SizedBox(width: context.rp(6)),
-              if (l3 > 0) _pill(context, 'L3', l3, const Color(0xFFef4444)),
+              if (l3 > 0) _pill(context, 'L3', l3, AppColors.redAlert),
               if (l1 == 0 && l2 == 0 && l3 == 0)
                 Text('—', style: TextStyle(
-                    color: const Color(0xFF475569), fontSize: context.sp(11))),
+                    color: AppColors.textSlate, fontSize: context.sp(11))),
             ]),
           ],
         )),
@@ -770,7 +771,7 @@ class _BarCard extends StatelessWidget {
                 Expanded(child: Text('Hourly Alert Distribution',
                     style: TextStyle(fontSize: context.sp(13),
                         fontWeight: FontWeight.w600,
-                        color: const Color(0xFFcbd5e1)),
+                        color: AppColors.textSlateLight),
                     maxLines: 1, overflow: TextOverflow.ellipsis)),
                 SizedBox(width: context.rp(8)),
                 _expandBadge(context),
@@ -809,10 +810,10 @@ class _BarCard extends StatelessWidget {
           SizedBox(height: ctx.rs(6)),
           Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             Icon(Icons.swipe_rounded,
-                color: const Color(0xFF475569), size: ctx.ri(13)),
+                color: AppColors.textSlate, size: ctx.ri(13)),
             SizedBox(width: ctx.rp(4)),
             Text('Swipe to see all hours',
-                style: TextStyle(color: const Color(0xFF475569),
+                style: TextStyle(color: AppColors.textSlate,
                     fontSize: ctx.sp(10))),
           ]),
           SizedBox(height: ctx.rs(8)),
@@ -836,8 +837,8 @@ class _BarCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(ctx.rp(4)),
           gradient: LinearGradient(
             colors: c > 0
-                ? [const Color(0xFF22d3ee), const Color(0xFF3b82f6)]
-                : [const Color(0xFF1e293b), const Color(0xFF1e293b)],
+                ? [AppColors.cyanAlt, const Color(0xFF3b82f6)]
+                : [AppColors.surfaceSlate, AppColors.surfaceSlate],
             begin: Alignment.bottomCenter, end: Alignment.topCenter,
           ),
         ),
@@ -855,7 +856,7 @@ class _BarCard extends StatelessWidget {
       barTouchData: BarTouchData(
         enabled: true,
         touchTooltipData: BarTouchTooltipData(
-          getTooltipColor: (_) => const Color(0xFF1e293b),
+          getTooltipColor: (_) => AppColors.surfaceSlate,
           tooltipBorderRadius: BorderRadius.circular(ctx.rp(10)),
           tooltipPadding: EdgeInsets.symmetric(
               horizontal: ctx.rp(10), vertical: ctx.rs(8)),
@@ -863,7 +864,7 @@ class _BarCard extends StatelessWidget {
               BarTooltipItem(
             '${rod.toY.toInt()} alert${rod.toY == 1 ? '' : 's'}\n'
             '${labels[group.x]}',
-            TextStyle(color: const Color(0xFF22d3ee),
+            TextStyle(color: AppColors.cyanAlt,
                 fontWeight: FontWeight.bold, fontSize: fs),
           ),
         ),
@@ -883,7 +884,7 @@ class _BarCard extends StatelessWidget {
               return Padding(
                 padding: EdgeInsets.only(top: ctx.rs(6)),
                 child: Text(labels[i], style: TextStyle(
-                    color: const Color(0xFF64748b), fontSize: fs)));
+                    color: AppColors.textFaded, fontSize: fs)));
             },
           ),
         ),
@@ -894,7 +895,7 @@ class _BarCard extends StatelessWidget {
             getTitlesWidget: (v, _) {
               if (v == 0 || v == maxY) return const SizedBox.shrink();
               return Text('${v.toInt()}', style: TextStyle(
-                  color: const Color(0xFF64748b), fontSize: fs));
+                  color: AppColors.textFaded, fontSize: fs));
             },
           ),
         ),
@@ -902,7 +903,7 @@ class _BarCard extends StatelessWidget {
       gridData: FlGridData(
         show: true, drawVerticalLine: false, horizontalInterval: yi,
         getDrawingHorizontalLine: (_) => FlLine(
-            color: const Color(0xFF1e293b), strokeWidth: 1,
+            color: AppColors.surfaceSlate, strokeWidth: 1,
             dashArray: [3, 3]),
       ),
       borderData: FlBorderData(show: false),
@@ -949,14 +950,14 @@ class _StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dot = accentColor ??
-        (positive ? const Color(0xFF10b981) : const Color(0xFFfbbf24));
+        (positive ? AppColors.greenScore : AppColors.distracted);
 
     return Container(
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          color: const Color(0xFF0f172a),
+          color: AppColors.surfaceDark,
           borderRadius: BorderRadius.circular(context.rp(14)),
-          border: Border.all(color: const Color(0xFF1E2D45), width: 1),
+          border: Border.all(color: AppColors.divider, width: 1),
         ),
         padding: EdgeInsets.all(context.rp(12)),
         child: Column(
@@ -967,11 +968,11 @@ class _StatCard extends StatelessWidget {
               Container(
                 padding: EdgeInsets.all(context.rp(7)),
                 decoration: BoxDecoration(
-                    color: const Color(0xFF1e293b),
+                    color: AppColors.surfaceSlate,
                     borderRadius: BorderRadius.circular(context.rp(8))),
                 child: Icon(icon,
                     size: context.ri(17),
-                    color: const Color(0xFF22d3ee)),
+                    color: AppColors.cyanAlt),
               ),
               Container(
                 width:  context.ri(9),
@@ -994,7 +995,7 @@ class _StatCard extends StatelessWidget {
               SizedBox(height: context.rs(3)),
               Text(label, style: TextStyle(
                 fontSize: context.sp(10),
-                color: const Color(0xFF64748b),
+                color: AppColors.textFaded,
               ), maxLines: 2, overflow: TextOverflow.ellipsis),
             ]),
           ],
@@ -1018,7 +1019,7 @@ class _ChartModal extends StatelessWidget {
     return Container(
       height: h,
       decoration: BoxDecoration(
-        color: const Color(0xFF0D1627),
+        color: AppColors.surface,
         borderRadius: BorderRadius.vertical(
             top: Radius.circular(context.rp(24))),
       ),
@@ -1029,7 +1030,7 @@ class _ChartModal extends StatelessWidget {
           child: Container(
               width: context.rp(40), height: context.rs(4),
               decoration: BoxDecoration(
-                  color: const Color(0xFF1E2D45),
+                  color: AppColors.divider,
                   borderRadius: BorderRadius.circular(context.rp(2)))),
         )),
         Padding(
@@ -1043,7 +1044,7 @@ class _ChartModal extends StatelessWidget {
                     fontSize: context.sp(17), fontWeight: FontWeight.w700)),
                 SizedBox(height: context.rs(3)),
                 Text(subtitle, style: TextStyle(
-                    color: const Color(0xFF6B7A99),
+                    color: AppColors.textDim,
                     fontSize: context.sp(11))),
               ],
             )),
@@ -1052,16 +1053,16 @@ class _ChartModal extends StatelessWidget {
               child: Container(
                   width: context.ri(34), height: context.ri(34),
                   decoration: BoxDecoration(
-                      color: const Color(0xFF1A2235),
+                      color: AppColors.surfaceAlt,
                       shape: BoxShape.circle,
-                      border: Border.all(color: const Color(0xFF1E2D45))),
+                      border: Border.all(color: AppColors.divider)),
                   child: Icon(Icons.close_rounded,
                       color: const Color(0xFF94A3B8),
                       size: context.ri(18))),
             ),
           ]),
         ),
-        Divider(color: const Color(0xFF1E2D45).withValues(alpha: 0.6),
+        Divider(color: AppColors.divider.withValues(alpha: 0.6),
             height: context.rs(20)),
         Expanded(
           child: Padding(
@@ -1082,9 +1083,9 @@ class _ChartModal extends StatelessWidget {
 
 // ── SHARED HELPERS ────────────────────────────────────────────────────────────
 BoxDecoration _cardDecor(BuildContext ctx) => BoxDecoration(
-      color:        const Color(0xFF0f172a),
+      color:        AppColors.surfaceDark,
       borderRadius: BorderRadius.all(Radius.circular(ctx.rp(18))),
-      border: Border.all(color: const Color(0xFF1E2D45), width: 1),
+      border: Border.all(color: AppColors.divider, width: 1),
     );
 
 Widget _legend(BuildContext ctx, String label, Color c) => Row(children: [
@@ -1093,20 +1094,20 @@ Widget _legend(BuildContext ctx, String label, Color c) => Row(children: [
           decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
       SizedBox(width: ctx.rp(5)),
       Text(label, style: TextStyle(
-          fontSize: ctx.sp(11), color: const Color(0xFF94a3b8))),
+          fontSize: ctx.sp(11), color: AppColors.textMuted)),
     ]);
 
 Widget _expandBadge(BuildContext ctx) => Container(
       padding: EdgeInsets.symmetric(
           horizontal: ctx.rp(6), vertical: ctx.rs(3)),
       decoration: BoxDecoration(
-        color:        const Color(0xFF22d3ee).withValues(alpha: 0.1),
+        color:        AppColors.cyanAlt.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(ctx.rp(8)),
         border: Border.all(
-            color: const Color(0xFF22d3ee).withValues(alpha: 0.25)),
+            color: AppColors.cyanAlt.withValues(alpha: 0.25)),
       ),
       child: Icon(Icons.open_in_full_rounded,
-          color: const Color(0xFF22d3ee), size: ctx.ri(13)),
+          color: AppColors.cyanAlt, size: ctx.ri(13)),
     );
 
 // ── ANALYTICS SKELETON ────────────────────────────────────────────────────────
@@ -1116,7 +1117,7 @@ class _AnalyticsSkeleton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Shimmer.fromColors(
-      baseColor:      const Color(0xFF1A2235),
+      baseColor:      AppColors.surfaceAlt,
       highlightColor: const Color(0xFF263350),
       child: SingleChildScrollView(
         physics: const NeverScrollableScrollPhysics(),

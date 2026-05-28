@@ -4,8 +4,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
 class VideoClipService {
-  // Minimum free space required (50MB) before attempting to write
-  static const int _minFreeBytesRequired = 52428800;
 
   static Future<Directory> _clipsDir() async {
     final docs = await getApplicationDocumentsDirectory();
@@ -84,7 +82,6 @@ class VideoClipService {
     }
   }
 
-  /// Returns (destinationPath, errorReason). On success errorReason is null.
   static Future<(String?, String?)> exportToDownloads(String filePath) async {
     try {
       // ✅ Check disk space before export

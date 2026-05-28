@@ -208,10 +208,11 @@ The **Monitor tab** (tab index 1). This is the primary functional screen — it 
 
 #### Alert System
 
-| Alert level | Trigger condition | Action |
+| Alert level | Trigger condition (Medium sensitivity) | Action |
 |---|---|---|
-| Level 1 | 5 consecutive distracted/drowsy frames | Short audio chime, banner notification |
-| Level 2 | 10 consecutive distracted/drowsy frames | Louder looping alarm, persistent banner, video clip saved |
+| Level 1 | 3 consecutive distracted/drowsy frames (~0.45 s) | Short audio chime, slide-in banner (auto-dismisses) |
+| Level 2 | 6 consecutive frames (~0.9 s) | Same chime again, persistent banner, video clip saved |
+| Level 3 | 9 consecutive frames (~1.35 s) | Looping critical alarm, full-screen red overlay (manual dismiss required), video clip saved |
 
 - Audio is played via `audioplayers` with volume controlled by `volume_controller`.
 - Alert volume respects the user's setting from `PreferencesHelper`.
@@ -230,7 +231,8 @@ safetyScore = 100 − (totalPenalty / durationMin) × 10
 ```
 
 - Level 1 alert penalty: 2 points
-- Level 2 alert penalty: 5 points
+- Level 2 alert penalty: 4 points
+- Level 3 alert penalty: 8 points
 - `durationMin` is floored at 2.0 minutes to prevent short test sessions from scoring 0%
 - Result is clamped to [0, 100]
 
@@ -319,10 +321,11 @@ The **Settings tab** (tab index 4). Allows the user to configure app behavior.
 | Setting | Type | Description |
 |---|---|---|
 | Alert Volume | Slider (0–100%) | Controls the audio alert volume; adjusts system media volume via `volume_controller` |
-| Alert Sensitivity | Segmented (Low / Normal / High) | Adjusts frame-count thresholds for Level 1 and Level 2 alert triggers |
+| Alert Sensitivity | Segmented (Low / Medium / High) | Adjusts frame-count thresholds for Level 1, 2, and 3 alert triggers |
 | Auto-Start Recording | Toggle | Automatically starts a session when the app is opened |
 | Show Session Summary | Toggle | Controls whether the summary modal appears after stopping |
-| Data Retention | Segmented (7d / 30d / 90d / Forever) | Sessions older than the chosen period are deleted on app launch |
+| Session Retention | Dropdown (7d / 30d / 90d / Never) | Sessions older than the chosen period are deleted on next app launch |
+| Video Clip Expiry | Dropdown (7d / 30d / 90d / Never) | Video clips older than the chosen period are deleted on next app launch |
 | Clear Data | Destructive button | Wipes all sessions, alerts, logs, and video clips from the device |
 | About section | Info | Shows app version, build number, and developer credits |
 
@@ -471,7 +474,7 @@ A cached stream reference (`_cachedStream`) is held to avoid the EventChannel be
 
 **File:** `lib/core/services/video_clip_service.dart`
 
-Static utility class for managing video clip files generated when a Level 2 alert fires.
+Static utility class for managing video clip files generated when a Level 2 or Level 3 alert fires.
 
 **Methods:**
 - `saveClip(bytes, sessionId, alertType)` — writes the clip to `getApplicationDocumentsDirectory()/alert_clips/` with a timestamped filename and inserts a record into the database
@@ -548,19 +551,19 @@ Singleton that wraps all `SharedPreferences` read/write operations for user-conf
 
 | Preference key | Type | Default | Description |
 |---|---|---|---|
-| `alert_volume` | double | 0.85 | Alert audio volume (0.0–1.0) |
-| `alert_sensitivity` | String | `'normal'` | Detection sensitivity: `'low'`, `'normal'`, `'high'` |
+| `alert_volume` | double | 0.8 | Alert audio volume (0.0–1.0) |
+| `alert_sensitivity` | int | `1` | Detection sensitivity: `0` = Low, `1` = Medium (default), `2` = High |
 | `auto_start` | bool | false | Start recording automatically on app open |
 | `show_session_summary` | bool | true | Show summary modal after stopping |
-| `retention_period` | String | `'30d'` | Data retention: `'7d'`, `'30d'`, `'90d'`, `'forever'` |
-| `clear_glasses` | bool | false | Adjusted EAR thresholds for glasses wearers |
+| `session_retention` | String | `'30 days'` | Session auto-delete period: `'7 days'`, `'30 days'`, `'90 days'`, `'Never'` |
+| `clip_expiry` | String | `'30 days'` | Video clip auto-delete period: `'7 days'`, `'30 days'`, `'90 days'`, `'Never'` |
 | `onboarding_seen` | bool | false | Whether the onboarding walkthrough has been completed |
 | `camera_guide_seen` | bool | false | Whether the camera placement guide has been dismissed |
 
-**Sensitivity → threshold mapping** (used by `MonitorScreen`):
-- Low: Level 1 at 8 frames, Level 2 at 18 frames
-- Normal: Level 1 at 5 frames, Level 2 at 10 frames
-- High: Level 1 at 3 frames, Level 2 at 6 frames
+**Sensitivity → threshold mapping** `[L1, L2, L3]` frames (used by `MonitorScreen`):
+- Low (0): `[5, 10, 15]` → ~0.75 s / ~1.5 s / ~2.25 s
+- Medium (1): `[3, 6, 9]` → ~0.45 s / ~0.9 s / ~1.35 s
+- High (2): `[2, 4, 6]` → ~0.3 s / ~0.6 s / ~0.9 s
 
 ---
 
@@ -670,9 +673,11 @@ assets/
 ├── model/
 │   └── dms_hybridnet_v3_float32.tflite   ← AI model (float32, dual-input)
 ├── norm_params.json                        ← Feature normalization mean/scale values
-└── sounds/
-    ├── alert_level1.mp3                    ← Short chime for Level 1 alerts
-    └── alert_level2.mp3                    ← Looping alarm for Level 2 alerts
+├── L1_L2_sound.mp3                         ← Chime played for Level 1 and Level 2 alerts
+├── L3_critical_alert.wav                   ← Looping alarm played for Level 3 alerts
+├── bantay_drive_logo.png                   ← App logo (splash + onboarding)
+├── text_logo.png                           ← Text-only "Bantay Drive" logo variant
+└── car.png                                 ← Car illustration (dashboard / onboarding)
 ```
 
 **norm_params.json** — Contains the `mean` and `scale` arrays (one value per temporal feature dimension) used to z-score normalize the temporal input before feeding it to the model. These were computed from the training dataset.

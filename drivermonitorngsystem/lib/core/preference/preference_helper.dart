@@ -7,14 +7,14 @@
 //   • alert_volume        — how loud the L1/L2/L3 alert sounds play (0.0–1.0)
 //   • alert_sensitivity   — how quickly alerts trigger (Low/Medium/High)
 //   • auto_start          — whether recording starts automatically on app open
-//   • session_retention   — how long to keep session history (7/30/forever)
-//   • clear_glasses       — whether periocular occlusion mode is enabled
+//   • session_retention   — how long to keep session history (7/30/90/Never)
+//   • clip_expiry         — how long to keep video clips (7/30/90/Never)
 //   • onboarding_seen     — whether the user has completed onboarding
 //   • show_session_summary— whether the session summary modal is shown after a session
 //
 // CALLED BY:
 //   • settings_screen.dart  — reads and writes all preferences
-//   • monitor_screen.dart   — reads volume, sensitivity, autoStart, clearGlasses, showSessionSummary
+//   • monitor_screen.dart   — reads volume, sensitivity, autoStart, showSessionSummary
 //   • onboarding_screen.dart— reads/writes onboarding_seen
 //   • database_helper.dart  — retention value used by deleteSessionsOlderThan()
 import 'package:shared_preferences/shared_preferences.dart';
@@ -32,7 +32,7 @@ class PreferencesHelper {
   static const String _keyAlertSensitivity   = 'alert_sensitivity';
   static const String _keyAutoStart          = 'auto_start';
   static const String _keyRetention          = 'session_retention';
-  static const String _keyClearGlasses       = 'clear_glasses';
+  static const String _keyClipExpiry         = 'clip_expiry';
   static const String _keyOnboardingSeen     = 'onboarding_seen';
   static const String _keyShowSessionSummary = 'show_session_summary';
   static const String _keyCameraGuideSeen    = 'camera_guide_seen';
@@ -86,16 +86,6 @@ class PreferencesHelper {
   Future<void> setAutoStart(bool value) async =>
       (await _prefs()).setBool(_keyAutoStart, value);
 
-  /// Clear Glasses mode — adjusts periocular occlusion tolerance.
-  /// When true, the EAR threshold is relaxed slightly to account for
-  /// glasses frames partially occluding the eye region.
-  /// Default: false.
-  Future<bool> getClearGlasses() async =>
-      (await _prefs()).getBool(_keyClearGlasses) ?? false;
-
-  Future<void> setClearGlasses(bool value) async =>
-      (await _prefs()).setBool(_keyClearGlasses, value);
-
   /// Show Session Summary — if true, a summary modal is displayed after
   /// each drive session ends showing safety score, duration, and alert counts.
   /// Default: true — summary is shown by default.
@@ -107,7 +97,7 @@ class PreferencesHelper {
 
   // DATA & PRIVACY
 
-  /// Valid values: '7 days', '30 days', 'forever'
+  /// Valid values: '7 days', '30 days', '90 days', 'Never'
   /// Default: '30 days'
   ///
   /// settings_screen enforces this immediately on change by calling
@@ -115,22 +105,40 @@ class PreferencesHelper {
   Future<String> getRetention() async =>
       (await _prefs()).getString(_keyRetention) ?? '30 days';
 
-  Future<void> setRetention(String value) async {
-    const valid = {'7 days', '30 days', 'forever'};
-    if (!valid.contains(value)) return;
-    await (await _prefs()).setString(_keyRetention, value);
-  }
+  Future<void> setRetention(String value) async => _setPeriod(_keyRetention, value);
 
   /// Converts retention string to days integer for database queries.
-  /// Returns null for 'forever' (no deletion).
-  Future<int?> getRetentionDays() async {
-    final retention = await getRetention();
-    switch (retention) {
+  /// Returns null for 'Never' (no deletion).
+  Future<int?> getRetentionDays() async =>
+      periodToDays(await getRetention());
+
+  /// Converts a period string ('7 days', '30 days', '90 days', 'Never') to days.
+  /// Returns null for 'Never'.
+  static int? periodToDays(String period) {
+    switch (period) {
       case '7 days':  return 7;
       case '30 days': return 30;
-      default:        return null; // 'forever' → no deletion
+      case '90 days': return 90;
+      default:        return null;
     }
   }
+
+  /// Valid values: '7 days', '30 days', '90 days', 'Never'
+  /// Default: '30 days'
+  ///
+  /// settings_screen enforces this immediately on change by calling
+  /// DatabaseHelper.instance.deleteClipsOlderThan(days).
+  /// Only video clip files and their DB records are removed — sessions
+  /// and alert events are kept.
+  Future<String> getClipExpiry() async =>
+      (await _prefs()).getString(_keyClipExpiry) ?? '30 days';
+
+  Future<void> setClipExpiry(String value) async => _setPeriod(_keyClipExpiry, value);
+
+  /// Converts clip expiry string to days integer.
+  /// Returns null for 'Never' (no auto-deletion).
+  Future<int?> getClipExpiryDays() async =>
+      periodToDays(await getClipExpiry());
 
   // ONBOARDING
 
@@ -159,13 +167,20 @@ class PreferencesHelper {
     await prefs.setInt   (_keyAlertSensitivity,   1);
     await prefs.setBool  (_keyAutoStart,          false);
     await prefs.setString(_keyRetention,          '30 days');
-    await prefs.setBool  (_keyClearGlasses,       false);
+    await prefs.setString(_keyClipExpiry,         '30 days');
     await prefs.setBool  (_keyShowSessionSummary, true);
     // Note: onboarding_seen is intentionally NOT reset here
     // — user should not have to redo onboarding after a settings reset.
   }
 
   // PRIVATE
+
+  static const Set<String> _validPeriods = {'7 days', '30 days', '90 days', 'Never'};
+
+  Future<void> _setPeriod(String key, String value) async {
+    if (!_validPeriods.contains(value)) return;
+    await (await _prefs()).setString(key, value);
+  }
 
   /// Returns the cached SharedPreferences instance.
   /// Initialises once on first call — all subsequent calls return cache.

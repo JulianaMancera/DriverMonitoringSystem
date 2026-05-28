@@ -75,11 +75,11 @@ drivermonitorngsystem/
 |------|------|
 | `lib/screens/splash_screen.dart` | Animated splash screen on first launch showing Bantay Drive branding; transitions to onboarding or main app. |
 | `lib/screens/onboarding_screen.dart` | First-launch walkthrough introducing app features. Shown only once (persisted via SharedPreferences). |
-| `lib/screens/monitor_screen.dart` | **Core screen.** Live camera feed + real-time AI inference. Implements the 3-level escalating alert system (L1 = slide-in banner, L2 = persistent warning, L3 = full-screen blocking alarm). Manages session recording, foreground service, and PiP mode. |
+| `lib/screens/monitor_screen.dart` | **Core screen.** Live camera feed + real-time AI inference. Implements the 3-level escalating alert system (L1 = slide-in banner, L2 = persistent warning + video clip, L3 = full-screen blocking alarm + video clip). Manages session recording, foreground service, and PiP mode. |
 | `lib/screens/dashboard_screen.dart` | Home screen with circular Safety Score (0–100, color-coded), 4 stat cards (Total Drive Time, Alerts, Safety Streak, Avg Alertness), and a 30-day safety score line chart. Auto-refreshes every 30 seconds. |
 | `lib/screens/analytics_screen.dart` | Trend analysis with 7-day/30-day/all-time filters, summary cards, drowsiness vs. distraction daily line chart, and hourly alert distribution bar chart. |
-| `lib/screens/history_screen.dart` | Two-tab screen: **Session Logs** — date-grouped session list with search and filters (date range, detection type, alert level); tap a session to see alertness timeline, alert events, system log, and linked clips. **Video Logs** — all saved alert clips with thumbnail, duration, alert type; supports multi-select bulk export to Downloads, in-app playback (non-mirrored), and swipe-to-delete. |
-| `lib/screens/settings_screen.dart` | App configuration: alert volume slider, sensitivity (Low/Medium/High), auto-start toggle, show session summary toggle, data retention policy (7 Days/30 Days/90 Days/Forever), clear all history, and About section with authors. |
+| `lib/screens/history_screen.dart` | Chronological session list grouped by date, with search and filter chips (This Week, This Month, With Alerts, Safe Drives). Tap a session to see state breakdown, alert events (L1/L2/L3), and system logs. |
+| `lib/screens/settings_screen.dart` | App configuration: alert volume slider, sensitivity (Low/Medium/High), auto-start toggle, session retention (7 Days/30 Days/90 Days/Never), video clip expiry (7 Days/30 Days/90 Days/Never), clear all history, and About section with authors. |
 
 ---
 
@@ -89,7 +89,7 @@ drivermonitorngsystem/
 |------|------|
 | `lib/widgets/head_pose_indicator.dart` | Color-coded ring widget on the monitor screen (green/yellow/red/dashed) showing the driver's current head orientation (yaw/roll as angle and rotation) as real-time alignment feedback. |
 | `lib/widgets/exit.dart` | Exit confirmation dialog to prevent accidental app closure; stops the foreground service and clears recording state before exiting. |
-| `lib/utils/responsive.dart` | OEM-specific UI scaling utilities. Applies multipliers per brand: Samsung (0.95×), MIUI/OPPO/Vivo (0.97×), stock Android (1.0×) for text, padding, sizes, icons, and border radii. |
+| `lib/utils/responsive.dart` | OEM-specific UI scaling utilities. Applies multipliers per brand: Samsung (0.92×), MIUI/OPPO/Vivo (0.97×), stock Android (1.0×) for text, padding, sizes, icons, and border radii. |
 
 ---
 
@@ -97,7 +97,7 @@ drivermonitorngsystem/
 
 | File | Role |
 |------|------|
-| `assets/models/dms_hybridnet_v3_float32.tflite` | The TFLite model. Hybrid CNN-BiLSTM-Attention architecture combining EfficientNet-B0 (face), Eye MicroCNN (eyes), and MobileNetV3-Small (upper body) with BiLSTM temporal modeling and Multi-head Attention. Outputs 13 behavior classes from a 224×224 image + 25 geometric features. |
+| `assets/model/dms_hybridnet_v3_float32.tflite` | The TFLite model. Hybrid CNN-BiLSTM-Attention architecture combining EfficientNet-B0 (face), Eye MicroCNN (eyes), and MobileNetV3-Small (upper body) with BiLSTM temporal modeling and Multi-head Attention. Outputs 13 behavior classes from a 224×224 image + 25 geometric features. |
 | `assets/norm_params.json` | Mean and scale normalization parameters for the 25 input features (EAR, MAR, head pose, gaze, wrist/shoulder positions, temporal trends) — required before feeding features into the model. |
 | `assets/L1_L2_sound.mp3` | Audio alert used for Level 1 and Level 2 alerts. L1 plays it once; L2 plays it 3× consecutively via a dedicated secondary audio player (`_alarmPlayer`). |
 | `assets/L3_critical_alert.wav` | Looping alarm played during Level 3 full-screen blocking alert requiring manual dismissal. |
@@ -130,7 +130,7 @@ Input 1: 224×224 RGB face image
 Input 2: 25-dimensional feature vector
   (EAR, MAR, head pose, gaze, wrist/shoulder positions, temporal trends)
 
-Combined → BiLSTM (temporal modeling, 20-frame window)
+Combined → BiLSTM (temporal modeling, 30-frame window)
          → Multi-head Attention (occlusion-tolerant frame weighting)
          → 13-class softmax output
 ```
@@ -141,7 +141,7 @@ Combined → BiLSTM (temporal modeling, 20-frame window)
 |----------|---------|
 | **Natural** | Safe Driving, Talking to Passenger |
 | **Drowsy** | Yawning, Yawning (Occluded), Fatigue, Microsleep |
-| **Distracted** | Texting, Phone Call, Radio, Drinking, Body/Reaching, Grooming, Smoking |
+| **Distracted** | Texting, Phone Call, Radio, Drinking, Body Movement, Grooming, Smoking |
 
 ### Training Datasets
 
@@ -167,11 +167,10 @@ Combined → BiLSTM (temporal modeling, 20-frame window)
 | Feature | Implementation |
 |---------|---------------|
 | Real-Time Detection | DMS-HybridNet V3 TFLite model (224×224 RGB + 25 features) at ~5 FPS |
-| 3-Level Alert System | Escalating L1 → L2 → L3 with distinct audio and visual alerts |
-| Video Clip Recording | Auto-records 10-second alert clips on L2/L3; stored in app-private storage with export to Downloads |
+| 3-Level Alert System | L1 (chime + slide-in banner) → L2 (chime + persistent banner + video clip) → L3 (looping alarm + full-screen overlay + video clip) |
 | Background Monitoring | Android foreground service with persistent notification |
 | Picture-in-Picture | Monitoring continues in floating window when app is minimized |
-| Database | SQLite v4 with 6 tables for sessions, alerts, logs, snapshots, and video clips |
+| Database | SQLite with 6 tables for sessions, alerts, logs, snapshots, and video clips |
 | Analytics Dashboard | Safety score ring, trend charts, hourly distribution |
 | Session History | Two-tab view: session logs with search/filters + video logs with bulk export |
 | Sensitivity Control | Low / Medium / High with adjustable frame thresholds |

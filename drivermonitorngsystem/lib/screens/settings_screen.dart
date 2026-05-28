@@ -8,6 +8,7 @@ import '../core/database/database_helper.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
 import 'package:bantaydrive/core/database/db_change_notifier.dart';
 import '../utils/responsive.dart';
+import '../theme/app_colors.dart';
 import 'dart:async';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -17,14 +18,14 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
-  static const Color _bg            = Color(0xFF080E1A);
-  static const Color _surface       = Color(0xFF0D1627);
-  static const Color _surfaceAlt    = Color(0xFF1A2235);
-  static const Color _cyan          = Color(0xFF00D4FF);
-  static const Color _textPrimary   = Color(0xFFEEF2FF);
-  static const Color _textSecondary = Color(0xFF6B7A99);
-  static const Color _red           = Color(0xFFFF4757);
-  static const Color _divider       = Color(0xFF1E2D45);
+  static const Color _bg            = AppColors.bg;
+  static const Color _surface       = AppColors.surface;
+  static const Color _surfaceAlt    = AppColors.surfaceAlt;
+  static const Color _cyan          = AppColors.cyan;
+  static const Color _textPrimary   = AppColors.textPrimary;
+  static const Color _textSecondary = AppColors.textDim;
+  static const Color _red           = AppColors.red;
+  static const Color _divider       = AppColors.divider;
 
   bool   _isLoading           = true;
   double _alertVolume         = 0.8;
@@ -32,19 +33,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool   _autoStartEnabled    = false;
   bool   _showSessionSummary  = true;
   String _retentionPeriod     = '30 days';
+  String _clipExpiry          = '30 days';
   String _appVersion          = '';
 
   StreamSubscription<double>? _volumeSubscription;
   final ScrollController _scrollController = ScrollController();
   final GlobalKey        _authorsKey       = GlobalKey();
-
-  int? _retentionDays(String period) {
-    switch (period) {
-      case '7 days':  return 7;
-      case '30 days': return 30;
-      default:        return null;
-    }
-  }
 
   @override
   void initState() {
@@ -69,6 +63,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final autoStart    = await prefs.getAutoStart();
     final showSummary  = await prefs.getShowSessionSummary();
     final retention    = await prefs.getRetention();
+    final clipExpiry   = await prefs.getClipExpiry();
     final systemVolume = await VolumeController.instance.getVolume();
     String version     = 'v1.0.0';
     try {
@@ -82,6 +77,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _autoStartEnabled   = autoStart;
         _showSessionSummary = showSummary;
         _retentionPeriod    = retention;
+        _clipExpiry         = clipExpiry;
         _appVersion         = version;
         _isLoading          = false;
       });
@@ -188,14 +184,32 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               title: 'Session Retention',
               subtitle: 'Auto-delete sessions older than selected period',
               value: _retentionPeriod,
-              options: const ['7 days', '30 days', 'Forever'],
+              options: const ['7 days', '30 days', '90 days', 'Never'],
               onChanged: (v) async {
                 if (v == null) return;
                 setState(() => _retentionPeriod = v);
                 await PreferencesHelper.instance.setRetention(v);
-                final days = _retentionDays(v);
+                final days = PreferencesHelper.periodToDays(v);
                 if (days != null) {
                   await DatabaseHelper.instance.deleteSessionsOlderThan(days);
+                  ref.read(dbChangeCounterProvider.notifier).increment();
+                }
+              },
+            ),
+            _dividerLine(),
+            _dropdownTile(
+              icon: Icons.video_library_rounded, iconColor: _cyan,
+              title: 'Video Clip Expiry',
+              subtitle: 'Auto-delete saved clips older than selected period',
+              value: _clipExpiry,
+              options: const ['7 days', '30 days', '90 days', 'Never'],
+              onChanged: (v) async {
+                if (v == null) return;
+                setState(() => _clipExpiry = v);
+                await PreferencesHelper.instance.setClipExpiry(v);
+                final days = PreferencesHelper.periodToDays(v);
+                if (days != null) {
+                  await DatabaseHelper.instance.deleteClipsOlderThan(days);
                   ref.read(dbChangeCounterProvider.notifier).increment();
                 }
               },

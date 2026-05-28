@@ -96,7 +96,7 @@ const Map<int, double> _kBehaviorClassThresholds = {
   12: 8.0,  // drowsy_microsleep
 };
 
-// 200 ms gap ≈ 5 FPS inference; camera preview runs unaffected.
+// Inference gap: 200ms ≈ 5 FPS inference, camera preview unaffected.
 const int _kMinInferenceGapMs = 200;
 
 // ── InferenceResult ───────────────────────────────────────────────────────────
@@ -527,6 +527,52 @@ class TfliteService {
       }
     }
 
+    // When the top two distracted classes are within 12% of each other the model
+    // is uncertain. Use gaze zone and head pitch to break the tie rather than
+    // letting raw probability noise pick the winner.
+    {
+      double secondDistScore = 0.0;
+      int    secondDistIdx   = bestDistIdx;
+      for (int i = 2; i <= 8; i++) {
+        if (i == bestDistIdx) continue;
+        final pct = probs[i] * 100.0;
+        if (pct > secondDistScore) { secondDistScore = pct; secondDistIdx = i; }
+      }
+
+      if (secondDistScore >= bestDistScore - 12.0) {
+        // LAP gaze → phone/texting more likely than radio, grooming, or body
+        if (gazeZone == 1 /* LAP */ &&
+            (bestDistIdx == 4 || bestDistIdx == 6 || bestDistIdx == 7)) {
+          final tScore = probs[2] * 100.0;
+          final pScore = probs[3] * 100.0;
+          final alt    = tScore >= pScore ? 2 : 3;
+          final altS   = math.max(tScore, pScore);
+          if (altS >= (_kBehaviorClassThresholds[alt] ?? 15.0) &&
+              altS >= bestDistScore - 15.0) {
+            bestDistIdx = alt; bestDistScore = altS;
+          }
+        }
+
+        // LEFT/RIGHT gaze (not mirror) → body distraction over phone/texting
+        if ((gazeZone == 2 /* LEFT */ || gazeZone == 4 /* RIGHT */) &&
+            (bestDistIdx == 2 || bestDistIdx == 3)) {
+          final bodyS = probs[6] * 100.0;
+          if (bodyS >= (_kBehaviorClassThresholds[6] ?? 50.0) &&
+              bodyS >= bestDistScore - 12.0) {
+            bestDistIdx = 6; bestDistScore = bodyS;
+          }
+        }
+
+        // Phone vs texting tie: head pitch disambiguates the look angle.
+        // Texting = face angled more downward (pitch < –15°), phone = more level.
+        if ((bestDistIdx == 2 && secondDistIdx == 3) ||
+            (bestDistIdx == 3 && secondDistIdx == 2)) {
+          bestDistIdx   = _facePitch < -15.0 ? 2 : 3;
+          bestDistScore = probs[bestDistIdx] * 100.0;
+        }
+      }
+    }
+
     final finalClassMinThreshold = _kBehaviorClassThresholds[bestDistIdx] ?? 5.0;
     final finalBestDistMeetsMin  = bestDistScore >= finalClassMinThreshold;
 
@@ -560,7 +606,7 @@ class TfliteService {
           (_classScoreAccum[bestDistIdx] ?? 0.0) + bestDistScore;
       _classScoreFrames++;
 
-      if (_classScoreFrames >= 3) {
+      if (_classScoreFrames >= 5) {
         int dominantIdx = bestDistIdx;
         double dominantScore = 0.0;
         _classScoreAccum.forEach((idx, score) {
