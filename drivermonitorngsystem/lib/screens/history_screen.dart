@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/database/database_helper.dart';
 import '../core/database/db_change_notifier.dart';
 import '../core/services/video_clip_service.dart';
+import '../theme/app_colors.dart';
 
 class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
@@ -15,16 +16,16 @@ class HistoryScreen extends ConsumerStatefulWidget {
 
 class _HistoryScreenState extends ConsumerState<HistoryScreen>
     with SingleTickerProviderStateMixin {
-  static const Color _bg = Color(0xFF080E1A);
-  static const Color _surface = Color(0xFF0D1627);
-  static const Color _surfaceAlt = Color(0xFF1A2235);
-  static const Color _cyan = Color(0xFF00D4FF);
-  static const Color _green = Color(0xFF00FF88);
-  static const Color _drowsy = Colors.red;
-  static const Color _distracted = Color(0xFFfbbf24);
-  static const Color _textPrimary = Color(0xFFEEF2FF);
-  static const Color _textDim = Color(0xFF6B7A99);
-  static const Color _divider = Color(0xFF1E2D45);
+  static const Color _bg          = AppColors.bg;
+  static const Color _surface     = AppColors.surface;
+  static const Color _surfaceAlt  = AppColors.surfaceAlt;
+  static const Color _cyan        = AppColors.cyan;
+  static const Color _green       = AppColors.green;
+  static const Color _drowsy      = AppColors.drowsy;
+  static const Color _distracted  = AppColors.distracted;
+  static const Color _textPrimary = AppColors.textPrimary;
+  static const Color _textDim     = AppColors.textDim;
+  static const Color _divider     = AppColors.divider;
 
   late TabController _tabController;
 
@@ -90,6 +91,25 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
     }
   }
 
+  static List<Map<String, dynamic>> _applyDateRange(
+    List<Map<String, dynamic>> items, {
+    required String dateField,
+    required DateTime? rangeStart,
+    required DateTime? rangeEnd,
+  }) {
+    if (rangeStart == null) return items;
+    final start = DateTime(rangeStart.year, rangeStart.month, rangeStart.day);
+    final end = rangeEnd != null
+        ? DateTime(rangeEnd.year, rangeEnd.month, rangeEnd.day, 23, 59, 59)
+        : DateTime(start.year, start.month, start.day, 23, 59, 59);
+    return items.where((item) {
+      final d = DateTime.tryParse(item[dateField] ?? '')?.toLocal();
+      return d != null &&
+          d.isAfter(start.subtract(const Duration(seconds: 1))) &&
+          d.isBefore(end.add(const Duration(seconds: 1)));
+    }).toList();
+  }
+
   void _applyFilter() {
     final query = _searchCtrl.text.toLowerCase().trim();
     List<Map<String, dynamic>> result = List.from(_sessions);
@@ -127,20 +147,10 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
       }).toList();
     }
 
-    if (_dateRangeStart != null) {
-      final start = DateTime(
-          _dateRangeStart!.year, _dateRangeStart!.month, _dateRangeStart!.day);
-      final end = _dateRangeEnd != null
-          ? DateTime(_dateRangeEnd!.year, _dateRangeEnd!.month,
-              _dateRangeEnd!.day, 23, 59, 59)
-          : DateTime(start.year, start.month, start.day, 23, 59, 59);
-      result = result.where((s) {
-        final d = DateTime.tryParse(s['started_at'] ?? '')?.toLocal();
-        return d != null &&
-            d.isAfter(start.subtract(const Duration(seconds: 1))) &&
-            d.isBefore(end.add(const Duration(seconds: 1)));
-      }).toList();
-    }
+    result = _applyDateRange(result,
+        dateField: 'started_at',
+        rangeStart: _dateRangeStart,
+        rangeEnd: _dateRangeEnd);
 
     if (_detectionFilter.isNotEmpty) {
       result = result.where((s) {
@@ -163,20 +173,10 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
   void _applyVideoFilter() {
     List<Map<String, dynamic>> result = List.from(_clips);
 
-    if (_videoDateRangeStart != null) {
-      final start = DateTime(_videoDateRangeStart!.year,
-          _videoDateRangeStart!.month, _videoDateRangeStart!.day);
-      final end = _videoDateRangeEnd != null
-          ? DateTime(_videoDateRangeEnd!.year, _videoDateRangeEnd!.month,
-              _videoDateRangeEnd!.day, 23, 59, 59)
-          : DateTime(start.year, start.month, start.day, 23, 59, 59);
-      result = result.where((c) {
-        final d = DateTime.tryParse(c['created_at'] ?? '')?.toLocal();
-        return d != null &&
-            d.isAfter(start.subtract(const Duration(seconds: 1))) &&
-            d.isBefore(end.add(const Duration(seconds: 1)));
-      }).toList();
-    }
+    result = _applyDateRange(result,
+        dateField: 'created_at',
+        rangeStart: _videoDateRangeStart,
+        rangeEnd: _videoDateRangeEnd);
 
     if (_videoDetectionFilter.isNotEmpty) {
       result = result.where((c) {
@@ -227,7 +227,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
           constraints:
               BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.72),
           decoration: const BoxDecoration(
-            color: Color(0xFF0D1627),
+            color: AppColors.surface,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -486,7 +486,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) => Container(
           decoration: const BoxDecoration(
-            color: Color(0xFF0D1627),
+            color: AppColors.surface,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
           padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
@@ -721,7 +721,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) => Container(
           decoration: const BoxDecoration(
-            color: Color(0xFF0D1627),
+            color: AppColors.surface,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
           padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
@@ -1759,13 +1759,13 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen>
                     style: TextStyle(color: Colors.white)),
                 content: const Text(
                     'This will permanently delete the video clip from your device.',
-                    style: TextStyle(color: Color(0xFF94a3b8))),
+                    style: TextStyle(color: AppColors.textMuted)),
                 actions: [
                   TextButton(
                       onPressed: () => Navigator.of(context).pop(false),
                       child: const Text('Cancel',
                           style:
-                              TextStyle(color: Color(0xFF64748b)))),
+                              TextStyle(color: AppColors.textFaded))),
                   TextButton(
                       onPressed: () => Navigator.of(context).pop(true),
                       child: const Text('Delete',
@@ -2031,7 +2031,7 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
             padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
             child: Row(children: [
               const Icon(Icons.videocam_rounded,
-                  color: Color(0xFF00D4FF), size: 18),
+                  color: AppColors.cyan, size: 18),
               const SizedBox(width: 8),
               Expanded(
                 child: Column(
@@ -2046,7 +2046,7 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
                     Text(
                       _formatDateMDY(widget.createdAt),
                       style: const TextStyle(
-                          color: Color(0xFF6B7A99),
+                          color: AppColors.textDim,
                           fontSize: 11),
                     ),
                   ],
@@ -2123,7 +2123,7 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
                                   _controller,
                                   allowScrubbing: true,
                                   colors: const VideoProgressColors(
-                                    playedColor: Color(0xFF00D4FF),
+                                    playedColor: AppColors.cyan,
                                     bufferedColor: Colors.white24,
                                     backgroundColor: Colors.white12,
                                   ),
@@ -2134,7 +2134,7 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
                             ])
                           : const Center(
                               child: CircularProgressIndicator(
-                                  color: Color(0xFF00D4FF))),
+                                  color: AppColors.cyan)),
                 ),
                 // Session number moved to bottom
                 Container(
@@ -2142,7 +2142,7 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 16, vertical: 10),
                   decoration: const BoxDecoration(
-                    color: Color(0xFF0D1627),
+                    color: AppColors.surface,
                     borderRadius: BorderRadius.only(
                       bottomLeft: Radius.circular(16),
                       bottomRight: Radius.circular(16),
@@ -2150,12 +2150,12 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
                   ),
                   child: Row(children: [
                     const Icon(Icons.folder_outlined,
-                        color: Color(0xFF6B7A99), size: 13),
+                        color: AppColors.textDim, size: 13),
                     const SizedBox(width: 6),
                     Text(
                       'Session #${widget.sessionId}',
                       style: const TextStyle(
-                          color: Color(0xFF6B7A99),
+                          color: AppColors.textDim,
                           fontSize: 11,
                           fontWeight: FontWeight.w500),
                     ),
@@ -2182,16 +2182,16 @@ class _SessionDetailSheet extends StatefulWidget {
 
 class _SessionDetailSheetState extends State<_SessionDetailSheet>
     with SingleTickerProviderStateMixin {
-  static const Color _sheetBg = Color(0xFF0D1627);
-  static const Color _surfaceAlt = Color(0xFF1A2235);
-  static const Color _cyan = Color(0xFF00D4FF);
-  static const Color _green = Color(0xFF00FF88);
-  static const Color _drowsy = Colors.red;
-  static const Color _distracted = Color(0xFFfbbf24);
-  static const Color _textPrimary = Color(0xFFEEF2FF);
-  static const Color _textMuted = Color(0xFF94A3B8);
-  static const Color _textDim = Color(0xFF6B7A99);
-  static const Color _divider = Color(0xFF1E2D45);
+  static const Color _sheetBg     = AppColors.surface;
+  static const Color _surfaceAlt  = AppColors.surfaceAlt;
+  static const Color _cyan        = AppColors.cyan;
+  static const Color _green       = AppColors.green;
+  static const Color _drowsy      = AppColors.drowsy;
+  static const Color _distracted  = AppColors.distracted;
+  static const Color _textPrimary = AppColors.textPrimary;
+  static const Color _textMuted   = AppColors.textMuted;
+  static const Color _textDim     = AppColors.textDim;
+  static const Color _divider     = AppColors.divider;
 
   bool _loading = true;
   Map<String, dynamic>? _counts;

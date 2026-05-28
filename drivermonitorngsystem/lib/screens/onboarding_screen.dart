@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../utils/responsive.dart';
 import 'package:bantaydrive/core/preference/preference_helper.dart';
+import '../theme/app_colors.dart';
 
 /// Shows only on the very first app launch.
 /// Call [OnboardingScreen.markSeen] after the user completes it.
@@ -35,25 +36,25 @@ class _OnboardingScreenState extends State<OnboardingScreen>
       icon: Icons.videocam_rounded,
       title: 'Live Monitoring',
       subtitle: 'Real-time dashcam feed with AI-powered driver alertness detection — always watching, always aware.',
-      accent: Color(0xFF00D4FF),
+      accent: AppColors.cyan,
     ),
     _OnboardingPage(
       icon: Icons.bar_chart_rounded,
       title: 'Drive Analytics',
       subtitle: 'Review your trips with detailed logs, speed graphs, and safety scores every time you park.',
-      accent: Color(0xFF00D4FF),
+      accent: AppColors.cyan,
     ),
     _OnboardingPage(
       icon: Icons.notifications_active_rounded,
       title: 'Instant Alerts',
       subtitle: 'Drowsiness, distraction, and harsh-braking alerts delivered instantly — before it becomes a risk.',
-      accent: Color(0xFF00D4FF),
+      accent: AppColors.cyan,
     ),
     _OnboardingPage(
       icon: Icons.history_rounded,
       title: 'Trip History',
       subtitle: 'Every journey stored safely on-device. Browse, filter, and replay any drive from your history.',
-      accent: Color(0xFF00D4FF),
+      accent: AppColors.cyan,
     ),
   ];
 
@@ -95,7 +96,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     return FadeTransition(
       opacity: _fadeAnim,
       child: Scaffold(
-        backgroundColor: const Color(0xFF080E1A),
+        backgroundColor: AppColors.bg,
         // Prevent the onboarding from being affected by keyboard or
         // system UI insets that could cause layout shifts
         resizeToAvoidBottomInset: false,
@@ -117,7 +118,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                 decoration: BoxDecoration(
                   gradient: RadialGradient(
                     colors: [
-                      const Color(0xFF00D4FF).withValues(alpha: 0.07),
+                      AppColors.cyan.withValues(alpha: 0.07),
                       Colors.transparent,
                     ],
                     radius: 0.8,
@@ -142,15 +143,15 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                               width: context.ri(28),
                               height: context.ri(28),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF00D4FF).withValues(alpha: 0.12),
+                                color: AppColors.cyan.withValues(alpha: 0.12),
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border.all(
-                                  color: const Color(0xFF00D4FF).withValues(alpha: 0.3),
+                                  color: AppColors.cyan.withValues(alpha: 0.3),
                                   width: 1,
                                 ),
                               ),
                               child: const Icon(Icons.show_chart,
-                                  size: 18, color: Color(0xFF00D4FF)),
+                                  size: 18, color: AppColors.cyan),
                             ),
                             SizedBox(width: context.rp(8)),
                             RichText(
@@ -168,7 +169,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                                   TextSpan(
                                     text: 'DRIVE',
                                     style: TextStyle(
-                                      color: Color(0xFF00D4FF),
+                                      color: AppColors.cyan,
                                       fontSize: context.sp(13),
                                       fontWeight: FontWeight.w700,
                                       letterSpacing: 2,
@@ -225,7 +226,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                                       height: 6,
                                       decoration: BoxDecoration(
                                         color: i == _currentPage
-                                            ? const Color(0xFF00D4FF)
+                                            ? AppColors.cyan
                                             : Colors.white.withValues(alpha: 0.15),
                                         borderRadius: BorderRadius.circular(3),
                                       ),
@@ -242,12 +243,12 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                                       duration: const Duration(milliseconds: 280),
                                       decoration: BoxDecoration(
                                         gradient: const LinearGradient(
-                                          colors: [Color(0xFF00B8D9), Color(0xFF00D4FF)],
+                                          colors: [Color(0xFF00B8D9), AppColors.cyan],
                                         ),
                                         borderRadius: BorderRadius.circular(14),
                                         boxShadow: [
                                           BoxShadow(
-                                            color: const Color(0xFF00D4FF).withValues(alpha: 0.25),
+                                            color: AppColors.cyan.withValues(alpha: 0.25),
                                             blurRadius: 20,
                                             offset: const Offset(0, 6),
                                           ),
@@ -262,7 +263,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                                                   ? 'Next'
                                                   : 'Get Started',
                                               style: TextStyle(
-                                                color: Color(0xFF080E1A),
+                                                color: AppColors.bg,
                                                 fontSize: context.sp(16),
                                                 fontWeight: FontWeight.w700,
                                                 letterSpacing: 0.5,
@@ -273,7 +274,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                                               _currentPage < _pages.length - 1
                                                   ? Icons.arrow_forward_rounded
                                                   : Icons.check_rounded,
-                                              color: const Color(0xFF080E1A),
+                                              color: AppColors.bg,
                                               size: 18,
                                             ),
                                           ],
@@ -393,7 +394,7 @@ class _OnboardingPageWidgetState extends State<_OnboardingPageWidget>
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             gradient: RadialGradient(colors: [
-                              const Color(0xFF00D4FF).withValues(alpha: 0.10),
+                              AppColors.cyan.withValues(alpha: 0.10),
                               Colors.transparent,
                             ]),
                           ),
@@ -402,14 +403,14 @@ class _OnboardingPageWidgetState extends State<_OnboardingPageWidget>
                           width: iconMid, height: iconMid,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: const Color(0xFF0D1627),
+                            color: AppColors.surface,
                             border: Border.all(
-                              color: const Color(0xFF00D4FF).withValues(alpha: 0.18),
+                              color: AppColors.cyan.withValues(alpha: 0.18),
                               width: 1.5,
                             ),
                             boxShadow: [
                               BoxShadow(
-                                color: const Color(0xFF00D4FF).withValues(alpha: 0.08),
+                                color: AppColors.cyan.withValues(alpha: 0.08),
                                 blurRadius: 30, spreadRadius: 4,
                               ),
                             ],
@@ -419,10 +420,10 @@ class _OnboardingPageWidgetState extends State<_OnboardingPageWidget>
                           width: iconInner, height: iconInner,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: const Color(0xFF00D4FF).withValues(alpha: 0.12),
+                            color: AppColors.cyan.withValues(alpha: 0.12),
                           ),
                           child: Icon(widget.page.icon,
-                              size: iconSize, color: const Color(0xFF00D4FF)),
+                              size: iconSize, color: AppColors.cyan),
                         ),
                       ],
                     ),
@@ -479,7 +480,7 @@ class _OnboardingPageWidgetState extends State<_OnboardingPageWidget>
                       child: Container(
                         width: 40, height: 2,
                         decoration: BoxDecoration(
-                          color: const Color(0xFF00D4FF).withValues(alpha: 0.5),
+                          color: AppColors.cyan.withValues(alpha: 0.5),
                           borderRadius: BorderRadius.circular(1),
                         ),
                       ),
