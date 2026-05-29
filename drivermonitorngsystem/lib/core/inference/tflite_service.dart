@@ -80,6 +80,18 @@ const int    _kDistThreshLow = 22;   // ~4.4 s
 // ── Per-class minimum thresholds (set above observed noise floor) ─────────────
 // Side-mount geometry inflates noise for grooming/radio/texting.
 // Thresholds are tuned to sit between noise peaks and real-action peaks.
+// ── Distraction class indices ─────────────────────────────────────────────────
+const int _kIdxTexting  = 2;
+const int _kIdxPhone    = 3;
+const int _kIdxRadio    = 4;
+const int _kIdxBody     = 6;
+const int _kIdxGrooming = 7;
+
+// ── Gaze zone indices ─────────────────────────────────────────────────────────
+const int _kGazeLap   = 1;
+const int _kGazeLeft  = 2;
+const int _kGazeRight = 4;
+
 const Map<int, double> _kBehaviorClassThresholds = {
   0: 40.0,  // safe_driving
   1: 15.0,  // talking_passenger
@@ -541,11 +553,11 @@ class TfliteService {
 
       if (secondDistScore >= bestDistScore - 12.0) {
         // LAP gaze → phone/texting more likely than radio, grooming, or body
-        if (gazeZone == 1 /* LAP */ &&
-            (bestDistIdx == 4 || bestDistIdx == 6 || bestDistIdx == 7)) {
-          final tScore = probs[2] * 100.0;
-          final pScore = probs[3] * 100.0;
-          final alt    = tScore >= pScore ? 2 : 3;
+        if (gazeZone == _kGazeLap &&
+            (bestDistIdx == _kIdxRadio || bestDistIdx == _kIdxBody || bestDistIdx == _kIdxGrooming)) {
+          final tScore = probs[_kIdxTexting] * 100.0;
+          final pScore = probs[_kIdxPhone] * 100.0;
+          final alt    = tScore >= pScore ? _kIdxTexting : _kIdxPhone;
           final altS   = math.max(tScore, pScore);
           if (altS >= (_kBehaviorClassThresholds[alt] ?? 15.0) &&
               altS >= bestDistScore - 15.0) {
@@ -554,20 +566,20 @@ class TfliteService {
         }
 
         // LEFT/RIGHT gaze (not mirror) → body distraction over phone/texting
-        if ((gazeZone == 2 /* LEFT */ || gazeZone == 4 /* RIGHT */) &&
-            (bestDistIdx == 2 || bestDistIdx == 3)) {
-          final bodyS = probs[6] * 100.0;
-          if (bodyS >= (_kBehaviorClassThresholds[6] ?? 50.0) &&
+        if ((gazeZone == _kGazeLeft || gazeZone == _kGazeRight) &&
+            (bestDistIdx == _kIdxTexting || bestDistIdx == _kIdxPhone)) {
+          final bodyS = probs[_kIdxBody] * 100.0;
+          if (bodyS >= (_kBehaviorClassThresholds[_kIdxBody] ?? 50.0) &&
               bodyS >= bestDistScore - 12.0) {
-            bestDistIdx = 6; bestDistScore = bodyS;
+            bestDistIdx = _kIdxBody; bestDistScore = bodyS;
           }
         }
 
         // Phone vs texting tie: head pitch disambiguates the look angle.
         // Texting = face angled more downward (pitch < –15°), phone = more level.
-        if ((bestDistIdx == 2 && secondDistIdx == 3) ||
-            (bestDistIdx == 3 && secondDistIdx == 2)) {
-          bestDistIdx   = _facePitch < -15.0 ? 2 : 3;
+        if ((bestDistIdx == _kIdxTexting && secondDistIdx == _kIdxPhone) ||
+            (bestDistIdx == _kIdxPhone && secondDistIdx == _kIdxTexting)) {
+          bestDistIdx   = _facePitch < -15.0 ? _kIdxTexting : _kIdxPhone;
           bestDistScore = probs[bestDistIdx] * 100.0;
         }
       }
