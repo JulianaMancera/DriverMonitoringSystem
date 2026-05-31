@@ -627,7 +627,7 @@ class _DayBreakdownModalState extends State<_DayBreakdownModal> {
                       shape: BoxShape.circle,
                       border: Border.all(color: AppColors.divider)),
                   child: Icon(Icons.close_rounded,
-                      color: const Color(0xFF94A3B8),
+                      color: AppColors.textMuted,
                       size: context.ri(18))),
             ),
           ]),
@@ -726,7 +726,7 @@ class _TypeRow extends StatelessWidget {
               if (l1 > 0) _pill(context, 'L1', l1, AppColors.amber),
               if (l1 > 0 && (l2 > 0 || l3 > 0))
                 SizedBox(width: context.rp(6)),
-              if (l2 > 0) _pill(context, 'L2', l2, const Color(0xFFef8c34)),
+              if (l2 > 0) _pill(context, 'L2', l2, AppColors.l2Alert),
               if (l2 > 0 && l3 > 0) SizedBox(width: context.rp(6)),
               if (l3 > 0) _pill(context, 'L3', l3, AppColors.redAlert),
               if (l1 == 0 && l2 == 0 && l3 == 0)
@@ -837,7 +837,7 @@ class _BarCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(ctx.rp(4)),
           gradient: LinearGradient(
             colors: c > 0
-                ? [AppColors.cyanAlt, const Color(0xFF3b82f6)]
+                ? [AppColors.cyanAlt, AppColors.barBlue]
                 : [AppColors.surfaceSlate, AppColors.surfaceSlate],
             begin: Alignment.bottomCenter, end: Alignment.topCenter,
           ),
@@ -990,7 +990,7 @@ class _StatCard extends StatelessWidget {
               Text(value, style: TextStyle(
                 fontSize: context.sp(22),
                 fontWeight: FontWeight.bold,
-                color: const Color(0xFFe2e8f0),
+                color: AppColors.textBright,
               )),
               SizedBox(height: context.rs(3)),
               Text(label, style: TextStyle(
@@ -1057,7 +1057,7 @@ class _ChartModal extends StatelessWidget {
                       shape: BoxShape.circle,
                       border: Border.all(color: AppColors.divider)),
                   child: Icon(Icons.close_rounded,
-                      color: const Color(0xFF94A3B8),
+                      color: AppColors.textMuted,
                       size: context.ri(18))),
             ),
           ]),
@@ -1118,7 +1118,7 @@ class _AnalyticsSkeleton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Shimmer.fromColors(
       baseColor:      AppColors.surfaceAlt,
-      highlightColor: const Color(0xFF263350),
+      highlightColor: AppColors.shimmerHighlight,
       child: SingleChildScrollView(
         physics: const NeverScrollableScrollPhysics(),
         padding: EdgeInsets.only(bottom: context.rs(32)),

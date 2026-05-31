@@ -355,11 +355,11 @@ class _BottomNav extends StatelessWidget {
   const _BottomNav({required this.currentIndex, required this.onTap});
 
   static const List<_NavData> _items = [
-    _NavData(Icons.home_rounded),
-    _NavData(Icons.videocam_rounded),
-    _NavData(Icons.bar_chart_rounded),
-    _NavData(Icons.history_rounded),
-    _NavData(Icons.settings_rounded),
+    _NavData(Icons.home_rounded,     'Home'),
+    _NavData(Icons.videocam_rounded, 'Monitor'),
+    _NavData(Icons.bar_chart_rounded,'Analytics'),
+    _NavData(Icons.history_rounded,  'History'),
+    _NavData(Icons.settings_rounded, 'Settings'),
   ];
 
   @override
@@ -422,24 +422,30 @@ class _BottomNav extends StatelessWidget {
                       final i = entry.key;
                       final item = entry.value;
                       final active = i == currentIndex;
-                      return GestureDetector(
-                        onTap: () => onTap(i),
-                        behavior: HitTestBehavior.opaque,
-                        child: SizedBox(
-                          width: itemWidth,
-                          height: context.rs(54),
-                          child: Center(
-                            child: AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 200),
-                              transitionBuilder: (child, anim) =>
-                                  ScaleTransition(scale: anim, child: child),
-                              child: Icon(
-                                item.icon,
-                                key: ValueKey('nav_${i}_$active'),
-                                size: active ? context.ri(24) : context.ri(22),
-                                color: active
-                                    ? AppColors.cyan
-                                    : Colors.white38,
+                      return Semantics(
+                        label: item.label,
+                        button: true,
+                        selected: active,
+                        child: GestureDetector(
+                          onTap: () => onTap(i),
+                          behavior: HitTestBehavior.opaque,
+                          child: SizedBox(
+                            width: itemWidth,
+                            height: context.rs(54),
+                            child: Center(
+                              child: AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 200),
+                                transitionBuilder: (child, anim) =>
+                                    ScaleTransition(scale: anim, child: child),
+                                child: Icon(
+                                  item.icon,
+                                  key: ValueKey('nav_${i}_$active'),
+                                  size: active ? context.ri(24) : context.ri(22),
+                                  color: active
+                                      ? AppColors.cyan
+                                      : Colors.white38,
+                                  semanticLabel: '',
+                                ),
                               ),
                             ),
                           ),
@@ -459,5 +465,6 @@ class _BottomNav extends StatelessWidget {
 
 class _NavData {
   final IconData icon;
-  const _NavData(this.icon);
+  final String label;
+  const _NavData(this.icon, this.label);
 }
