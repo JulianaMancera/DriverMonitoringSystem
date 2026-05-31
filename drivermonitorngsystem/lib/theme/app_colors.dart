@@ -21,10 +21,12 @@ abstract final class AppColors {
   // ── Alerts ────────────────────────────────────────────────────────────────────
   static const Color red         = Color(0xFFFF4757);
   static const Color redAlert    = Color(0xFFEF4444);
+  static const Color l2Alert     = Color(0xFFEF8C34);
   static const Color drowsy      = Colors.red;
 
   // ── Text ──────────────────────────────────────────────────────────────────────
   static const Color textPrimary    = Color(0xFFEEF2FF);
+  static const Color textBright     = Color(0xFFE2E8F0);
   static const Color textMuted      = Color(0xFF94A3B8);
   static const Color textDim        = Color(0xFF6B7A99);
   static const Color textFaded      = Color(0xFF64748B);
@@ -32,5 +34,9 @@ abstract final class AppColors {
   static const Color textSlateLight = Color(0xFFCBD5E1);
 
   // ── Divider ───────────────────────────────────────────────────────────────────
-  static const Color divider     = Color(0xFF1E2D45);
+  static const Color divider        = Color(0xFF1E2D45);
+
+  // ── Chart ─────────────────────────────────────────────────────────────────────
+  static const Color barBlue        = Color(0xFF3B82F6);
+  static const Color shimmerHighlight = Color(0xFF263350);
 }

@@ -632,8 +632,10 @@ class DatabaseHelper {
     if (rows.isEmpty) return;
 
     final paths = rows.map((r) => r['file_path'] as String).toList();
-    await db.delete('video_clips', where: 'created_at < ?', whereArgs: [cutoff]);
+    // Delete files before DB records: a leaked file is recoverable on next
+    // startup, but a DB record pointing to a deleted file causes access errors.
     await Future.wait(paths.map(_safeDeleteFile));
+    await db.delete('video_clips', where: 'created_at < ?', whereArgs: [cutoff]);
   }
 
   Future<List<String>> getAllVideoClipPaths() async {
