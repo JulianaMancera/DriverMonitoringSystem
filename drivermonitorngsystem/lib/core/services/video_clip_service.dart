@@ -17,12 +17,6 @@ class VideoClipService {
     required int sessionId,
   }) async {
     try {
-      // ✅ Check disk space before attempting write
-      if (!await _hasSufficientDiskSpace()) {
-        debugPrint('[VideoClip] ❌ Insufficient disk space for saveClip');
-        return null;
-      }
-
       final src = File(sourcePath);
 
       // ✅ Verify source file exists
@@ -84,12 +78,6 @@ class VideoClipService {
 
   static Future<(String?, String?)> exportToDownloads(String filePath) async {
     try {
-      // ✅ Check disk space before export
-      if (!await _hasSufficientDiskSpace()) {
-        debugPrint('[VideoClip] ❌ Insufficient disk space for export');
-        return (null, 'disk_full');
-      }
-
       final src = File(filePath);
       if (!await src.exists()) {
         debugPrint('[VideoClip] ❌ Source file does not exist: $filePath');
@@ -145,24 +133,6 @@ class VideoClipService {
     } catch (e) {
       debugPrint('[VideoClip] Error checking clip existence: $e');
       return false;
-    }
-  }
-
-  static Future<bool> _hasSufficientDiskSpace() async {
-    try {
-      final docs = await getApplicationDocumentsDirectory();
-      final result = await Process.run('df', ['-k', docs.path]);
-      if (result.exitCode != 0) return true;
-      final lines = (result.stdout as String).trim().split('\n');
-      if (lines.length < 2) return true;
-      // POSIX df -k columns: Filesystem  1K-blocks  Used  Available  Use%  Mounted
-      final parts = lines.last.trim().split(RegExp(r'\s+'));
-      if (parts.length < 4) return true;
-      final availKb = int.tryParse(parts[3]);
-      if (availKb == null) return true;
-      return (availKb * 1024) >= _minFreeBytesRequired;
-    } catch (_) {
-      return true;
     }
   }
 }
